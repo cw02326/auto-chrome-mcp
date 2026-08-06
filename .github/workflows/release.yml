@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags:
+      # fork-specific namespace — upstream 의 v* 와 충돌 방지.
+      # 예: scalemaker-v1.0.0, scalemaker-v1.1.0, scalemaker-v2.0.0
+      - 'scalemaker-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write  # for npm --provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          registry-url: https://registry.npmjs.org/
+
+      - run: pnpm install --ignore-scripts
+
+      - name: Build all workspace packages
+        run: pnpm build
+
+      - name: Jest regression
+        working-directory: app/native-server
+        run: npx jest --colors
+
+      - name: Package extension zip
+        run: |
+          cd app/chrome-extension/.output/chrome-mv3
+          zip -r "${{ github.workspace }}/chrome-mcp-scalemaker-extension.zip" .
+
+      - name: Package launcher tarball
+        run: |
+          tar czf chrome-launcher-${{ github.ref_name }}.tar.gz \
+            -C packages/chrome-launcher \
+            bin dist package.json README.md
+
+      # npm pack — install.sh 가 npm registry 대신 GH release 의 .tgz 로 설치하기 위함.
+      # 결과물 이름은 package.json 의 name@version 으로 자동 결정됨 (예: mcp-chrome-scalemaker-bridge-1.0.0.tgz).
+      - name: Pack bridge tarball for GH release
+        working-directory: app/native-server
+        run: |
+          npm pack
+          mv mcp-chrome-scalemaker-bridge-*.tgz "${{ github.workspace }}/"
+          ls -la "${{ github.workspace }}/"mcp-chrome-scalemaker-bridge-*.tgz
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            chrome-mcp-scalemaker-extension.zip
+            chrome-launcher-${{ github.ref_name }}.tar.gz
+            mcp-chrome-scalemaker-bridge-*.tgz

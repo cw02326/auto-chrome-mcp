@@ -1,0 +1,49 @@
+name: self-test
+
+on:
+  push:
+    branches: [main-scalemaker, master]
+  pull_request:
+    branches: [main-scalemaker, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install (ignore postinstall)
+        run: pnpm install --ignore-scripts
+
+      - name: Build native-server
+        run: pnpm --filter mcp-chrome-scalemaker-bridge build
+
+      - name: Build extension
+        run: pnpm --filter chrome-mcp-scalemaker build
+
+      - name: Build launcher
+        run: pnpm --filter mcp-chrome-scalemaker-launcher build
+
+      - name: Jest (native-server regression suite)
+        working-directory: app/native-server
+        run: npx jest --colors
+
+      - name: Upload extension zip
+        if: matrix.node == '22'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-mcp-scalemaker-extension
+          path: app/chrome-extension/.output/chrome-mv3/
+          retention-days: 7

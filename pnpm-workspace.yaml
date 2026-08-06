@@ -1,0 +1,16 @@
+packages:
+  - 'app/*'
+  - 'packages/*'
+allowBuilds:
+  esbuild: set this to true or false
+  protobufjs: set this to true or false
+  sharp: set this to true or false
+  spawn-sync: set this to true or false
+  vue-demi: set this to true or false
+
+onlyBuiltDependencies:
+  - esbuild
+  - protobufjs
+  - sharp
+  - spawn-sync
+  - vue-demi

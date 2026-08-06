@@ -1,0 +1,43 @@
+{
+  "name": "mcp-chrome-scalemaker-launcher",
+  "version": "1.0.37",
+  "description": "Chrome Launcher with --remote-debugging-port=9222 for mcp-chrome-scalemaker Playwright CDP fallback. Detects default Chrome binary + user-data-dir per OS (macOS/Windows/Linux).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "scalemaker-chrome": "./bin/scalemaker-chrome.sh"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint 'src/**/*.ts'",
+    "test": "jest"
+  },
+  "keywords": [
+    "chrome",
+    "mcp",
+    "playwright",
+    "cdp",
+    "launcher"
+  ],
+  "author": "scalemaker-ship-it (scalemaker fork)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker.git",
+    "directory": "packages/chrome-launcher"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
