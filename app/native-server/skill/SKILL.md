@@ -218,6 +218,9 @@ v1.1.0 부터 MCP 도구는 사용자의 브라우징을 방해하지 않는 **�
 v1.2.0 신규 도구: `chrome_wait_for`(로딩 대기), `chrome_scroll_collect`(무한스크롤 수집),
 `chrome_extract`(선택자 정밀 추출), `chrome_batch`(다단계 1회 호출). read_page/get_web_content 는
 diff·compact·reader 모드 기본 ON(토큰 절감, `diff:false`/`compact:false`/`raw:true` 로 해제).
+v1.3.0 신규: `chrome_find`(자연어 요소 검색 — 한/영, iframe 포함), `chrome_shortcut`(이름 매크로
+저장/실행), `chrome_list_browsers`/`chrome_use_browser`(세션 중 브라우저 프로필 전환 — stdio 로컬
+도구라 extension 버전과 무관, 브리지 1.3.0+ 필요. 프로필별 포트는 각 확장 popup 에 표시).
 
 ### 증상 → 처방
 

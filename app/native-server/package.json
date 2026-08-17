@@ -1,6 +1,6 @@
 {
   "name": "auto-chrome-mcp-bridge",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Auto Chrome MCP — Chrome Native-Messaging host (Node). Non-interference background work mode, per-session work tabs, Force Reconnect, Playwright CDP fallback.",
   "main": "dist/index.js",
   "bin": {

@@ -45,6 +45,11 @@ export const TOOL_NAMES = {
     WAIT_FOR: 'chrome_wait_for',
     SCROLL_COLLECT: 'chrome_scroll_collect',
     EXTRACT: 'chrome_extract',
+    FIND: 'chrome_find',
+    SHORTCUT: 'chrome_shortcut',
+    // stdio 프록시 전용 (extension 으로 forward 되지 않음 — mcp-server-stdio.ts 가 가로챔)
+    LIST_BROWSERS: 'chrome_list_browsers',
+    USE_BROWSER: 'chrome_use_browser',
   },
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
@@ -78,6 +83,66 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.FIND,
+    description:
+      'Find elements on the page using natural language (Korean or English), e.g. "로그인 버튼", "search input", "장바구니 아이콘". Matches element names/roles/placeholder/text via synonym + fuzzy scoring over the accessibility tree and returns ranked candidates with ref (usable directly in chrome_click_element / chrome_fill_or_select), role, name, coordinates, and frameId. Cheaper and more direct than reading the whole page when you know what you are looking for.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural language description of the element (Korean/English)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        maxResults: { type: 'number', description: 'Max candidates to return (default 5, max 20)' },
+        allFrames: {
+          type: 'boolean',
+          description: 'Also search inside iframes (default true)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SHORTCUT,
+    description:
+      'Save and run named multi-step shortcuts (macro = a chrome_batch step list stored under a name). action="save" stores {name, steps, description}; "run" executes a saved shortcut through the normal tool pipeline; "list" shows saved shortcuts; "delete" removes one. Useful for workflows you repeat across sessions (login flows, routine collection).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['save', 'run', 'list', 'delete'],
+          description: 'What to do',
+        },
+        name: { type: 'string', description: 'Shortcut name (save/run/delete)' },
+        steps: {
+          type: 'array',
+          description:
+            'For action="save": steps in chrome_batch format, max 20. Each: { tool: string, args?: object }',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string' },
+              args: { type: 'object' },
+            },
+            required: ['tool'],
+          },
+        },
+        description: { type: 'string', description: 'For action="save": what this shortcut does' },
+        continueOnError: {
+          type: 'boolean',
+          description: 'For action="run": keep running steps after a failure (default false)',
+        },
+      },
+      required: ['action'],
     },
   },
   {

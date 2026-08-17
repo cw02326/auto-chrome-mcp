@@ -60,6 +60,7 @@ const TAB_ID_INJECT_TOOLS = new Set<string>([
   B.WAIT_FOR,
   B.SCROLL_COLLECT,
   B.EXTRACT,
+  B.FIND,
 ]);
 
 /**
@@ -336,3 +337,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
 // scalemaker fork: chrome_batch 가 step 을 같은 게이트(handleCallTool)로 재진입시키도록 배선.
 // (barrel 재수출하면 toolsMap 에 함수가 섞이므로 직접 import — batch.ts 주석 참고)
 setBatchToolInvoker(handleCallTool);
+
+// scalemaker fork: chrome_shortcut(run) 도 저장된 step 을 같은 게이트로 실행
+import { setShortcutToolInvoker } from './browser/shortcut';
+setShortcutToolInvoker(handleCallTool);

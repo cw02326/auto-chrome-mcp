@@ -524,6 +524,129 @@
    */
   const COMPACT_NOISE_ROLES = new Set(['generic', 'group', 'none', 'presentation']);
 
+  // ==========================================================================
+  // scalemaker fork(chrome_find): 자연어 요소 검색용 "평면 후보 목록" 수집
+  //
+  // 설계: 트리 walker(traverse)를 하나 더 만들지 않는다. traverse 는 이미 요소마다
+  // role / label / ref / 좌표 / interactive 를 계산하므로, state.findSink 가 있을 때만
+  // 그 자리에서 후보 객체를 추가로 만들어 담는다(플래그 방식). findSink 가 없으면
+  // 코드 경로가 전혀 실행되지 않으므로 read_page 동작에는 영향이 없다.
+  // ==========================================================================
+
+  /** 프레임당 후보 상한 (상호작용 요소 우선, 남는 자리를 이름 있는 요소로 채움) */
+  const FIND_CANDIDATE_CAP = 400;
+
+  /** 후보 text 필드 최대 길이 */
+  const FIND_TEXT_MAX = 200;
+
+  /**
+   * 상호작용 요소가 아니어도 후보로 받아줄 role (제목/라벨/이미지 등 "이름이 정보인" 것들).
+   * 이 목록에 없는 generic/section 같은 껍데기는 이름이 있어도 후보에서 제외한다.
+   */
+  const FIND_NAMED_ROLES = new Set([
+    'heading',
+    'label',
+    'image',
+    'img',
+    'option',
+    'listitem',
+    'cell',
+    'gridcell',
+    'tab',
+    'menuitem',
+  ]);
+
+  /**
+   * 요소 자신의 보이는 텍스트.
+   * 직계 텍스트 노드를 우선 쓰고, 없으면(<button><span>로그인</span></button> 같은 래핑)
+   * 짧은 경우에 한해 textContent 로 보완한다 — 큰 컨테이너의 전체 텍스트가 후보를
+   * 오염시키는 것을 막기 위한 상한이다.
+   */
+  function findOwnText(el) {
+    let own = '';
+    try {
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const n = el.childNodes[i];
+        if (n.nodeType === Node.TEXT_NODE) own += n.textContent || '';
+      }
+      own = own.replace(/\s+/g, ' ').trim();
+      if (!own) {
+        const tc = String(el.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (tc && tc.length <= 300) own = tc;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return own.length > FIND_TEXT_MAX ? own.substring(0, FIND_TEXT_MAX) : own;
+  }
+
+  /** 뷰포트 안에 걸쳐 있는지 (좌표 클릭 가능성 판단용) */
+  function findInViewport(el) {
+    try {
+      const r = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      return (
+        r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * traverse 안에서 호출되어 후보 하나를 sink 에 담는다.
+   * @param {Element} el
+   * @param {any} node traverse 가 방금 만든 구조화 노드(role/label/ref/좌표 재사용)
+   * @param {{interactive: any[], named: any[]}} sink
+   */
+  function collectFindCandidate(el, node, sink) {
+    const interactive = node.interactive === true;
+    const named = !!node.label && FIND_NAMED_ROLES.has(node.role);
+    if (!interactive && !named) return;
+    const bucket = interactive ? sink.interactive : sink.named;
+    if (bucket.length >= FIND_CANDIDATE_CAP) return;
+
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    let value = '';
+    try {
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        const v = /** @type {HTMLInputElement} */ (el).value;
+        if (typeof v === 'string') value = v.replace(/\s+/g, ' ').trim().substring(0, 100);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+
+    let href = '';
+    if (tag === 'a' || node.role === 'link') {
+      try {
+        href = String(/** @type {HTMLAnchorElement} */ (el).href || el.getAttribute('href') || '');
+      } catch (_) {
+        href = String(el.getAttribute('href') || '');
+      }
+      if (href.length > 200) href = href.substring(0, 200);
+    }
+
+    const text = findOwnText(el);
+    bucket.push({
+      ref: node.ref,
+      role: node.role,
+      name: node.label || '',
+      // name 과 같은 텍스트는 중복이므로 싣지 않는다(응답 크기 절감).
+      text: text && text !== node.label ? text : '',
+      placeholder: el.getAttribute('placeholder') || '',
+      value,
+      title: el.getAttribute('title') || '',
+      href,
+      inputType: tag === 'input' ? el.getAttribute('type') || '' : '',
+      cx: node.cx,
+      cy: node.cy,
+      visible: findInViewport(el),
+      interactive,
+    });
+  }
+
   /** scalemaker fork(T4): 라벨 비교용 정규화 */
   function normLabel(s) {
     return String(s || '')
@@ -603,6 +726,10 @@
       childSink = node.children;
       state.included++;
       state.processed++;
+
+      // scalemaker fork(chrome_find): 같은 순회를 재사용해 평면 후보 목록도 함께 모은다.
+      // state.findSink 가 있을 때만 실행되므로 read_page 경로에는 영향이 없다.
+      if (state.findSink) collectFindCandidate(el, node, state.findSink);
 
       // Only collect ref mapping for interactive elements to limit cost
       if (node.interactive && refMap.length < REF_MAP_LIMIT) {
@@ -842,8 +969,50 @@
     }
   }
 
+  /**
+   * scalemaker fork(chrome_find): 접근성 트리와 동일한 수집 경로를 타되,
+   * 결과를 트리 문자열이 아니라 "평면 후보 배열"로 돌려준다.
+   *
+   * filter 는 'all' 로 고정한다 — 화면 아래(뷰포트 밖)에 있는 버튼도 찾을 수 있어야 하기 때문.
+   * 대신 후보마다 visible(뷰포트 교차 여부)을 실어 배경 도구가 점수에 반영하게 한다.
+   */
+  function __collectFindCandidates() {
+    const start = performance && performance.now ? performance.now() : Date.now();
+    const roots = [];
+    const refMap = [];
+    const sink = { interactive: [], named: [] };
+    const state = { processed: 0, included: 0, visited: new WeakSet(), findSink: sink };
+
+    if (document.body) traverse(document.body, 0, { filter: 'all' }, roots, refMap, state);
+
+    // 상호작용 요소를 먼저 채우고, 남는 자리만 이름 있는 비-상호작용 요소로 채운다.
+    const candidates = sink.interactive.slice(0, FIND_CANDIDATE_CAP);
+    for (let i = 0; i < sink.named.length && candidates.length < FIND_CANDIDATE_CAP; i++) {
+      candidates.push(sink.named[i]);
+    }
+    const end = performance && performance.now ? performance.now() : Date.now();
+
+    return {
+      candidates,
+      truncated: sink.interactive.length + sink.named.length > candidates.length,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+      },
+      stats: {
+        processed: state.processed,
+        included: state.included,
+        candidates: candidates.length,
+        durationMs: Math.round(end - start),
+      },
+    };
+  }
+
   // Expose API on window
   window.__generateAccessibilityTree = __generateAccessibilityTree;
+  // scalemaker fork(chrome_find)
+  window.__collectFindCandidates = __collectFindCandidates;
 
   // ============================================================================
   // Hover for Ref (DOM Fallback Support)
@@ -1191,6 +1360,21 @@
           sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
           return true;
         }
+      }
+      // scalemaker fork(chrome_find): 도구 이름 기반 주입 ping (BaseBrowserToolExecutor 규칙)
+      if (request && request.action === 'chrome_find_ping') {
+        sendResponse({ status: 'pong' });
+        return false;
+      }
+      // scalemaker fork(chrome_find): 평면 후보 목록 반환 (점수 계산은 background 에서)
+      if (request && request.action === 'chrome_find_get_candidates') {
+        try {
+          const result = __collectFindCandidates();
+          sendResponse({ success: true, ...result });
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+        }
+        return true;
       }
       if (request && request.action === 'generateAccessibilityTree') {
         const result = __generateAccessibilityTree(request.filter || null, {

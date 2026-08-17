@@ -39,3 +39,5 @@ export { waitForTool } from './wait-for';
 export { scrollCollectTool } from './scroll-collect';
 // scalemaker fork: 필요한 필드만 뽑는 토큰 절약 읽기(chrome_extract)
 export { extractTool } from './extract';
+export { findTool } from './find';
+export { shortcutTool } from './shortcut';

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.0] — Auto Chrome MCP (2026-08-17)
+
+### Added — Claude-in-Chrome 격차 해소 (사용자 선택 1–3)
+
+- **`chrome_find`**: natural-language element search (Korean/English) over the accessibility tree — synonym + fuzzy scoring, iframe search included; returns ranked refs/coordinates/frameId usable directly with click/fill/computer.
+- **Multi-browser switching** (stdio-local tools, never forwarded to the extension): `chrome_list_browsers` probes candidate bridge ports (active + `CHROME_PORTS` env + defaults) via GET /ping; `chrome_use_browser` switches the session's active browser profile mid-session with clean session termination on the old bridge.
+- **`chrome_shortcut`**: named saved macros (chrome_batch step format) — save/run/list/delete, stored in extension storage, executed through the normal tool gate (session work tabs, guards, locks all apply).
+
 ## [v1.2.0] — Auto Chrome MCP (2026-08-17)
 
 ### Added — 팝업 인지 · 신뢰성 (F1–F7)
