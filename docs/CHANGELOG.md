@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0] — scalemaker fork (2026-08-17)
+
+### Added — 백그라운드 작업 모드 (non-interference)
+
+- **Background work mode** (`backgroundWorkMode`, default ON, popup toggle "백그라운드 작업"): MCP tools no longer activate tabs or steal focus; all tools default `background: true` via a central gate in `tools/index.ts`.
+- **Per-session work tabs** (max 10, LRU): each Claude Code session's stdio proxy injects `_mcpSessionId` into every call; `chrome_navigate` records the session's work tab, and tabId-less tool calls target it instead of the user's active tab. Work tabs show an "MCP" action badge.
+- **Dedicated MCP work window** (`dedicatedWorkWindow`, default ON, popup toggle "전용 작업 창"): MCP tabs are created in a separate unfocused window; URL-reuse never grabs tabs from user windows in background mode.
+- **`chrome_batch` tool**: run up to 20 tool steps in one MCP round-trip (stop-on-error or continueOnError).
+- **Screenshot auto-save**: `saveToDownloads`/`filename` params save captures under `Downloads/mcp-screenshots/`.
+- **Automation guard** (`automationGuardEnabled`, default ON): per-domain soft throttle (30 actions/10s, delay ≤5s) and runaway-loop breaker (identical call ×12 in 120s → blocked).
+- **Per-tab serialization**: concurrent tool calls targeting the same tab are queued, so two sessions can't interleave input on one tab.
+- **`tabId` param added** to dialog / network_request / network_capture / performance×3 / userscript / bookmark_add schemas.
+
+### Fixed
+
+- Screenshots are now CDP-first: background tabs capture correctly (incl. fullPage via `captureBeyondViewport`); the captureVisibleTab fallback errors instead of silently returning the wrong tab.
+- `chrome_computer` sub-delegations (screenshot/click/fill/keyboard, 10 call sites) now forward the resolved `tabId`.
+- Removed needless `tabs.update({active:true})` in console / inject-script / network-capture / web-fetcher; two raw `windows.update({focused:true})` calls now respect the force-focus policy; record-replay window focus routed through the same policy.
+- GIF recording of tabs in non-focused windows activates the tab within its own window (animations keep running) and restores the previous tab afterwards.
+- `chrome_console` deep-serializes lossy objects (depth 4, 5000 chars, budgeted CDP calls) instead of returning truncated previews (upstream #215).
+- CDP attach conflicts retry once (300ms) and report an actionable error; stale debugger sessions are cleaned on force-detach.
+- `chrome_close_tabs` with no args closes the session work tab, never the user's active tab, in background mode.
+
 ## [v0.0.5]
 
 ### Improved

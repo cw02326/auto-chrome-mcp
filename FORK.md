@@ -1,4 +1,4 @@
-# mcp-chrome-scalemaker
+# Auto Chrome MCP (구 mcp-chrome-scalemaker)
 
 > Fork of [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) with reliability fixes + Force Reconnect + Playwright CDP fallback.
 
@@ -27,6 +27,16 @@ upstream diff → [`UPSTREAM_DIFF.md`](./UPSTREAM_DIFF.md)
 - **Playwright CDP 폴백** — native 실패 시 같은 Chrome 에 attach (세션 공유, 33 도구 미러)
 - **Diagnostic Report UI** — 4 stage indicator + Self-Test + Copy as JSON
 
+### v1.1.0 — 백그라운드 작업 모드 (무간섭)
+
+- **백그라운드 작업 모드** (기본 ON, popup 토글) — MCP 도구가 사용자의 탭·포커스를 건드리지 않음. 스크린샷은 CDP 기반이라 안 보이는 탭도 정확히 캡처.
+- **세션별 작업 탭** (최대 10, LRU) — Claude Code 세션마다 `_mcpSessionId` 자동 주입, 세션별 작업 탭 분리. 작업 탭엔 "MCP" 뱃지.
+- **전용 작업 창** (기본 ON, popup 토글) — MCP 탭을 별도 비포커스 창에 모아 사용자 창과 물리적으로 분리.
+- **`chrome_batch`** — 최대 20 스텝을 1회 왕복으로 실행.
+- **Automation guard** — 도메인당 속도 제한(30회/10초, soft delay) + 동일 호출 12회 반복 시 루프 차단.
+- **탭 단위 직렬화** — 같은 탭 대상 동시 호출 순차화.
+- 상세: [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) v1.1.0 항목.
+
 ## Install
 
 ```bash
@@ -34,7 +44,7 @@ upstream diff → [`UPSTREAM_DIFF.md`](./UPSTREAM_DIFF.md)
 npm i -g mcp-chrome-scalemaker-bridge
 
 # 2. extension (Chrome Web Store 사용 안 함 — Releases 의 .zip 사이드로드)
-# https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker/releases 에서 latest .zip 다운로드
+# https://github.com/scalemaker-ship-it/auto-chrome-mcp/releases 에서 latest .zip 다운로드
 # chrome://extensions → Developer mode ON → Load unpacked → 폴더 선택
 
 # 3. Chrome Launcher (Playwright 폴백 사용할 때만)

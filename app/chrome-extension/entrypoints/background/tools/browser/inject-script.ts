@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
 import { ExecutionWorld } from '@/common/constants';
+import { focusWindowIfAllowed } from '@/utils/focus-policy';
 
 interface InjectScriptParam {
   url?: string;
@@ -80,10 +81,10 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
         return createErrorResponse('Tab has no ID');
       }
 
-      // Optionally bring tab/window to foreground based on background flag
+      // Optionally bring window to foreground based on background flag
+      // scalemaker fork: chrome.scripting.executeScript works on background tabs, so tab activation was unnecessary; window focus still goes through the policy gate.
       if (background !== true) {
-        await chrome.tabs.update(tab.id, { active: true });
-        await chrome.windows.update(tab.windowId, { focused: true });
+        await focusWindowIfAllowed(tab.windowId);
       }
 
       const res = await handleInject(tab.id!, { ...args });
@@ -126,8 +127,9 @@ class SendCommandToInjectScriptTool extends BaseBrowserToolExecutor {
       let finalTabId: number | undefined = tabId;
 
       if (finalTabId === undefined) {
-        // Use active tab
-        const tabs = await chrome.tabs.query({ active: true });
+        // Use active tab (of the last-focused window; querying without lastFocusedWindow
+        // returns an arbitrary active tab across all open windows)
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (!tabs[0]) {
           return createErrorResponse('No active tab found');
         }

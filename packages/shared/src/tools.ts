@@ -40,6 +40,7 @@ export const TOOL_NAMES = {
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
     GIF_RECORDER: 'chrome_gif_recorder',
+    BATCH: 'chrome_batch',
   },
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
@@ -48,6 +49,33 @@ export const TOOL_NAMES = {
 };
 
 export const TOOL_SCHEMAS: Tool[] = [
+  {
+    name: TOOL_NAMES.BROWSER.BATCH,
+    description:
+      'Execute multiple browser tool steps sequentially in ONE call (cuts round-trip latency for chains like click → fill → click → screenshot). Each step targets the session work tab by default. Steps cannot include chrome_batch itself or interactive tools (switch_tab, element selection, user consent). Default stops on first error; set continueOnError to run all steps. Returns per-step results as JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: 'Steps to run in order (max 20). Each: { tool: string, args?: object }',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string', description: 'Tool name, e.g. chrome_click_element' },
+              args: { type: 'object', description: 'Arguments for the tool' },
+            },
+            required: ['tool'],
+          },
+        },
+        continueOnError: {
+          type: 'boolean',
+          description: 'Run remaining steps even when a step fails (default false)',
+        },
+      },
+      required: ['steps'],
+    },
+  },
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
     description: 'Get all currently open browser windows and tabs',
@@ -115,6 +143,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           description: 'Auto-stop duration in milliseconds when autoStop is true (default 5000).',
         },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
       },
       required: [],
     },
@@ -132,6 +165,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         filenamePrefix: {
           type: 'string',
           description: 'Optional filename prefix for the downloaded trace JSON.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
       },
       required: [],
@@ -153,6 +191,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           description:
             'Timeout for deep analysis via native host (milliseconds). Default 60000. Increase for large traces.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
       },
       required: [],
@@ -483,6 +526,16 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Save screenshot as PNG file (default: true)，if you want to see the page, recommend set this to be false, and set storeBase64 to be true',
         },
+        saveToDownloads: {
+          type: 'boolean',
+          description:
+            'Also auto-save the captured image to Downloads/mcp-screenshots/ without any user interaction (default: false)',
+        },
+        filename: {
+          type: 'string',
+          description:
+            'Filename for saveToDownloads (sanitized, kept under mcp-screenshots/). Default: screenshot-<timestamp>.png',
+        },
       },
       required: [],
     },
@@ -593,6 +646,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Multipart/form-data descriptor. If provided, overrides body and builds FormData with optional file attachments. Shape: { fields?: Record<string,string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, filePath?: string, base64Data?: string, filename?: string, contentType?: string }> }. Also supports a compact array form: [ [name, fileSpec, filename?], ... ] where fileSpec may be url:, file:, or base64:.',
         },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional tab id whose browser context (cookies, origin) is used. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
       },
       required: ['url'],
     },
@@ -630,6 +688,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         includeStatic: {
           type: 'boolean',
           description: 'Include static resources like images/scripts/styles (default: false)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
       },
       required: ['action'],
@@ -729,6 +792,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         createFolder: {
           type: 'boolean',
           description: 'Whether to create the parent folder if it does not exist (default: false)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional tab id to bookmark when url is omitted. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
       },
       required: [],
@@ -1191,6 +1259,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         promptText: {
           type: 'string',
           description: 'Optional prompt text when accepting a prompt',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
       },
       required: ['action'],

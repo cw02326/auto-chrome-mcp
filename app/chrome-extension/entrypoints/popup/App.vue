@@ -15,29 +15,75 @@
             <div class="status-section">
               <div class="status-header">
                 <p class="status-label">{{ getMessage('runningStatusLabel') }}</p>
-                <label
-                  class="force-focus-switch"
-                  :title="
-                    forceFocusEnabled
-                      ? '강제 포커스 ON — MCP 도구 실행 시 Chrome 윈도우가 OS 앞으로 튀어나옴'
-                      : '강제 포커스 OFF — MCP 도구 실행 시 OS 포커스 가로채지 않음'
-                  "
-                >
-                  <input
-                    type="checkbox"
-                    class="force-focus-switch__input"
-                    :checked="forceFocusEnabled"
-                    :aria-label="forceFocusEnabled ? '강제 포커스 끄기' : '강제 포커스 켜기'"
-                    @change="toggleForceFocus"
-                  />
-                  <span class="force-focus-switch__label">강제 포커스</span>
-                  <span
-                    class="force-focus-switch__track"
-                    :class="{ 'force-focus-switch__track--on': forceFocusEnabled }"
+                <div class="status-switches">
+                  <label
+                    class="force-focus-switch"
+                    :title="
+                      forceFocusEnabled
+                        ? '강제 포커스 ON — MCP 도구 실행 시 Chrome 윈도우가 OS 앞으로 튀어나옴'
+                        : '강제 포커스 OFF — MCP 도구 실행 시 OS 포커스 가로채지 않음'
+                    "
                   >
-                    <span class="force-focus-switch__thumb" />
-                  </span>
-                </label>
+                    <input
+                      type="checkbox"
+                      class="force-focus-switch__input"
+                      :checked="forceFocusEnabled"
+                      :aria-label="forceFocusEnabled ? '강제 포커스 끄기' : '강제 포커스 켜기'"
+                      @change="toggleForceFocus"
+                    />
+                    <span class="force-focus-switch__label">강제 포커스</span>
+                    <span
+                      class="force-focus-switch__track"
+                      :class="{ 'force-focus-switch__track--on': forceFocusEnabled }"
+                    >
+                      <span class="force-focus-switch__thumb" />
+                    </span>
+                  </label>
+                  <!-- scalemaker fork: 백그라운드 작업 모드 토글 -->
+                  <label
+                    class="force-focus-switch"
+                    title="ON: MCP 도구가 사용자의 탭·포커스를 건드리지 않고 백그라운드 작업 탭에서 작업합니다. OFF: 이전처럼 작업 탭을 앞으로 가져옵니다."
+                  >
+                    <input
+                      type="checkbox"
+                      class="force-focus-switch__input"
+                      :checked="backgroundModeEnabled"
+                      :aria-label="
+                        backgroundModeEnabled ? '백그라운드 작업 끄기' : '백그라운드 작업 켜기'
+                      "
+                      @change="toggleBackgroundMode"
+                    />
+                    <span class="force-focus-switch__label">백그라운드 작업</span>
+                    <span
+                      class="force-focus-switch__track"
+                      :class="{ 'force-focus-switch__track--on': backgroundModeEnabled }"
+                    >
+                      <span class="force-focus-switch__thumb" />
+                    </span>
+                  </label>
+                  <!-- scalemaker fork: 전용 MCP 작업 창 토글 -->
+                  <label
+                    class="force-focus-switch"
+                    title="ON: MCP 작업 탭을 별도 'MCP 작업 창'에 모아서 사용자 창과 분리합니다. OFF: 현재 창에 백그라운드 탭으로 만듭니다."
+                  >
+                    <input
+                      type="checkbox"
+                      class="force-focus-switch__input"
+                      :checked="dedicatedWindowEnabled"
+                      :aria-label="
+                        dedicatedWindowEnabled ? '전용 작업 창 끄기' : '전용 작업 창 켜기'
+                      "
+                      @change="toggleDedicatedWindow"
+                    />
+                    <span class="force-focus-switch__label">전용 작업 창</span>
+                    <span
+                      class="force-focus-switch__track"
+                      :class="{ 'force-focus-switch__track--on': dedicatedWindowEnabled }"
+                    >
+                      <span class="force-focus-switch__thumb" />
+                    </span>
+                  </label>
+                </div>
               </div>
               <div class="status-info">
                 <span :class="['status-dot', getStatusClass()]"></span>
@@ -248,6 +294,16 @@ import {
   FORCE_FOCUS_STORAGE_KEY,
 } from '@/utils/focus-policy';
 import {
+  isBackgroundModeEnabled,
+  setBackgroundModeEnabled,
+  BACKGROUND_MODE_STORAGE_KEY,
+} from '@/utils/background-mode';
+import {
+  isDedicatedWindowEnabled,
+  setDedicatedWindowEnabled,
+  DEDICATED_WINDOW_STORAGE_KEY,
+} from '@/utils/mcp-window-manager';
+import {
   getToggles,
   setToggle as setSitePermissionToggleStorage,
   SENSITIVE_PERMISSIONS,
@@ -431,6 +487,14 @@ const nativeServerPort = ref<number>(12320);
 // scalemaker fork: 강제포커스 정책 토글. true = MCP 도구가 OS 윈도우 포커스 가로채기 허용.
 // false = Chrome 이 다른 앱 앞으로 안 튀어나옴 (탭 전환·창 생성은 여전히 동작).
 const forceFocusEnabled = ref<boolean>(false);
+
+// scalemaker fork: 백그라운드 작업 모드 토글. true(기본) = MCP 도구가 사용자의 탭·포커스를
+// 건드리지 않고 MCP 작업 탭에서 동작. false = 이전처럼 작업 탭을 앞으로 가져옴.
+const backgroundModeEnabled = ref<boolean>(true);
+
+// scalemaker fork: 전용 작업 창 토글. true(기본) = MCP 작업 탭을 별도 "MCP 작업 창"에 모아
+// 사용자 창과 분리. false = 현재(마지막 활성) 창에 백그라운드 탭으로 생성.
+const dedicatedWindowEnabled = ref<boolean>(true);
 
 // v1.0.31+: site permissions consent gate (camera / microphone / geolocation)
 const sitePermissionToggles = ref<SitePermissionToggles>({
@@ -1193,6 +1257,46 @@ const toggleForceFocus = async () => {
   }
 };
 
+// scalemaker fork: 백그라운드 작업 모드 토글 — load + toggle handler.
+const loadBackgroundModePreference = async () => {
+  try {
+    backgroundModeEnabled.value = await isBackgroundModeEnabled();
+  } catch (error) {
+    console.error('백그라운드 작업 모드 설정 로드 실패:', error);
+  }
+};
+
+const toggleBackgroundMode = async () => {
+  const next = !backgroundModeEnabled.value;
+  backgroundModeEnabled.value = next; // optimistic
+  try {
+    await setBackgroundModeEnabled(next);
+  } catch (error) {
+    console.error('백그라운드 작업 모드 설정 저장 실패:', error);
+    backgroundModeEnabled.value = !next; // revert
+  }
+};
+
+// scalemaker fork: 전용 작업 창 토글 — load + toggle handler.
+const loadDedicatedWindowPreference = async () => {
+  try {
+    dedicatedWindowEnabled.value = await isDedicatedWindowEnabled();
+  } catch (error) {
+    console.error('전용 작업 창 설정 로드 실패:', error);
+  }
+};
+
+const toggleDedicatedWindow = async () => {
+  const next = !dedicatedWindowEnabled.value;
+  dedicatedWindowEnabled.value = next; // optimistic
+  try {
+    await setDedicatedWindowEnabled(next);
+  } catch (error) {
+    console.error('전용 작업 창 설정 저장 실패:', error);
+    dedicatedWindowEnabled.value = !next; // revert
+  }
+};
+
 // v1.0.31+: site permissions consent gate
 const loadSitePermissionToggles = async () => {
   try {
@@ -1557,6 +1661,8 @@ onMounted(async () => {
   await initTheme();
   await loadPortPreference();
   await loadForceFocusPreference();
+  await loadBackgroundModePreference();
+  await loadDedicatedWindowPreference();
   await loadSitePermissionToggles();
   await loadModelPreference();
   await checkNativeConnection();
@@ -1580,6 +1686,14 @@ onMounted(async () => {
         // scalemaker fork: 다른 popup/탭이 force-focus 토글 바꿔도 즉시 반영.
         if (Object.prototype.hasOwnProperty.call(changes || {}, FORCE_FOCUS_STORAGE_KEY)) {
           forceFocusEnabled.value = changes[FORCE_FOCUS_STORAGE_KEY]?.newValue === true;
+        }
+        // scalemaker fork: 백그라운드 작업 모드도 동일하게 동기화 (기본값 true — false 만 OFF).
+        if (Object.prototype.hasOwnProperty.call(changes || {}, BACKGROUND_MODE_STORAGE_KEY)) {
+          backgroundModeEnabled.value = changes[BACKGROUND_MODE_STORAGE_KEY]?.newValue !== false;
+        }
+        // scalemaker fork: 전용 작업 창도 동일하게 동기화 (기본값 true — false 만 OFF).
+        if (Object.prototype.hasOwnProperty.call(changes || {}, DEDICATED_WINDOW_STORAGE_KEY)) {
+          dedicatedWindowEnabled.value = changes[DEDICATED_WINDOW_STORAGE_KEY]?.newValue !== false;
         }
         // v1.0.31+: 사이트 권한 토글 동기화 (background 가 consent 후 ON 으로 바꿀 때도)
         if (Object.prototype.hasOwnProperty.call(changes || {}, SITE_PERMS_STORAGE_KEY)) {
@@ -2188,6 +2302,17 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 8px;
+}
+
+/* scalemaker fork: 강제 포커스 + 백그라운드 작업 + 전용 작업 창 토글 묶음
+   (3개라 좁으면 flex-wrap 으로 줄바꿈) */
+.status-switches {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .status-timestamp {

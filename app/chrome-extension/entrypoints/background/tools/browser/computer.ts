@@ -505,6 +505,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
             modifiers: params.modifiers,
+            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return domResult;
         }
@@ -518,6 +519,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
             modifiers: params.modifiers,
+            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return domResult;
         }
@@ -552,6 +554,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           timeout: TIMEOUTS.DEFAULT_WAIT * 5,
           button: params.action === 'right_click' ? 'right' : 'left',
           modifiers: params.modifiers,
+          tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
         });
         if (!domResult.isError) {
           return domResult; // Standardized response from click tool
@@ -935,6 +938,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               ref: params.ref,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
+              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             });
           }
           await CDPHelper.attach(tab.id);
@@ -961,6 +965,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             keys: params.text.split('').join(','),
             delay: 0,
             selector: undefined,
+            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return res;
         }
@@ -975,6 +980,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           selectorType: params.selectorType as any,
           ref: params.ref as any,
           value: params.value as any,
+          tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
         } as any);
         return res;
       }
@@ -996,6 +1002,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             const r = await fillTool.execute({
               ref: item.ref as any,
               value: item.value as any,
+              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             } as any);
             const ok = !r.isError;
             results.push({ ref: item.ref, ok, error: ok ? undefined : 'failed' });
@@ -1041,6 +1048,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               ref: params.ref,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
+              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             });
           }
           await CDPHelper.attach(tab.id);
@@ -1066,7 +1074,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const keysStr = tokens.join(',');
           const repeatedKeys =
             repeat === 1 ? keysStr : Array.from({ length: repeat }, () => keysStr).join(',');
-          const res = await keyboardTool.execute({ keys: repeatedKeys });
+          // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+          const res = await keyboardTool.execute({ keys: repeatedKeys, tabId: tab.id });
           return res;
         }
       }
@@ -1279,10 +1288,15 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'screenshot': {
         // Reuse existing screenshot tool; it already supports base64 save option
+        // scalemaker fork: 해석된 대상 탭을 그대로 넘긴다. 넘기지 않으면 screenshot 도구가
+        // 자기 나름대로 "활성 탭"을 다시 고르기 때문에 백그라운드 작업 탭 대신 사용자가
+        // 보고 있는 탭이 찍힌다.
         const result = await screenshotTool.execute({
           name: 'computer',
           storeBase64: true,
           fullPage: false,
+          tabId: tab.id,
+          background: params.background,
         });
         return result;
       }

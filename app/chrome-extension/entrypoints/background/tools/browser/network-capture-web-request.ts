@@ -47,6 +47,8 @@ const AD_ANALYTICS_DOMAINS = NETWORK_FILTERS.EXCLUDED_DOMAINS;
 
 interface NetworkCaptureStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
+  tabId?: number; // Explicit tab to operate on when url is not provided.
+  background?: boolean; // If true, newly created tabs are not activated.
   maxCaptureTime?: number; // Maximum capture time (milliseconds)
   inactivityTimeout?: number; // Inactivity timeout (milliseconds)
   includeStatic?: boolean; // Whether to include static resources
@@ -789,6 +791,8 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
   async execute(args: NetworkCaptureStartToolParams): Promise<ToolResult> {
     const {
       url: targetUrl,
+      tabId: requestedTabId,
+      background = false,
       maxCaptureTime = 3 * 60 * 1000, // Default 3 minutes
       inactivityTimeout = 60 * 1000, // Default 1 minute of inactivity before auto-stop
       includeStatic = false, // Default: don't include static resources
@@ -811,18 +815,21 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         } else {
           // Create new tab
           console.log(`NetworkCaptureV2: Creating new tab with URL: ${targetUrl}`);
-          tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          tabToOperateOn = await chrome.tabs.create({
+            url: targetUrl,
+            active: background === true ? false : true,
+          });
 
           // Wait for page to load
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } else {
-        // Use current active tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tabs[0]) {
+        // Use the explicitly requested tab, falling back to the current active tab
+        const tab = (await this.tryGetTab(requestedTabId)) || (await this.getActiveTabInWindow());
+        if (!tab) {
           return createErrorResponse('No active tab found');
         }
-        tabToOperateOn = tabs[0];
+        tabToOperateOn = tab;
       }
 
       if (!tabToOperateOn?.id) {
@@ -884,7 +891,7 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
     NetworkCaptureStopTool.instance = this;
   }
 
-  async execute(): Promise<ToolResult> {
+  async execute(args?: { tabId?: number }): Promise<ToolResult> {
     console.log(`NetworkCaptureStopTool: Executing`);
 
     try {
@@ -904,9 +911,10 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
         return createErrorResponse('No active network captures found in any tab.');
       }
 
-      // Get current active tab
-      const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const activeTabId = activeTabs[0]?.id;
+      // Prefer the explicitly requested tab; fall back to the current active tab.
+      const requestedTab =
+        (await this.tryGetTab(args?.tabId)) || (await this.getActiveTabInWindow());
+      const activeTabId = requestedTab?.id;
 
       // Determine the primary tab to stop
       let primaryTabId: number;

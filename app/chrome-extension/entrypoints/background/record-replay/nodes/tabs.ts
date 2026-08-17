@@ -3,11 +3,17 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+// scalemaker fork: 새 윈도우 생성 시 focused 값도 강제 포커스 정책을 따름
+import { isForceFocusEnabled } from '@/utils/focus-policy';
 
 export const openTabNode: NodeRuntime<StepOpenTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    if (s.newWindow) await chrome.windows.create({ url: s.url || undefined, focused: true });
+    if (s.newWindow)
+      await chrome.windows.create({
+        url: s.url || undefined,
+        focused: await isForceFocusEnabled(),
+      });
     else await chrome.tabs.create({ url: s.url || undefined, active: true });
     return {} as ExecResult;
   },

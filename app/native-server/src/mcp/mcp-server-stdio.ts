@@ -20,6 +20,11 @@ let mcpClient: Client | null = null;
 let sessionId: string | undefined = undefined;
 let isCleaningUp = false;
 
+// scalemaker fork: 이 stdio 프로세스(=Claude Code 세션 1개당 1개)의 고유 세션 id.
+// 모든 tools/call 인자에 _mcpSessionId 로 실려 extension 까지 전달되고,
+// extension 은 세션별 "작업 탭"을 분리 관리한다 (최대 10 세션). extension 게이트에서 strip 됨.
+const MCP_SESSION_ID = `stdio-${process.pid}-${Math.random().toString(36).slice(2, 8).padEnd(6, '0')}`;
+
 // Read configuration from stdio-config.json.
 // scalemaker fork: .mcp.json 에서 전달된 env.CHROME_PORT 가 있으면 hardcoded 12320 을 override.
 // 이걸 안 하면 같은 머신에서 두 Chrome profile 을 다른 port 로 띄워도 모든 Claude Code 세션이
@@ -150,8 +155,12 @@ export const setupTools = (server: Server) => {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_SCHEMAS }));
 
   // Call tool handler
+  // scalemaker fork: 세션 id 주입 (호출자가 명시한 _mcpSessionId 는 존중)
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(request.params.name, request.params.arguments || {}),
+    handleToolCall(request.params.name, {
+      _mcpSessionId: MCP_SESSION_ID,
+      ...(request.params.arguments || {}),
+    }),
   );
 
   // List resources handler - REQUIRED BY MCP PROTOCOL

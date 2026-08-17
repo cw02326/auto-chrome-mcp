@@ -1,9 +1,11 @@
 {
-  "name": "mcp-chrome-scalemaker-bridge",
-  "version": "1.0.37",
-  "description": "Chrome Native-Messaging host (Node) — scalemaker fork with Force Reconnect + Playwright CDP fallback",
+  "name": "auto-chrome-mcp-bridge",
+  "version": "1.1.0",
+  "description": "Auto Chrome MCP — Chrome Native-Messaging host (Node). Non-interference background work mode, per-session work tabs, Force Reconnect, Playwright CDP fallback.",
   "main": "dist/index.js",
   "bin": {
+    "auto-chrome-mcp-bridge": "./dist/cli.js",
+    "auto-chrome-mcp-stdio": "./dist/mcp/mcp-server-stdio.js",
     "mcp-chrome-scalemaker-bridge": "./dist/cli.js",
     "mcp-chrome-scalemaker-stdio": "./dist/mcp/mcp-server-stdio.js",
     "scalemaker-install": "./dist/scripts/scalemaker-install.js"
@@ -36,9 +38,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker.git"
+    "url": "https://github.com/scalemaker-ship-it/auto-chrome-mcp.git"
   },
-  "homepage": "https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker",
+  "homepage": "https://github.com/scalemaker-ship-it/auto-chrome-mcp",
   "dependencies": {
     "@fastify/cors": "^11.0.1",
     "@modelcontextprotocol/sdk": "^1.11.0",

@@ -10,6 +10,7 @@ import {
   compressImage,
 } from '../../../../utils/image-utils';
 import { screenshotContextManager } from '@/utils/screenshot-context';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 // Screenshot-specific constants
 const SCREENSHOT_CONSTANTS = {
@@ -43,6 +44,209 @@ if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
   );
 }
 
+/**
+ * scalemaker fork: 백그라운드(비활성) 탭 캡처 지원.
+ *
+ * chrome.tabs.captureVisibleTab 은 "윈도우에서 지금 보이는 탭"만 캡처하므로, MCP 도구가
+ * 백그라운드 작업 탭을 대상으로 동작할 때 조용히 엉뚱한 탭을 찍는다.
+ * 따라서 모든 캡처 경로에서 CDP(Page.captureScreenshot)를 1순위로 쓰고,
+ * captureVisibleTab 은 CDP 가 불가능할 때(예: DevTools 가 이미 붙어 있어 attach 실패)의 폴백으로만 쓴다.
+ */
+const CDP_CAPTURE_TIMEOUT_MS = 20000; // 비활성 탭 합성 지연 시 무한 대기 방지
+const MAX_CDP_FULLPAGE_HEIGHT_PX = 16000; // Chrome 텍스처 한계(~16384) 안쪽 안전값
+
+// scalemaker fork: captureVisibleTab 호출 최소 간격 (폴백 경로에만 적용)
+const MIN_CAPTURE_VISIBLE_TAB_INTERVAL_MS =
+  typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0 ? Math.ceil(1000 / __MAX_CAP_RATE) : 0;
+let lastCaptureVisibleTabAtMs = 0;
+
+/**
+ * scalemaker fork: captureVisibleTab 폴백 전용 래퍼.
+ * - 대상 탭이 자기 윈도우의 활성 탭이 아니면 다른 탭이 찍히므로, 캡처하지 않고 명확한 에러를 던진다.
+ * - Chrome 의 captureVisibleTab 호출 빈도 제한을 이 지점에서만 적용한다.
+ */
+async function captureVisibleTabFallback(tabId: number, windowId?: number): Promise<string> {
+  let isActive = false;
+  let targetWindowId = windowId;
+  try {
+    const fresh = await chrome.tabs.get(tabId);
+    isActive = fresh.active === true;
+    if (typeof fresh.windowId === 'number') targetWindowId = fresh.windowId;
+  } catch {
+    isActive = false;
+  }
+
+  if (!isActive) {
+    throw new Error(
+      'Cannot capture background tab: CDP unavailable (another debugger attached?) and tab is not visible. ' +
+        'Close DevTools/other debugger for this tab or activate the tab, then retry.',
+    );
+  }
+
+  if (MIN_CAPTURE_VISIBLE_TAB_INTERVAL_MS > 0) {
+    const waitMs = MIN_CAPTURE_VISIBLE_TAB_INTERVAL_MS - (Date.now() - lastCaptureVisibleTabAtMs);
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  lastCaptureVisibleTabAtMs = Date.now();
+
+  const dataUrl =
+    typeof targetWindowId === 'number'
+      ? await chrome.tabs.captureVisibleTab(targetWindowId, { format: 'png' })
+      : await chrome.tabs.captureVisibleTab({ format: 'png' });
+  if (!dataUrl) throw new Error('captureVisibleTab returned empty image data');
+  return dataUrl;
+}
+
+/**
+ * scalemaker fork: 사용자 지정 filename 을 안전하게 정규화한다.
+ * - 경로 순회('..'), 선행 슬래시, 허용되지 않는 문자를 제거한다.
+ * - 항상 mcp-screenshots/ 폴더 하위에 저장되도록 강제한다(사용자가 이미 폴더를 포함해도 접두사 유지).
+ */
+function sanitizeDownloadFilename(userFilename?: string): string {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); // yyyyMMdd-HHmmss
+  const defaultName = `screenshot-${timestamp}.png`;
+
+  if (!userFilename || typeof userFilename !== 'string' || !userFilename.trim()) {
+    return `mcp-screenshots/${defaultName}`;
+  }
+
+  // 경로 순회 방지: '..' 세그먼트 제거, 역슬래시를 슬래시로 통일
+  let cleaned = userFilename.trim().replace(/\\/g, '/');
+  cleaned = cleaned
+    .split('/')
+    .filter((seg) => seg !== '' && seg !== '.' && seg !== '..')
+    .join('/');
+  // 선행 슬래시 제거 후, 허용되지 않는 문자는 밑줄로 치환 (영숫자, ., _, -, / 만 허용)
+  cleaned = cleaned.replace(/^\/+/, '').replace(/[^a-zA-Z0-9._\-/]/g, '_');
+
+  if (!cleaned) cleaned = defaultName;
+  if (!/\.(png|jpe?g)$/i.test(cleaned)) cleaned += '.png';
+
+  return `mcp-screenshots/${cleaned}`;
+}
+
+/**
+ * scalemaker fork: 캡처된 이미지를 chrome.downloads 로 저장한다.
+ * saveToDownloads 요청 시 모든 캡처 경로(CDP viewport/fullPage/element, captureVisibleTab 폴백) 이후
+ * 공통으로 호출되며, 실패해도 스크린샷 자체는 성공으로 유지한다(호출부에서 saveError 만 첨부).
+ */
+async function saveScreenshotToDownloads(
+  dataUrl: string,
+  filename?: string,
+): Promise<
+  { saved: true; downloadId: number; savedFilename: string } | { saved: false; saveError: string }
+> {
+  try {
+    const savedFilename = sanitizeDownloadFilename(filename);
+    const downloadId = await chrome.downloads.download({
+      url: dataUrl,
+      filename: savedFilename,
+      saveAs: false,
+    });
+    return { saved: true, downloadId, savedFilename };
+  } catch (error) {
+    return {
+      saved: false,
+      saveError: String(error instanceof Error ? error.message : error),
+    };
+  }
+}
+
+interface NormalizedLayoutMetrics {
+  viewportWidthCss: number;
+  viewportHeightCss: number;
+  pageXCss: number;
+  pageYCss: number;
+  contentWidthCss: number;
+  contentHeightCss: number;
+}
+
+/**
+ * scalemaker fork: Page.getLayoutMetrics 결과를 CSS 픽셀 기준으로 정규화한다.
+ * css* 필드(cssLayoutViewport/cssContentSize)를 우선 사용하고, 없으면 구 필드로 폴백.
+ * CDP clip 좌표계도 CSS 픽셀이므로 여기서 나온 값을 그대로 clip 에 쓸 수 있다.
+ */
+function normalizeLayoutMetrics(metrics: any): NormalizedLayoutMetrics {
+  const num = (value: any, fallback: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+  const viewport =
+    metrics?.cssLayoutViewport ||
+    metrics?.layoutViewport ||
+    metrics?.cssVisualViewport ||
+    metrics?.visualViewport ||
+    {};
+  const content = metrics?.cssContentSize || metrics?.contentSize || {};
+
+  const viewportWidthCss = Math.round(num(viewport.clientWidth, 800));
+  const viewportHeightCss = Math.round(num(viewport.clientHeight, 600));
+
+  return {
+    viewportWidthCss,
+    viewportHeightCss,
+    pageXCss: num(viewport.pageX, 0),
+    pageYCss: num(viewport.pageY, 0),
+    contentWidthCss: Math.round(num(content.width, viewportWidthCss)),
+    contentHeightCss: Math.round(num(content.height, viewportHeightCss)),
+  };
+}
+
+/** scalemaker fork: CDP 호출이 비활성 탭에서 매달리는 경우를 대비한 타임아웃 래퍼 */
+async function withCdpTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  // 타임아웃이 이겨도 원본 promise 의 rejection 이 unhandled 로 남지 않게 한다
+  void promise.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${CDP_CAPTURE_TIMEOUT_MS}ms`)),
+          CDP_CAPTURE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * scalemaker fork: 스티칭 경로와 동일한 규칙으로 options.width/height 를 적용한다.
+ * (한쪽만 지정하면 비율 유지, 둘 다 지정하면 그대로 늘림. 출력은 물리 픽셀 = CSS * dpr)
+ */
+async function resizeToRequestedSize(
+  dataUrl: string,
+  dpr: number,
+  targetWidthCss?: number,
+  targetHeightCss?: number,
+): Promise<string> {
+  if (!targetWidthCss && !targetHeightCss) return dataUrl;
+
+  const img = await createImageBitmapFromUrl(dataUrl);
+  let targetWidthPx: number;
+  let targetHeightPx: number;
+  if (targetWidthCss && targetHeightCss) {
+    targetWidthPx = targetWidthCss * dpr;
+    targetHeightPx = targetHeightCss * dpr;
+  } else if (targetWidthCss) {
+    targetWidthPx = targetWidthCss * dpr;
+    targetHeightPx = targetWidthPx * (img.height / img.width);
+  } else {
+    targetHeightPx = (targetHeightCss as number) * dpr;
+    targetWidthPx = targetHeightPx * (img.width / img.height);
+  }
+
+  const canvas = new OffscreenCanvas(
+    Math.max(1, Math.round(targetWidthPx)),
+    Math.max(1, Math.round(targetHeightPx)),
+  );
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Unable to get canvas context');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvasToDataURL(canvas);
+}
+
 interface ScreenshotToolParams {
   name: string;
   selector?: string;
@@ -55,6 +259,9 @@ interface ScreenshotToolParams {
   fullPage?: boolean;
   savePng?: boolean;
   maxHeight?: number; // Maximum height to capture in pixels (for infinite scroll pages)
+  // scalemaker fork: 캡처 결과를 chrome.downloads 로 자동 저장하기 위한 옵션
+  saveToDownloads?: boolean;
+  filename?: string;
 }
 
 /** Page details returned by screenshot-helper content script */
@@ -118,6 +325,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       storeBase64 = false,
       fullPage = false,
       savePng = true,
+      saveToDownloads = false,
+      filename,
     } = args;
 
     console.log(`Starting screenshot with options:`, args);
@@ -147,38 +356,28 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let pageDetails: ScreenshotPageDetails | undefined;
 
     try {
-      const background = args.background === true;
-      // CDP path: background=true with simple viewport capture (no fullPage, no selector)
-      const canUseCdpCapture = background && !fullPage && !selector;
+      // scalemaker fork: CDP 는 대상 탭이 보이지 않아도 정확히 그 탭을 캡처하므로,
+      // background 플래그와 무관하게 항상 1순위 경로로 사용한다.
+      // 뷰포트 캡처는 콘텐츠 스크립트 없이 CDP 만으로 처리 가능.
+      const canUseCdpCapture = !fullPage && !selector;
 
       // === Path 1: CDP viewport capture (no content script needed) ===
       if (canUseCdpCapture) {
         try {
           const tabId = tab.id!;
-          const { cdpSessionManager } = await import('@/utils/cdp-session-manager');
           await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
-            const metrics: any = await cdpSessionManager.sendCommand(
-              tabId,
-              'Page.getLayoutMetrics',
-              {},
+            const metrics = normalizeLayoutMetrics(
+              await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {}),
             );
-            const viewport = metrics?.layoutViewport ||
-              metrics?.visualViewport || {
-                clientWidth: 800,
-                clientHeight: 600,
-                pageX: 0,
-                pageY: 0,
-              };
-            const shot: any = await cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', {
+            const base64Data = await this._cdpCaptureScreenshot(tabId, {
               format: 'png',
+              fromSurface: true,
+              captureBeyondViewport: false,
             });
-            const base64Data = typeof shot?.data === 'string' ? shot.data : '';
-            if (!base64Data) {
-              throw new Error('CDP Page.captureScreenshot returned empty data');
-            }
             finalImageDataUrl = `data:image/png;base64,${base64Data}`;
-            finalImageWidthCss = Math.round(viewport.clientWidth || 800);
-            finalImageHeightCss = Math.round(viewport.clientHeight || 600);
+            // 좌표 스케일링 규약 유지: 컨텍스트에는 CSS 픽셀 기준 뷰포트 크기를 기록한다
+            finalImageWidthCss = metrics.viewportWidthCss;
+            finalImageHeightCss = metrics.viewportHeightCss;
           });
         } catch (e) {
           console.warn('CDP viewport capture failed, falling back to helper path:', e);
@@ -212,7 +411,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
         if (fullPage) {
           this.logInfo('Capturing full page...');
-          finalImageDataUrl = await this._captureFullPage(tab.id!, args, pageDetails);
+          finalImageDataUrl = await this._captureFullPage(tab, args, pageDetails);
           // Compute final CSS size
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
@@ -231,11 +430,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           }
         } else if (selector) {
           this.logInfo(`Capturing element: ${selector}`);
-          finalImageDataUrl = await this._captureElement(
-            tab.id!,
-            args,
-            pageDetails.devicePixelRatio,
-          );
+          finalImageDataUrl = await this._captureElement(tab, args, pageDetails.devicePixelRatio);
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
             finalImageHeightCss = args.height;
@@ -244,9 +439,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             finalImageHeightCss = pageDetails.viewportHeight;
           }
         } else {
-          // Visible area only
-          this.logInfo('Capturing visible area...');
-          finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+          // Visible area only — CDP 가 실패했을 때만 도달하는 폴백 경로
+          this.logInfo('Capturing visible area (captureVisibleTab fallback)...');
+          finalImageDataUrl = await captureVisibleTabFallback(tab.id!, tab.windowId);
           finalImageWidthCss = pageDetails.viewportWidth;
           finalImageHeightCss = pageDetails.viewportHeight;
         }
@@ -254,6 +449,17 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
       if (!finalImageDataUrl) {
         throw new Error('Failed to capture image data');
+      }
+
+      // scalemaker fork: 캡처 성공 후(모든 경로 공통) saveToDownloads 요청 시 다운로드로 저장.
+      // 실패해도 스크린샷 자체는 성공 처리하고 saveError 만 응답에 첨부한다.
+      let downloadsSaveResult:
+        | { saved: true; downloadId: number; savedFilename: string }
+        | { saved: false; saveError: string }
+        | undefined;
+      if (saveToDownloads === true) {
+        downloadsSaveResult = await saveScreenshotToDownloads(finalImageDataUrl, filename);
+        Object.assign(results, downloadsSaveResult);
       }
 
       // 2. Process output
@@ -296,7 +502,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ base64Data, mimeType: compressed.mimeType }),
+              // scalemaker fork: saveToDownloads 결과(있다면)를 base64 응답에도 동일하게 포함
+              text: JSON.stringify({
+                base64Data,
+                mimeType: compressed.mimeType,
+                ...downloadsSaveResult,
+              }),
             },
           ],
           isError: false,
@@ -393,36 +604,72 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   }
 
   /**
+   * scalemaker fork: CDP Page.captureScreenshot 실행 (타임아웃 + 빈 데이터 검증).
+   * 호출자는 cdpSessionManager.withSession 안에서 호출해야 한다.
+   */
+  private async _cdpCaptureScreenshot(
+    tabId: number,
+    params: Record<string, unknown>,
+  ): Promise<string> {
+    const shot: any = await withCdpTimeout(
+      cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', params),
+      'CDP Page.captureScreenshot',
+    );
+    const base64Data = typeof shot?.data === 'string' ? shot.data : '';
+    if (!base64Data) {
+      throw new Error('CDP Page.captureScreenshot returned empty data');
+    }
+    return base64Data;
+  }
+
+  /**
    * Capture specific element
+   *
+   * scalemaker fork: CDP clip 캡처를 우선 사용한다. 대상 탭이 보이지 않아도 정확하고,
+   * captureVisibleTab + crop 과 달리 뷰포트보다 큰 요소도 온전히 담을 수 있다.
    */
   async _captureElement(
-    tabId: number,
+    tab: chrome.tabs.Tab,
     options: ScreenshotToolParams,
     pageDpr: number,
   ): Promise<string> {
+    const tabId = tab.id!;
     const elementDetails = await this.sendMessageToTab(tabId, {
       action: TOOL_MESSAGE_TYPES.SCREENSHOT_GET_ELEMENT_DETAILS,
       selector: options.selector,
     });
 
+    if (!elementDetails || !elementDetails.rect) {
+      throw new Error(`Failed to resolve element rect for selector "${options.selector}"`);
+    }
+
     const dpr = elementDetails.devicePixelRatio || pageDpr || 1;
+    const rect = elementDetails.rect as { x: number; y: number; width: number; height: number };
+    if (!(rect.width > 0) || !(rect.height > 0)) {
+      throw new Error(`Element "${options.selector}" has zero size and cannot be captured`);
+    }
 
     // Element rect is viewport-relative, in CSS pixels
     // captureVisibleTab captures in physical pixels
     const cropRectPx = {
-      x: elementDetails.rect.x * dpr,
-      y: elementDetails.rect.y * dpr,
-      width: elementDetails.rect.width * dpr,
-      height: elementDetails.rect.height * dpr,
+      x: rect.x * dpr,
+      y: rect.y * dpr,
+      width: rect.width * dpr,
+      height: rect.height * dpr,
     };
 
     // Small delay to ensure element is fully rendered after scrollIntoView
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
-    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
-    if (!visibleCaptureDataUrl) {
-      throw new Error('Failed to capture visible tab for element cropping');
+    // === Primary: CDP clip capture ===
+    try {
+      return await this._captureElementViaCdp(tabId, rect, options, dpr);
+    } catch (e) {
+      console.warn('CDP element capture failed, falling back to captureVisibleTab crop:', e);
     }
+
+    // === Fallback: captureVisibleTab + crop (대상 탭이 보이지 않으면 여기서 에러) ===
+    const visibleCaptureDataUrl = await captureVisibleTabFallback(tabId, tab.windowId);
 
     const croppedCanvas = await cropAndResizeImage(
       visibleCaptureDataUrl,
@@ -435,14 +682,140 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * Capture full page
+   * scalemaker fork: 요소 영역을 CDP clip 으로 캡처.
+   * clip 은 문서(페이지) 좌표계의 CSS 픽셀이므로 뷰포트 기준 rect 에 스크롤 오프셋을 더한다.
+   * 결과 이미지는 기존 crop 경로와 동일하게 물리 픽셀(= CSS * dpr) 해상도를 갖는다.
    */
-  async _captureFullPage(
+  private async _captureElementViaCdp(
+    tabId: number,
+    rect: { x: number; y: number; width: number; height: number },
+    options: ScreenshotToolParams,
+    dpr: number,
+  ): Promise<string> {
+    return await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
+      const metrics = normalizeLayoutMetrics(
+        await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {}),
+      );
+
+      // 요소가 뷰포트를 벗어나면 뷰포트 밖 영역까지 캡처
+      const beyondViewport =
+        rect.x < 0 ||
+        rect.y < 0 ||
+        rect.x + rect.width > metrics.viewportWidthCss + SCREENSHOT_CONSTANTS.PIXEL_TOLERANCE ||
+        rect.y + rect.height > metrics.viewportHeightCss + SCREENSHOT_CONSTANTS.PIXEL_TOLERANCE;
+
+      const base64Data = await this._cdpCaptureScreenshot(tabId, {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: beyondViewport,
+        clip: {
+          x: metrics.pageXCss + rect.x,
+          y: metrics.pageYCss + rect.y,
+          width: rect.width,
+          height: rect.height,
+          scale: 1,
+        },
+      });
+
+      const dataUrl = `data:image/png;base64,${base64Data}`;
+      if (!options.width && !options.height) return dataUrl;
+
+      // 출력 크기 지정 시 폴백(crop) 경로와 동일한 리사이즈 규칙 적용
+      const resized = await cropAndResizeImage(
+        dataUrl,
+        { x: 0, y: 0, width: rect.width * dpr, height: rect.height * dpr },
+        dpr,
+        options.width,
+        options.height,
+      );
+      return canvasToDataURL(resized);
+    });
+  }
+
+  /**
+   * scalemaker fork: 전체 페이지를 CDP 한 번의 captureBeyondViewport 로 캡처.
+   * 스크롤-스티칭이 필요 없고, 대상 탭이 보이지 않아도 동작한다.
+   * 캡처가 불가능/위험하다고 판단되면 null 을 돌려 스티칭 경로로 넘긴다.
+   */
+  private async _captureFullPageViaCdp(
     tabId: number,
     options: ScreenshotToolParams,
     initialPageDetails: any,
+  ): Promise<string | null> {
+    const dpr = initialPageDetails.devicePixelRatio || 1;
+
+    return await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
+      const metrics = normalizeLayoutMetrics(
+        await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {}),
+      );
+
+      const contentWidthCss = Math.max(metrics.contentWidthCss, metrics.viewportWidthCss);
+      const contentHeightCss = Math.max(metrics.contentHeightCss, metrics.viewportHeightCss);
+
+      // Sanity check: 콘텐츠 스크립트가 알려준 문서 크기와 크게 어긋나면(단위 불일치 등) 스티칭으로
+      const helperHeightCss = Number(initialPageDetails.totalHeight) || 0;
+      if (helperHeightCss > 0 && contentHeightCss > helperHeightCss * 2) {
+        this.logInfo(
+          `CDP contentSize (${contentHeightCss}) disagrees with page details (${helperHeightCss}); using scroll-stitch path.`,
+        );
+        return null;
+      }
+
+      // Apply maximum height limit for infinite scroll pages (스티칭 경로와 동일 규칙)
+      const maxHeightPx = options.maxHeight || SCREENSHOT_CONSTANTS.MAX_CAPTURE_HEIGHT_PX;
+      const limitedHeightCss = Math.min(contentHeightCss, Math.floor(maxHeightPx / dpr));
+
+      // 캡처 결과가 Chrome 텍스처 한계를 넘을 정도로 크면 스티칭 경로로
+      if (limitedHeightCss * dpr > MAX_CDP_FULLPAGE_HEIGHT_PX) {
+        this.logInfo(
+          `Full page height ${Math.round(limitedHeightCss * dpr)}px exceeds CDP safe limit (${MAX_CDP_FULLPAGE_HEIGHT_PX}px); using scroll-stitch path.`,
+        );
+        return null;
+      }
+      if (!(contentWidthCss > 0) || !(limitedHeightCss > 0)) return null;
+
+      const base64Data = await this._cdpCaptureScreenshot(tabId, {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: true,
+        clip: {
+          x: 0,
+          y: 0,
+          width: contentWidthCss,
+          height: limitedHeightCss,
+          scale: 1,
+        },
+      });
+
+      return await resizeToRequestedSize(
+        `data:image/png;base64,${base64Data}`,
+        dpr,
+        options.width,
+        options.height,
+      );
+    });
+  }
+
+  /**
+   * Capture full page
+   */
+  async _captureFullPage(
+    tab: chrome.tabs.Tab,
+    options: ScreenshotToolParams,
+    initialPageDetails: any,
   ): Promise<string> {
+    const tabId = tab.id!;
     const dpr = initialPageDetails.devicePixelRatio;
+
+    // === Primary: 단일 CDP 캡처 (백그라운드 탭 지원, 스크롤 이동 없음) ===
+    try {
+      const cdpDataUrl = await this._captureFullPageViaCdp(tabId, options, initialPageDetails);
+      if (cdpDataUrl) return cdpDataUrl;
+    } catch (e) {
+      console.warn('CDP full page capture failed, falling back to scroll-stitch:', e);
+    }
+
+    // === Fallback: captureVisibleTab 스크롤-스티칭 (대상 탭이 보여야 함) ===
     const totalWidthCss = options.width || initialPageDetails.totalWidth; // Use option width if provided
     const totalHeightCss = initialPageDetails.totalHeight; // Full page always uses actual height
 
@@ -490,8 +863,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         setTimeout(resolve, SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS),
       );
 
-      const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
-      if (!dataUrl) throw new Error('captureVisibleTab returned empty during full page capture');
+      const dataUrl = await captureVisibleTabFallback(tabId, tab.windowId);
 
       const yOffsetPx = currentScrollYCss * dpr;
       capturedParts.push({ dataUrl, y: yOffsetPx });

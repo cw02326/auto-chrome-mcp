@@ -3,6 +3,13 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
 import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
 import { focusWindowIfAllowed, isForceFocusEnabled } from '@/utils/focus-policy';
+import { getWorkTabId, setWorkTab } from '@/utils/work-tab-manager';
+import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import {
+  getOrCreateMcpWindow,
+  isDedicatedWindowEnabled,
+  isMcpWindow,
+} from '@/utils/mcp-window-manager';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -39,6 +46,61 @@ class NavigateTool extends BaseBrowserToolExecutor {
     }
   }
 
+  /**
+   * scalemaker fork: navigate 가 확정한 탭을 "MCP 작업 탭"으로 기록.
+   * 이후 tabId 미지정 도구 호출이 사용자의 활성 탭 대신 이 탭을 대상으로 한다.
+   */
+  private async rememberWorkTab(tabId?: number, sessionId?: string): Promise<void> {
+    if (typeof tabId !== 'number') return;
+    try {
+      await setWorkTab(tabId, sessionId);
+    } catch (error) {
+      console.warn('[NavigateTool] Failed to record MCP work tab:', error);
+    }
+  }
+
+  /**
+   * scalemaker fork: "MCP 작업 창" 으로 보낼지 판정.
+   * 백그라운드 작업 모드(게이트가 background:true 주입) + 전용 작업 창 정책이 모두 ON 이고,
+   * 호출자가 windowId 를 명시하지 않은 경우에만 전용 창 id 를 반환한다.
+   * 그 외/실패 시 null → 호출부는 기존(사용자 창) 동작 그대로.
+   */
+  private async resolveMcpWindowId(
+    background: boolean | undefined,
+    windowId: number | undefined,
+  ): Promise<number | null> {
+    if (background !== true) return null;
+    if (typeof windowId === 'number') return null;
+    try {
+      if (!(await isDedicatedWindowEnabled())) return null;
+      return await getOrCreateMcpWindow();
+    } catch (error) {
+      console.warn('[NavigateTool] Failed to resolve MCP work window:', error);
+      return null;
+    }
+  }
+
+  /**
+   * scalemaker fork: 전용 작업 창을 만들 때 같이 생긴 about:blank 탭 정리 (best-effort).
+   * 방금 만든 탭은 건드리지 않고, url 이 정확히 'about:blank' 인 탭만 닫는다.
+   * 창에 탭이 하나뿐이면 닫지 않는다 (창 자체가 사라지므로).
+   */
+  private async closeLeftoverBlankTab(mcpWindowId: number, keepTabId?: number): Promise<void> {
+    try {
+      const tabs = await chrome.tabs.query({ windowId: mcpWindowId });
+      if (tabs.length <= 1) return;
+      for (const tab of tabs) {
+        if (typeof tab.id !== 'number' || tab.id === keepTabId) continue;
+        const url = tab.url || tab.pendingUrl || '';
+        if (url === 'about:blank') {
+          await chrome.tabs.remove(tab.id);
+        }
+      }
+    } catch (error) {
+      console.warn('[NavigateTool] Failed to close leftover about:blank tab:', error);
+    }
+  }
+
   async execute(args: NavigateToolParams): Promise<ToolResult> {
     const {
       newWindow = false,
@@ -50,6 +112,8 @@ class NavigateTool extends BaseBrowserToolExecutor {
       background,
       windowId,
     } = args;
+    // scalemaker fork: 게이트가 실어 보낸 세션 id — 세션별 작업 탭 기록에 사용
+    const mcpSessionId = (args as any)._mcpSessionId as string | undefined;
 
     console.log(
       `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
@@ -73,6 +137,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on refresh
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        await this.rememberWorkTab(updatedTab.id, mcpSessionId);
 
         return {
           content: [
@@ -122,6 +187,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on history navigation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        await this.rememberWorkTab(updatedTab.id, mcpSessionId);
 
         return {
           content: [
@@ -181,8 +247,27 @@ class NavigateTool extends BaseBrowserToolExecutor {
       };
 
       const urlPatterns = buildUrlPatterns(url);
-      const candidateTabs = await chrome.tabs.query({ url: urlPatterns });
+      let candidateTabs = await chrome.tabs.query({ url: urlPatterns });
       console.log(`Found ${candidateTabs.length} matching tabs with patterns:`, urlPatterns);
+
+      // scalemaker fork: 백그라운드 모드 + 전용 작업 창 ON 이면 사용자 창의 탭은 재사용하지 않는다
+      // — 사용자가 열어둔 동일 URL 탭을 MCP 가 잡아 조작하는 간섭 방지. MCP 작업 창 안의 탭과
+      // 이 세션의 기존 작업 탭만 재사용 후보로 인정하고, 없으면 아래에서 MCP 창에 새 탭을 만든다.
+      if (candidateTabs.length > 0 && background === true && (await isDedicatedWindowEnabled())) {
+        const sessionWorkTabId = await getWorkTabId(mcpSessionId);
+        const filtered: chrome.tabs.Tab[] = [];
+        for (const t of candidateTabs) {
+          if (t.id === sessionWorkTabId || (await isMcpWindow(t.windowId))) {
+            filtered.push(t);
+          }
+        }
+        if (filtered.length !== candidateTabs.length) {
+          console.log(
+            `Background mode: ${candidateTabs.length - filtered.length} user-window tab(s) excluded from reuse`,
+          );
+        }
+        candidateTabs = filtered;
+      }
 
       // Prefer strict match when user specifies a concrete path/query.
       // Only fall back to host-level activation when the target is site root.
@@ -273,6 +358,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on existing tab activation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        await this.rememberWorkTab(updatedTab.id, mcpSessionId);
 
         return {
           content: [
@@ -316,6 +402,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           if (firstTab?.id) {
             await this.triggerAutoCapture(firstTab.id, firstTab.url);
           }
+          await this.rememberWorkTab(firstTab?.id, mcpSessionId);
 
           return {
             content: [
@@ -338,6 +425,45 @@ class NavigateTool extends BaseBrowserToolExecutor {
           };
         }
       } else {
+        // scalemaker fork: 백그라운드 작업 모드 + 전용 작업 창 ON 이면 사용자 창 대신
+        // "MCP 작업 창"에 탭을 만든다. 아래 last-focused-window / fallback-window 경로를
+        // 모두 대체한다. null 이면(정책 OFF·창 생성 실패) 기존 동작 그대로 진행.
+        const mcpWindowId = await this.resolveMcpWindowId(background, windowId);
+        if (mcpWindowId !== null) {
+          console.log(`Opening URL in dedicated MCP work window: ${mcpWindowId}`);
+
+          // active: true 가 맞다 — 사용자의 창이 아니므로 여기서 활성화해도 방해가 없고,
+          // 탭이 보이는 상태여야 throttling 없이(rAF 포함) 페이지가 정상 동작한다.
+          const mcpTab = await chrome.tabs.create({
+            url: url,
+            windowId: mcpWindowId,
+            active: true,
+          });
+          // 창 생성 시 함께 만들어진 about:blank 잔재 정리
+          await this.closeLeftoverBlankTab(mcpWindowId, mcpTab.id);
+
+          if (mcpTab.id) {
+            await this.triggerAutoCapture(mcpTab.id, mcpTab.url);
+          }
+          await this.rememberWorkTab(mcpTab.id, mcpSessionId);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  message: 'Opened URL in new tab in MCP work window',
+                  tabId: mcpTab.id,
+                  windowId: mcpWindowId,
+                  url: mcpTab.url,
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
+
         console.log('Opening URL in the last active window.');
         // Try to open a new tab in the specified window, otherwise the most recently active window
         let targetWindow: chrome.windows.Window | null = null;
@@ -369,6 +495,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           if (newTab.id) {
             await this.triggerAutoCapture(newTab.id, newTab.url);
           }
+          await this.rememberWorkTab(newTab.id, mcpSessionId);
 
           return {
             content: [
@@ -407,6 +534,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             if (firstTab?.id) {
               await this.triggerAutoCapture(firstTab.id, firstTab.url);
             }
+            await this.rememberWorkTab(firstTab?.id, mcpSessionId);
 
             return {
               content: [
@@ -588,6 +716,36 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
                 closedCount: validTabIds.length,
                 closedTabIds: validTabIds,
                 invalidTabIds: tabIds.filter((id) => !validTabIds.includes(id)),
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      // scalemaker fork: 인자 없이 호출되면 원래는 사용자의 활성 탭을 닫았다.
+      // 백그라운드 작업 모드 ON 이면 사용자 탭 대신 MCP 작업 탭만 닫는다 (없으면 에러).
+      // 닫힌 탭이 작업 탭이면 work-tab-manager 의 onRemoved 리스너가 알아서 정리한다.
+      if (await isBackgroundModeEnabled()) {
+        const workTabId = await getWorkTabId((args as any)._mcpSessionId);
+        if (workTabId === null) {
+          return createErrorResponse(
+            'Background work mode: no MCP work tab to close; pass tabIds explicitly',
+          );
+        }
+
+        console.log(`No tabIds or URL provided, closing MCP work tab ${workTabId}`);
+        await chrome.tabs.remove(workTabId);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                message: 'Closed MCP work tab',
+                closedCount: 1,
+                closedTabIds: [workTabId],
               }),
             },
           ],

@@ -22,6 +22,7 @@ interface UserscriptArgsBase {
 
 interface CreateArgs {
   script: string;
+  tabId?: number; // Explicit tab to apply the script to. Falls back to the active tab.
   name?: string;
   description?: string;
   matches?: string[];
@@ -458,7 +459,10 @@ class UserscriptTool extends BaseBrowserToolExecutor {
   }
 
   private async create(args: CreateArgs): Promise<ToolResult> {
-    const active = await getActiveTab();
+    // scalemaker fork: honor an explicit tabId before falling back to the active tab.
+    const requestedTab =
+      typeof args.tabId === 'number' ? await chrome.tabs.get(args.tabId).catch(() => null) : null;
+    const active = requestedTab || (await getActiveTab());
     if (!active || !active.id) return createErrorResponse('No active tab found');
     const currentUrl = active.url;
 
@@ -685,8 +689,10 @@ class UserscriptTool extends BaseBrowserToolExecutor {
     delete all[id];
     await saveAllRecords(all);
 
-    // Attempt cleanup on active tab
-    const active = await getActiveTab();
+    // Attempt cleanup on the requested tab, falling back to the active tab
+    const requestedTab =
+      typeof args?.tabId === 'number' ? await chrome.tabs.get(args.tabId).catch(() => null) : null;
+    const active = requestedTab || (await getActiveTab());
     if (active && active.id) {
       try {
         if (rec.sourceType === 'CSS') {

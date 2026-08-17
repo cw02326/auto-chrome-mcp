@@ -262,8 +262,9 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
 
       expect(result.executor).toBe('actions');
+      // scalemaker fork: 강제 포커스 정책 기본 OFF — 새 창은 focused:false 로 생성됨
       expect(mocks.windowsCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ url: 'about:blank', focused: true }),
+        expect.objectContaining({ url: 'about:blank', focused: false }),
       );
     });
 
@@ -326,7 +327,8 @@ describe('tab cursor integration (M3-full batch 2)', () => {
 
       expect(result.executor).toBe('actions');
       expect(mocks.tabsUpdate).toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
-      expect(mocks.windowsUpdate).toHaveBeenCalledWith(TARGET_WINDOW_ID, { focused: true });
+      // scalemaker fork: window 포커스는 focusWindowIfAllowed 게이트 통과 시에만 — 기본 OFF 라 미호출
+      expect(mocks.windowsUpdate).not.toHaveBeenCalled();
     });
 
     it('switchTab finds tab by titleContains', async () => {
@@ -391,7 +393,8 @@ describe('tab cursor integration (M3-full batch 2)', () => {
 
       expect(result.executor).toBe('actions');
       expect(mocks.tabsUpdate).toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
-      expect(mocks.windowsUpdate).toHaveBeenCalledWith(TARGET_WINDOW_ID, { focused: true });
+      // scalemaker fork: window 포커스는 focusWindowIfAllowed 게이트 통과 시에만 — 기본 OFF 라 미호출
+      expect(mocks.windowsUpdate).not.toHaveBeenCalled();
     });
 
     it('switchTab fails when no matching tab found', async () => {

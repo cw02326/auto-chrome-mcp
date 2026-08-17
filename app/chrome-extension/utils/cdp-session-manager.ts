@@ -9,9 +9,20 @@ interface TabSessionState {
 }
 
 const DEBUGGER_PROTOCOL_VERSION = '1.3';
+const ATTACH_CONFLICT_RETRY_DELAY_MS = 300;
 
 class CDPSessionManager {
   private sessions = new Map<number, TabSessionState>();
+
+  constructor() {
+    // scalemaker fork: Chrome이 강제로 detach한 경우(사용자가 infobar에서 취소를 누르는 등)
+    // 내부 Map에 stale 항목이 남지 않도록 정리해 다음 attach가 깨끗한 상태에서 시작되게 한다.
+    chrome.debugger.onDetach.addListener((source) => {
+      if (typeof source.tabId === 'number') {
+        this.sessions.delete(source.tabId);
+      }
+    });
+  }
 
   private getState(tabId: number): TabSessionState | undefined {
     return this.sessions.get(tabId);
@@ -19,6 +30,28 @@ class CDPSessionManager {
 
   private setState(tabId: number, state: TabSessionState) {
     this.sessions.set(tabId, state);
+  }
+
+  // scalemaker fork: getTargets 조회 1회분을 담당. 다른 클라이언트가 붙어 있으면 'conflict'를 반환해
+  // 호출부(attach)가 재시도 여부를 판단하게 한다.
+  private async tryAttachOnce(
+    tabId: number,
+    owner: OwnerTag,
+    priorState: TabSessionState | undefined,
+  ): Promise<'adopted' | 'conflict' | 'clear'> {
+    const targets = await chrome.debugger.getTargets();
+    const existing = targets.find((t) => t.tabId === tabId && t.attached);
+    if (!existing) return 'clear';
+    if (existing.extensionId === chrome.runtime.id) {
+      // Already attached by us (e.g., previous tool). Adopt and refcount.
+      this.setState(tabId, {
+        refCount: priorState ? priorState.refCount + 1 : 1,
+        owners: new Set([...(priorState?.owners || []), owner]),
+        attachedByUs: true,
+      });
+      return 'adopted';
+    }
+    return 'conflict';
   }
 
   async attach(tabId: number, owner: OwnerTag = 'unknown'): Promise<void> {
@@ -30,22 +63,20 @@ class CDPSessionManager {
     }
 
     // Check existing attachments
-    const targets = await chrome.debugger.getTargets();
-    const existing = targets.find((t) => t.tabId === tabId && t.attached);
-    if (existing) {
-      if (existing.extensionId === chrome.runtime.id) {
-        // Already attached by us (e.g., previous tool). Adopt and refcount.
-        this.setState(tabId, {
-          refCount: state ? state.refCount + 1 : 1,
-          owners: new Set([...(state?.owners || []), owner]),
-          attachedByUs: true,
-        });
-        return;
+    let result = await this.tryAttachOnce(tabId, owner, state);
+    if (result === 'adopted') return;
+    if (result === 'conflict') {
+      // scalemaker fork: DevTools를 방금 닫았거나 stale attach가 해제 중일 수 있으므로
+      // 300ms 대기 후 1회만 재시도한다 (총 추가 지연은 최대 300ms로 제한).
+      await new Promise((resolve) => setTimeout(resolve, ATTACH_CONFLICT_RETRY_DELAY_MS));
+      result = await this.tryAttachOnce(tabId, owner, state);
+      if (result === 'adopted') return;
+      if (result === 'conflict') {
+        // scalemaker fork: 모델이 바로 다음 행동을 판단할 수 있도록 원인과 조치를 한 줄로 안내
+        throw new Error(
+          `CDP unavailable for tab ${tabId}: another debugger is attached (likely DevTools/F12 or another extension). Close DevTools for that tab and retry.`,
+        );
       }
-      // Another client (DevTools/other extension) is attached
-      throw new Error(
-        `Debugger is already attached to tab ${tabId} by another client (e.g., DevTools/extension)`,
-      );
     }
 
     // Attach freshly
@@ -72,7 +103,8 @@ class CDPSessionManager {
         await chrome.debugger.detach({ tabId });
       }
     } catch (e) {
-      // Best-effort detach; ignore
+      // scalemaker fork: detach 실패(Chrome이 이미 세션을 끊은 경우 등)해도 refCount가 새는 걸 막기 위해
+      // 아래 finally에서 반드시 Map 항목을 정리한다. best-effort로 무시.
     } finally {
       this.sessions.delete(tabId);
     }

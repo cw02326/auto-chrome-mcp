@@ -2,7 +2,15 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
+import { focusWindowIfAllowed } from '@/utils/focus-policy';
+import {
+  consoleBuffer,
+  BufferedConsoleMessage,
+  BufferedConsoleException,
+  // scalemaker fork (upstream #215): 얕은 preview로 인한 중첩 객체 손실을 보정하는 공용 직렬화 유틸
+  buildSerializedConsoleArgs,
+  createRunBudget,
+} from './console-buffer';
 
 const DEFAULT_MAX_MESSAGES = 100;
 
@@ -30,7 +38,9 @@ interface ConsoleMessage {
   level: string;
   text: string;
   args?: any[];
-  argsSerialized?: any[];
+  argsSerialized?: unknown[];
+  // scalemaker fork: 이 메시지에서 깊은 직렬화로 복원한 인자 수
+  argsDeepSerializedCount?: number;
   source?: string;
   url?: string;
   lineNumber?: number;
@@ -62,6 +72,8 @@ interface ConsoleResult {
   messageLimitReached: boolean;
   droppedMessageCount: number;
   droppedExceptionCount: number;
+  // scalemaker fork: 예산 상한 때문에 깊은 직렬화를 건너뛴 인자 수(0이면 손실 없음)
+  deepSerializationSkipped?: number;
 }
 
 // 辅助函数
@@ -273,6 +285,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           messageLimitReached: read.messageLimitReached,
           droppedMessageCount: read.droppedMessageCount,
           droppedExceptionCount: read.droppedExceptionCount,
+          deepSerializationSkipped: read.deepSerializationSkipped,
         };
 
         return {
@@ -319,9 +332,8 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     if (existingTabs.length > 0 && existingTabs[0]?.id) {
       const tab = existingTabs[0];
       if (!background) {
-        // Activate the existing tab
-        await chrome.tabs.update(tab.id!, { active: true });
-        await chrome.windows.update(tab.windowId, { focused: true });
+        // scalemaker fork: 콘솔 수집은 CDP Runtime/Log 도메인으로 동작하므로 탭 활성화는 불필요 — 정책 게이트를 통과한 경우에만 윈도우 포커스.
+        await focusWindowIfAllowed(tab.windowId);
       }
       return tab;
     } else {
@@ -390,6 +402,8 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     const messages: ConsoleMessage[] = [];
     const exceptions: ConsoleException[] = [];
     let limitReached = false;
+    // scalemaker fork: 예산 상한으로 깊은 직렬화를 건너뛴 인자 수(관측용)
+    let deepSerializationSkipped = 0;
 
     try {
       // Get tab information
@@ -442,80 +456,11 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
         // Process collected messages
-        // Helper to deeply serialize console arguments when possible
-        const serializeArg = async (arg: any): Promise<any> => {
-          try {
-            if (!arg) return arg;
-            if (Object.prototype.hasOwnProperty.call(arg, 'unserializableValue')) {
-              return arg.unserializableValue;
-            }
-            if (Object.prototype.hasOwnProperty.call(arg, 'value')) {
-              return arg.value;
-            }
-            if (arg.objectId) {
-              const resp = await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
-                objectId: arg.objectId,
-                functionDeclaration:
-                  'function(maxDepth, maxProps){\n' +
-                  '  const seen=new WeakSet();\n' +
-                  '  function S(v,d){\n' +
-                  '    try{\n' +
-                  '      if(d<0) return "[MaxDepth]";\n' +
-                  '      if(v===null) return null;\n' +
-                  '      const t=typeof v;\n' +
-                  '      if(t!=="object"){\n' +
-                  '        if(t==="bigint") return v.toString()+"n";\n' +
-                  '        return v;\n' +
-                  '      }\n' +
-                  '      if(seen.has(v)) return "[Circular]";\n' +
-                  '      seen.add(v);\n' +
-                  '      if(Array.isArray(v)){\n' +
-                  '        const out=[];\n' +
-                  '        for(let i=0;i<v.length;i++){\n' +
-                  '          if(i>=maxProps){ out.push("[...truncated]"); break; }\n' +
-                  '          out.push(S(v[i], d-1));\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      if(v instanceof Date) return {__type:"Date", value:v.toISOString()};\n' +
-                  '      if(v instanceof RegExp) return {__type:"RegExp", value:String(v)};\n' +
-                  '      if(v instanceof Map){\n' +
-                  '        const out={__type:"Map", entries:[]}; let c=0;\n' +
-                  '        for(const [k,val] of v.entries()){\n' +
-                  '          if(c++>=maxProps){ out.entries.push(["[...truncated]","[...truncated]"]); break; }\n' +
-                  '          out.entries.push([S(k,d-1), S(val,d-1)]);\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      if(v instanceof Set){\n' +
-                  '        const out={__type:"Set", values:[]}; let c=0;\n' +
-                  '        for(const val of v.values()){\n' +
-                  '          if(c++>=maxProps){ out.values.push("[...truncated]"); break; }\n' +
-                  '          out.values.push(S(val,d-1));\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      const out={}; let c=0;\n' +
-                  '      for(const key in v){\n' +
-                  '        if(c++>=maxProps){ out.__truncated__=true; break; }\n' +
-                  '        try{ out[key]=S(v[key], d-1); }catch(e){ out[key]="[Thrown]"; }\n' +
-                  '      }\n' +
-                  '      return out;\n' +
-                  '    }catch(e){ return "[Unserializable]" }\n' +
-                  '  }\n' +
-                  '  return S(this, maxDepth);\n' +
-                  '}',
-                arguments: [{ value: 3 }, { value: 100 }],
-                silent: true,
-                returnByValue: true,
-              });
-              return resp?.result?.value ?? '[Unavailable]';
-            }
-            return '[Unknown]';
-          } catch (e) {
-            return '[SerializeError]';
-          }
-        };
+        // scalemaker fork (upstream #215): 예전에는 objectId가 있는 모든 인자를 매번
+        // Runtime.callFunctionOn 으로 직렬화해 CDP 왕복이 폭주했고, 문자 수 상한도 없었다.
+        // 이제는 preview가 실제로 손실된 인자만 깊이 직렬화하며(그 외는 preview 복원 fast path),
+        // 이 캡처 1회당 총 호출 수와 벽시계 데드라인으로 상한을 건다.
+        const deepBudget = createRunBudget();
 
         for (const entry of collectedMessages) {
           if (messages.length >= maxMessages) {
@@ -538,16 +483,20 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
           if (entry.args && Array.isArray(entry.args)) {
             message.args = entry.args;
-            // Attempt deep serialization for better fidelity
-            const serialized: any[] = [];
-            for (const a of entry.args) {
-              serialized.push(await serializeArg(a));
-            }
+            // scalemaker fork: shallow 결과를 먼저 채우고, 손실된 인자만 깊은 직렬화로 덮어쓴다.
+            // 어떤 실패도 던지지 않으므로 툴 호출 자체는 절대 실패하지 않는다.
+            const { args: serialized, deepCount } = await buildSerializedConsoleArgs(
+              tabId,
+              entry.args,
+              deepBudget,
+            );
             message.argsSerialized = serialized;
+            if (deepCount > 0) message.argsDeepSerializedCount = deepCount;
           }
 
           messages.push(message);
         }
+        deepSerializationSkipped = deepBudget.skipped;
 
         // Process collected exceptions
         for (const exceptionDetails of collectedExceptions) {
@@ -617,6 +566,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         messageLimitReached: limitReached,
         droppedMessageCount: 0,
         droppedExceptionCount: 0,
+        deepSerializationSkipped,
       };
     } catch (error: any) {
       console.error(`ConsoleTool: Error capturing console messages for tab ${tabId}:`, error);

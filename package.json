@@ -1,11 +1,11 @@
 {
   "name": "mcp-chrome-scalemaker-monorepo",
-  "version": "1.0.37",
+  "version": "1.1.0",
   "private": true,
   "author": "hangye (upstream), scalemaker-ship-it (scalemaker fork)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker.git"
+    "url": "https://github.com/scalemaker-ship-it/auto-chrome-mcp.git"
   },
   "type": "module",
   "scripts": {

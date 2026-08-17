@@ -7,6 +7,8 @@ import { NETWORK_FILTERS } from '@/common/constants';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
+  tabId?: number; // Explicit tab to operate on when url is not provided.
+  background?: boolean; // If true, newly created tabs are not activated.
   maxCaptureTime?: number;
   inactivityTimeout?: number; // Inactivity timeout (milliseconds)
   includeStatic?: boolean; // if include static resources
@@ -768,6 +770,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   async execute(args: NetworkDebuggerStartToolParams): Promise<ToolResult> {
     const {
       url: targetUrl,
+      tabId: requestedTabId,
+      background = false,
       maxCaptureTime = DEFAULT_MAX_CAPTURE_TIME_MS,
       inactivityTimeout = DEFAULT_INACTIVITY_TIMEOUT_MS,
       includeStatic = false,
@@ -786,21 +790,23 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         }); // More specific query
         if (existingTabs.length > 0 && existingTabs[0]?.id) {
           tabToOperateOn = existingTabs[0];
-          // Ensure window gets focus and tab is truly activated
-          // scalemaker fork: OS 윈도우 포커스는 정책 통과 시에만.
+          // Ensure window gets focus (tab activation removed — the CDP Network domain
+          // works fine on background tabs; scalemaker fork: OS 윈도우 포커스는 정책 통과 시에만).
           await focusWindowIfAllowed(tabToOperateOn.windowId);
-          await chrome.tabs.update(tabToOperateOn.id!, { active: true });
         } else {
-          tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          tabToOperateOn = await chrome.tabs.create({
+            url: targetUrl,
+            active: background === true ? false : true,
+          });
           // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
           // but for debugger attachment, it just needs the tabId.
           await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay
         }
       } else {
-        const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (activeTabs.length > 0 && activeTabs[0]?.id) {
-          tabToOperateOn = activeTabs[0];
-        } else {
+        try {
+          tabToOperateOn =
+            (await this.tryGetTab(requestedTabId)) || (await this.getActiveTabOrThrow());
+        } catch {
           return createErrorResponse('No active tab found and no URL provided.');
         }
       }
@@ -873,7 +879,7 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
     NetworkDebuggerStopTool.instance = this;
   }
 
-  async execute(): Promise<ToolResult> {
+  async execute(args?: { tabId?: number }): Promise<ToolResult> {
     console.log(`NetworkDebuggerStopTool: Executing command.`);
 
     const startTool = NetworkDebuggerStartTool.instance;
@@ -893,9 +899,9 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
       return createErrorResponse('No active network captures found in any tab.');
     }
 
-    // Get current active tab
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTabId = activeTabs[0]?.id;
+    // Prefer the explicitly requested tab; fall back to the current active tab.
+    const requestedTab = (await this.tryGetTab(args?.tabId)) || (await this.getActiveTabInWindow());
+    const activeTabId = requestedTab?.id;
 
     // Determine the primary tab to stop
     let primaryTabId: number;

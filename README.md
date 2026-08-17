@@ -1,4 +1,4 @@
-# mcp-chrome-scalemaker
+# Auto Chrome MCP (구 mcp-chrome-scalemaker)
 
 > [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) 의 reliability fork — 5+ 개월 머지 안 된 핵심 PR 7개 흡수 + Force Reconnect + Diagnostic UI.
 > **stdio transport 강제** (HTTP 12306 안 씀). 웹스토어 등록 안 함 — npm + GitHub Release 사이드로드.

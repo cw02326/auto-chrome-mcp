@@ -10,6 +10,8 @@
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, DownloadInfo, DownloadState, VariableStore } from '../types';
+// scalemaker fork: OS 윈도우 포커스는 강제 포커스 정책 게이트를 통과해야 함
+import { focusWindowIfAllowed, isForceFocusEnabled } from '@/utils/focus-policy';
 
 /** Default timeout for tab operations */
 const DEFAULT_TAB_TIMEOUT_MS = 10000;
@@ -52,7 +54,7 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         // Create new window
         const window = await chrome.windows.create({
           url: url || 'about:blank',
-          focused: true,
+          focused: await isForceFocusEnabled(),
         });
 
         const tab = window?.tabs?.[0];
@@ -179,7 +181,7 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
       // Focus the window containing the tab
       const tab = await chrome.tabs.get(targetTabId);
       if (tab.windowId) {
-        await chrome.windows.update(tab.windowId, { focused: true });
+        await focusWindowIfAllowed(tab.windowId);
       }
 
       // Return newTabId for ctx.tabId sync

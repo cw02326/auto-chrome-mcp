@@ -17,6 +17,7 @@ interface BookmarkSearchToolParams {
  */
 interface BookmarkAddToolParams {
   url?: string; // URL to add as bookmark, if not provided use current active tab URL
+  tabId?: number; // Explicit tab to read the URL/title from when url is not provided.
   title?: string; // Bookmark title, if not provided use page title
   parentId?: string; // Parent folder ID or path string (like "Work/Projects"), if not provided add to "Bookmarks Bar" folder
   createFolder?: boolean; // Whether to automatically create parent folder if it doesn't exist
@@ -366,26 +367,29 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
    * Execute add bookmark operation
    */
   async execute(args: BookmarkAddToolParams): Promise<ToolResult> {
-    const { url, title, parentId, createFolder = false } = args;
+    const { url, tabId, title, parentId, createFolder = false } = args;
 
     console.log(`BookmarkAddTool: Adding bookmark, options:`, args);
 
     try {
-      // If no URL provided, use current active tab
+      // If no URL provided, use the requested tab (falling back to the active tab)
       let bookmarkUrl = url;
       let bookmarkTitle = title;
 
       if (!bookmarkUrl) {
-        // Get current active tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tabs[0] || !tabs[0].url) {
+        const requestedTab =
+          typeof tabId === 'number' ? await chrome.tabs.get(tabId).catch(() => null) : null;
+        const [activeTab] = requestedTab
+          ? [requestedTab]
+          : await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!activeTab || !activeTab.url) {
           // tab.url might be undefined (e.g., chrome:// pages)
           return createErrorResponse('No active tab with valid URL found, and no URL provided');
         }
 
-        bookmarkUrl = tabs[0].url;
+        bookmarkUrl = activeTab.url;
         if (!bookmarkTitle) {
-          bookmarkTitle = tabs[0].title || bookmarkUrl; // If tab title is empty, use URL as title
+          bookmarkTitle = activeTab.title || bookmarkUrl; // If tab title is empty, use URL as title
         }
       }
 

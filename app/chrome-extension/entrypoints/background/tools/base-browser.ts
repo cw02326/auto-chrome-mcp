@@ -2,6 +2,7 @@ import { ToolExecutor } from '@/common/tool-handler';
 import type { ToolResult } from '@/common/tool-handler';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { focusWindowIfAllowed } from '@/utils/focus-policy';
+import { isBackgroundModeEnabled } from '@/utils/background-mode';
 
 const PING_TIMEOUT_MS = 300;
 
@@ -137,21 +138,29 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    * Optionally focus window and/or activate tab. Defaults preserve current behavior
    * when caller sets activate/focus flags explicitly.
    *
-   * scalemaker fork: focusWindow 는 popup 의 "강제 포커스" 토글 정책을 통과한 경우에만 실제로
-   * windows.update({focused:true}) 호출. tab.update({active:true}) 는 정책 영향 받지 않음
-   * (탭 활성화는 도구 동작에 필수).
+   * scalemaker fork: 두 동작이 각각 별도 정책 게이트를 통과해야 한다.
+   * - focusWindow: popup 의 "강제 포커스" 토글 정책(focus-policy)을 통과한 경우에만 실제로
+   *   windows.update({focused:true}) 호출.
+   * - activate: popup 의 "백그라운드 작업" 토글이 ON 이면 tabs.update({active:true}) 를 skip
+   *   (사용자가 보고 있는 탭을 MCP 도구가 뺏지 않게). 단 forceActivate:true 를 넘기면 게이트를
+   *   우회한다 — 사용자 대면 UI 를 띄우는 도구(element-picker 등)는 탭이 앞에 있어야 하므로.
+   *   백그라운드 모드가 OFF 면 이전과 동일하게 항상 활성화.
    */
   protected async ensureFocus(
     tab: chrome.tabs.Tab,
-    options: { activate?: boolean; focusWindow?: boolean } = {},
+    options: { activate?: boolean; focusWindow?: boolean; forceActivate?: boolean } = {},
   ): Promise<void> {
     const activate = options.activate === true;
     const focusWindow = options.focusWindow === true;
+    const forceActivate = options.forceActivate === true;
     if (focusWindow) {
       await focusWindowIfAllowed(tab.windowId);
     }
     if (activate && typeof tab.id === 'number') {
-      await chrome.tabs.update(tab.id, { active: true });
+      const allowActivate = forceActivate || !(await isBackgroundModeEnabled());
+      if (allowActivate) {
+        await chrome.tabs.update(tab.id, { active: true });
+      }
     }
   }
 

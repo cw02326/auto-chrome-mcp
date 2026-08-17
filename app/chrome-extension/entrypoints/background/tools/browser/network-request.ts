@@ -7,6 +7,7 @@ const DEFAULT_NETWORK_REQUEST_TIMEOUT = 30000; // For sending a single request v
 
 interface NetworkRequestToolParams {
   url: string; // URL is always required
+  tabId?: number; // Explicit tab to send the request from. Falls back to the active tab.
   method?: string; // Defaults to GET
   headers?: Record<string, string>; // User-provided headers
   body?: any; // User-provided body
@@ -26,6 +27,7 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
   async execute(args: NetworkRequestToolParams): Promise<ToolResult> {
     const {
       url,
+      tabId: requestedTabId,
       method = 'GET',
       headers = {},
       body,
@@ -39,11 +41,11 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]?.id) {
+      const tab = (await this.tryGetTab(requestedTabId)) || (await this.getActiveTabInWindow());
+      if (!tab?.id) {
         return createErrorResponse('No active tab found or tab has no ID.');
       }
-      const activeTabId = tabs[0].id;
+      const activeTabId = tab.id;
 
       // Ensure content script is available in the target tab
       await this.injectContentScript(activeTabId, ['inject-scripts/network-helper.js']);
