@@ -1,6 +1,6 @@
 ﻿# Auto Chrome MCP 자동 설치 스크립트 (Windows)
 # 사용법: PowerShell에 아래 한 줄을 붙여넣고 Enter
-#   irm https://raw.githubusercontent.com/cw02326/auto-chrome-mcp/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/cw02326/auto-chrome-mcp/main/install.ps1 | iex
 param(
   [switch]$SkipNpm,      # 테스트용: 브리지 설치 건너뛰기
   [switch]$SkipRegister, # 테스트용: 클로드 등록 건너뛰기
