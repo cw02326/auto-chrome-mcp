@@ -22,6 +22,11 @@ description: |
     - "bridge 가 안 떠" / "native messaging error" / "manifest 못 찾음"
     - "권한 에러" / "EACCES" / "run_host.sh"
     - "강제 재연결 눌렀는데도 안 돼"
+    - "MCP 가 내가 보던 탭을 조작해" / "탭이 자꾸 앞으로 튀어나옴"
+    - "스크린샷이 엉뚱한 탭" / "Cannot capture background tab"
+    - "runaway loop 에러" / "Automation guard 가 막았어"
+    - "MCP 작업 창이 자꾸 생겨" / "작업 창 끄고 싶어"
+    - "팝업이 열렸는데 인식을 못해" / "새 창에서 작업이 안 이어져"
 
   Skip if the user is using upstream hangwin/mcp-chrome (not the scalemaker
   fork) — this skill knows fork-specific commands and architecture.
@@ -194,6 +199,39 @@ doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
 윈도우 포커스만 안 가로챔.
 
 ---
+
+## (D-2) 백그라운드 작업 모드 + 신뢰성 도구 (v1.1.0+/v1.2.0+)
+
+v1.1.0 부터 MCP 도구는 사용자의 브라우징을 방해하지 않는 **백그라운드 작업 모드**로 동작한다.
+
+| 토글 (popup)      | storage.local 키           | 기본값 | 의미                                                    |
+| ----------------- | -------------------------- | ------ | ------------------------------------------------------- |
+| 강제 포커스       | `forceFocusOnToolCall`     | OFF    | ON 이면 도구 호출 시 OS 윈도우 포커스 가로챔            |
+| 백그라운드 작업   | `backgroundWorkMode`       | ON     | ON 이면 탭 활성화 없이 세션별 "작업 탭"을 대상으로 동작 |
+| 전용 작업 창      | `dedicatedWorkWindow`      | ON     | ON 이면 MCP 작업 탭을 별도 비포커스 창에 모음           |
+| (popup 토글 없음) | `automationGuardEnabled`   | ON     | 도메인 속도 제한 + 동일 호출 반복 폭주 가드             |
+| (popup 토글 없음) | `errorScreenshotOnFailure` | ON     | 도구 실패 시 화면 JPEG 자동 첨부                        |
+
+핵심 동작: 세션(stdio)마다 `_mcpSessionId` 자동 주입 → 세션별 작업 탭(최대 10, LRU, "MCP" 뱃지).
+`chrome_navigate` 가 작업 탭을 확정하므로 **세션 첫 작업은 navigate 부터**. 팝업/새 창이 열리면
+결과에 `new_tabs_opened` 알림이 붙고, `chrome_set_work_tab` 으로 화면 전환 없이 작업 탭 이동.
+v1.2.0 신규 도구: `chrome_wait_for`(로딩 대기), `chrome_scroll_collect`(무한스크롤 수집),
+`chrome_extract`(선택자 정밀 추출), `chrome_batch`(다단계 1회 호출). read_page/get_web_content 는
+diff·compact·reader 모드 기본 ON(토큰 절감, `diff:false`/`compact:false`/`raw:true` 로 해제).
+
+### 증상 → 처방
+
+| 증상                                                  | 처방                                                                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| "MCP 가 내가 보던 탭을 조작해"                        | ① "백그라운드 작업" 토글 ON 확인 ② 그 세션에서 `chrome_navigate` 를 먼저 호출했는지 확인 (작업 탭 미확정이면 활성 탭 fallback) |
+| "탭/창이 자꾸 앞으로 나옴"                            | "강제 포커스" OFF + "백그라운드 작업" ON 확인. 확장 버전 1.1.0 미만인지 확인 (`chrome://extensions`)                           |
+| "Cannot capture background tab: CDP unavailable" 에러 | 해당 탭에 DevTools(F12)/다른 디버거가 붙어 있음 → 닫고 재시도                                                                  |
+| "Automation guard: identical ... runaway loop" 에러   | 동일 호출 12회 반복 감지. 의도적이면 `chrome.storage.local.set({automationGuardEnabled:false})`                                |
+| "MCP 작업 창이 자꾸 생겨"                             | popup 의 "전용 작업 창" 토글 OFF                                                                                               |
+| "팝업이 열렸는데 인식 못함" (v1.2.0 미만)             | 확장을 1.2.0+ 로 업데이트 — 결과에 `new_tabs_opened` 알림 + `chrome_set_work_tab` 제공                                         |
+| "클릭했는데 내용이 없다/빈 결과"                      | `chrome_wait_for` 로 selector/text/networkIdle 대기 후 재시도                                                                  |
+| "iframe 안 요소 클릭 실패" (v1.2.0 미만)              | 1.2.0+ 는 자동 프레임 탐색. 구버전이면 업데이트                                                                                |
+| 두 세션이 같은 탭을 잡음                              | v1.1.0+ 는 세션별 작업 탭 분리. 각 세션에서 navigate 로 각자 작업 탭 확정                                                      |
 
 ## (E) When to escalate
 
