@@ -7,6 +7,7 @@ import { clickTool, fillTool } from './interaction';
 import { keyboardTool } from './keyboard';
 import { screenshotTool } from './screenshot';
 import { screenshotContextManager, scaleCoordinates } from '@/utils/screenshot-context';
+import { prepareImageForModelInput, MODEL_INPUT_MAX_LONG_EDGE } from '@/utils/image-utils';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   captureFrameOnAction,
@@ -75,6 +76,8 @@ interface ComputerParams {
   tabId?: number; // target existing tab id
   windowId?: number;
   background?: boolean; // avoid focusing/activating
+  // scalemaker fork: screenshot/zoom 결과 이미지의 축소(긴 변 1568px)를 건너뛴다. 화질 탈출구.
+  fullResolution?: boolean;
 }
 
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
@@ -1262,10 +1265,23 @@ class ComputerTool extends BaseBrowserToolExecutor {
           });
           await CDPHelper.detach(tab.id);
 
-          const base64Data = String(shot?.data || '');
-          if (!base64Data) {
+          const rawBase64 = String(shot?.data || '');
+          if (!rawBase64) {
             return createErrorResponse('Failed to capture zoom screenshot via CDP');
           }
+
+          // scalemaker fork: zoom 도 screenshot 과 동일한 토큰 낭비 버그가 있었다.
+          // base64 를 텍스트 JSON 에 넣으면 이미지 1장에 텍스트 토큰 10만개 이상을 지불한다.
+          // → 정식 MCP image 블록으로 분리하고, 긴 변 1568px(Claude 입력 최적)로 축소한다.
+          const zoomImage = await prepareImageForModelInput(`data:image/png;base64,${rawBase64}`, {
+            maxLongEdge:
+              params.fullResolution === true ? Number.MAX_SAFE_INTEGER : MODEL_INPUT_MAX_LONG_EDGE,
+            quality: 0.8,
+            format: 'image/jpeg',
+          });
+          const zoomBase64 = zoomImage.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+          const zoomDownscaled = zoomImage.scale < 1;
+
           return {
             content: [
               {
@@ -1273,10 +1289,22 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 text: JSON.stringify({
                   success: true,
                   action: 'zoom',
-                  mimeType: 'image/png',
-                  base64Data,
+                  mimeType: zoomImage.mimeType,
+                  width: zoomImage.width,
+                  height: zoomImage.height,
+                  downscaled: zoomDownscaled,
+                  ...(zoomDownscaled
+                    ? { downscaledFrom: `${zoomImage.originalWidth}x${zoomImage.originalHeight}` }
+                    : {}),
+                  // region 은 뷰포트 CSS 좌표. 확대 이미지 좌표를 되돌리려면 이 region 을 기준으로 환산한다.
                   region: { x0: rx0, y0: ry0, x1: rx1, y1: ry1 },
+                  note: 'The zoomed image is attached as an MCP image content block (no base64 in this text). Its pixels map onto the viewport region reported in `region`.',
                 }),
+              },
+              {
+                type: 'image',
+                data: zoomBase64,
+                mimeType: zoomImage.mimeType,
               },
             ],
             isError: false,
@@ -1291,12 +1319,17 @@ class ComputerTool extends BaseBrowserToolExecutor {
         // scalemaker fork: 해석된 대상 탭을 그대로 넘긴다. 넘기지 않으면 screenshot 도구가
         // 자기 나름대로 "활성 탭"을 다시 고르기 때문에 백그라운드 작업 탭 대신 사용자가
         // 보고 있는 탭이 찍힌다.
+        //
+        // scalemaker fork: screenshot 도구는 이제 [text(메타데이터), image(base64)] 두 블록을
+        // 돌려준다. 여기서는 JSON 파싱/재포장 없이 그대로 통과시켜야 MCP 응답에 image 블록이
+        // 살아남는다(텍스트로 다시 감싸면 토큰 낭비 버그가 그대로 재발한다).
         const result = await screenshotTool.execute({
           name: 'computer',
           storeBase64: true,
           fullPage: false,
           tabId: tab.id,
           background: params.background,
+          fullResolution: params.fullResolution,
         });
         return result;
       }

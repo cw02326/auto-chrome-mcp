@@ -19,6 +19,10 @@ interface HistoryToolParams {
   endTime?: string;
   maxResults?: number;
   excludeCurrentTabs?: boolean;
+  // scalemaker fork: 페이지네이션 — 필터링 이후 items 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+  limit?: number;
+  offset?: number;
+  countOnly?: boolean;
 }
 
 interface HistoryItem {
@@ -31,8 +35,13 @@ interface HistoryItem {
 }
 
 interface HistoryResult {
-  items: HistoryItem[];
+  success: boolean;
+  items?: HistoryItem[];
   totalCount: number;
+  // scalemaker fork: 페이지네이션 메타 — 반환된 개수, 요청 offset, 다음 페이지 존재 여부
+  returnedCount: number;
+  offset: number;
+  hasMore: boolean;
   timeRange: {
     startTime: number;
     endTime: number;
@@ -118,6 +127,9 @@ class HistoryTool extends BaseBrowserToolExecutor {
         text = '',
         maxResults = 100, // Default to 100 results
         excludeCurrentTabs = false,
+        limit = 100, // scalemaker fork: 결과 배열 페이지네이션 기본 상한(기존 maxResults 기본값과 동일)
+        offset = 0,
+        countOnly = false,
       } = args;
 
       const now = Date.now();
@@ -189,16 +201,37 @@ class HistoryTool extends BaseBrowserToolExecutor {
         }
       }
 
+      // scalemaker fork: 필터링(excludeCurrentTabs) 이후 items 배열에 limit/offset/countOnly 페이지네이션 적용
+      const totalCount = filteredItems.length;
+      const normalizedOffset = Math.max(
+        0,
+        typeof offset === 'number' && Number.isFinite(offset) ? Math.floor(offset) : 0,
+      );
+      const normalizedLimit = Math.max(
+        0,
+        typeof limit === 'number' && Number.isFinite(limit) ? Math.floor(limit) : 100,
+      );
+      const isCountOnly = countOnly === true;
+      const pagedItems = isCountOnly
+        ? undefined
+        : filteredItems.slice(normalizedOffset, normalizedOffset + normalizedLimit).map((item) => ({
+            id: item.id,
+            url: item.url,
+            title: item.title,
+            lastVisitTime: item.lastVisitTime,
+            visitCount: item.visitCount,
+            typedCount: item.typedCount,
+          }));
+      const returnedCount = pagedItems?.length ?? 0;
+      const hasMore = normalizedOffset + returnedCount < totalCount;
+
       const result: HistoryResult = {
-        items: filteredItems.map((item) => ({
-          id: item.id,
-          url: item.url,
-          title: item.title,
-          lastVisitTime: item.lastVisitTime,
-          visitCount: item.visitCount,
-          typedCount: item.typedCount,
-        })),
-        totalCount: filteredItems.length,
+        success: true,
+        ...(isCountOnly ? {} : { items: pagedItems }),
+        totalCount,
+        returnedCount,
+        offset: normalizedOffset,
+        hasMore,
         timeRange: {
           startTime: startTimeMs,
           endTime: endTimeMs,

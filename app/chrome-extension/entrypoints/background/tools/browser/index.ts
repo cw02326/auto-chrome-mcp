@@ -33,3 +33,9 @@ export { gifRecorderTool } from './gif-recorder';
 // setBatchToolInvoker 는 도구 인스턴스가 아니므로 이 barrel 로 내보내지 않는다
 // (tools/index.ts 가 Object.values 로 도구 맵을 만들기 때문). './browser/batch' 에서 직접 import 할 것.
 export { batchTool } from './batch';
+export { setWorkTabTool } from './work-tab';
+// scalemaker fork: 페이지 조건 대기(chrome_wait_for) + 무한 스크롤 수집(chrome_scroll_collect)
+export { waitForTool } from './wait-for';
+export { scrollCollectTool } from './scroll-collect';
+// scalemaker fork: 필요한 필드만 뽑는 토큰 절약 읽기(chrome_extract)
+export { extractTool } from './extract';

@@ -891,7 +891,13 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
     NetworkCaptureStopTool.instance = this;
   }
 
-  async execute(args?: { tabId?: number }): Promise<ToolResult> {
+  async execute(args?: {
+    tabId?: number;
+    // scalemaker fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+    limit?: number;
+    offset?: number;
+    countOnly?: boolean;
+  }): Promise<ToolResult> {
     console.log(`NetworkCaptureStopTool: Executing`);
 
     try {
@@ -962,6 +968,29 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
           }
         }
       }
+
+      // scalemaker fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
+      const allRequests: NetworkRequestInfo[] = stopResult.data?.requests || [];
+      const totalCount = allRequests.length;
+      const isCountOnly = args?.countOnly === true;
+      const normalizedOffset = Math.max(
+        0,
+        typeof args?.offset === 'number' && Number.isFinite(args.offset)
+          ? Math.floor(args.offset)
+          : 0,
+      );
+      const normalizedLimit = Math.max(
+        0,
+        typeof args?.limit === 'number' && Number.isFinite(args.limit)
+          ? Math.min(Math.floor(args.limit), NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE)
+          : NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE,
+      );
+      const pagedRequests = isCountOnly
+        ? undefined
+        : allRequests.slice(normalizedOffset, normalizedOffset + normalizedLimit);
+      const returnedCount = pagedRequests?.length ?? 0;
+      const hasMore = normalizedOffset + returnedCount < totalCount;
+
       return {
         content: [
           {
@@ -975,7 +1004,11 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
               requestCount: stopResult.data?.requestCount || 0,
               commonRequestHeaders: stopResult.data?.commonRequestHeaders || {},
               commonResponseHeaders: stopResult.data?.commonResponseHeaders || {},
-              requests: stopResult.data?.requests || [],
+              ...(isCountOnly ? {} : { requests: pagedRequests }),
+              totalCount,
+              returnedCount,
+              offset: normalizedOffset,
+              hasMore,
               captureStartTime: stopResult.data?.captureStartTime,
               captureEndTime: stopResult.data?.captureEndTime,
               totalDurationMs: stopResult.data?.totalDurationMs,

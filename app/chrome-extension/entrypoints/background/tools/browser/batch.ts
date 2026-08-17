@@ -55,16 +55,18 @@ export function setBatchToolInvoker(fn: ToolInvoker) {
 }
 
 /**
- * 결과에서 첫 번째 text content 를 뽑아 잘라낸다.
+ * 결과의 모든 text content 를 이어붙여 잘라낸다.
+ * (게이트가 new_tabs_opened 같은 알림을 두 번째 text 항목으로 첨부하므로
+ *  첫 항목만 취하면 팝업 감지 알림이 유실된다 — scalemaker fork)
  */
 function extractResultText(result: any): string | undefined {
   const content = Array.isArray(result?.content) ? result.content : null;
   if (!content) return undefined;
-  const firstText = content.find(
-    (item: any) => item?.type === 'text' && typeof item.text === 'string',
-  );
-  if (!firstText) return undefined;
-  const text: string = firstText.text;
+  const texts = content
+    .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
+    .map((item: any) => item.text);
+  if (texts.length === 0) return undefined;
+  const text: string = texts.join('\n');
   return text.length > MAX_RESULT_TEXT_LENGTH
     ? `${text.slice(0, MAX_RESULT_TEXT_LENGTH)}... [truncated]`
     : text;

@@ -26,7 +26,10 @@ export const handleDownloadNode: NodeRuntime<any> = {
 export const screenshotNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const args: any = { name: 'workflow', storeBase64: true };
+    // scalemaker fork: includeBase64InText 는 확장 내부 전용 플래그.
+    // 스크린샷 도구는 base64 를 MCP image 블록으로만 내보내므로, 변수에 이미지 바이트를
+    // 저장해야 하는 워크플로 노드만 텍스트 동봉을 요청한다.
+    const args: any = { name: 'workflow', storeBase64: true, includeBase64InText: true };
     if (s.fullPage) args.fullPage = true;
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
       args.selector = s.selector;

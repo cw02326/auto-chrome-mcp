@@ -55,7 +55,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   private lastActivityTime: Map<number, number> = new Map(); // tabId -> timestamp of last network activity
   private pendingResponseBodies: Map<string, Promise<any>> = new Map(); // requestId -> promise for getResponseBody
   private requestCounters: Map<number, number> = new Map(); // tabId -> count of captured requests (after filtering)
-  private static MAX_REQUESTS_PER_CAPTURE = 100; // Max requests to store to prevent memory issues
+  // scalemaker fork: STOP 결과 페이지네이션 기본 limit 계산을 위해 NetworkDebuggerStopTool에서도 참조 — public으로 완화
+  public static MAX_REQUESTS_PER_CAPTURE = 100; // Max requests to store to prevent memory issues
   public static instance: NetworkDebuggerStartTool | null = null;
 
   constructor() {
@@ -879,7 +880,13 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
     NetworkDebuggerStopTool.instance = this;
   }
 
-  async execute(args?: { tabId?: number }): Promise<ToolResult> {
+  async execute(args?: {
+    tabId?: number;
+    // scalemaker fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+    limit?: number;
+    offset?: number;
+    countOnly?: boolean;
+  }): Promise<ToolResult> {
     console.log(`NetworkDebuggerStopTool: Executing command.`);
 
     const startTool = NetworkDebuggerStartTool.instance;
@@ -927,7 +934,11 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
     }
 
     // Stop capture for the primary tab
-    const result = await this.performStop(startTool, primaryTabId);
+    const result = await this.performStop(startTool, primaryTabId, {
+      limit: args?.limit,
+      offset: args?.offset,
+      countOnly: args?.countOnly,
+    });
 
     // If multiple tabs are capturing, stop other tabs
     if (ongoingCaptures.length > 1) {
@@ -951,6 +962,7 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
   private async performStop(
     startTool: NetworkDebuggerStartTool,
     tabId: number,
+    pagination?: { limit?: number; offset?: number; countOnly?: boolean },
   ): Promise<ToolResult> {
     console.log(`NetworkDebuggerStopTool: Attempting to stop capture for tab ${tabId}.`);
     const stopResult = await startTool.stopCapture(tabId);
@@ -975,6 +987,28 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
       );
     }
 
+    // scalemaker fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
+    const allRequests: NetworkRequestInfo[] = resultData.requests || [];
+    const totalCount = allRequests.length;
+    const isCountOnly = pagination?.countOnly === true;
+    const normalizedOffset = Math.max(
+      0,
+      typeof pagination?.offset === 'number' && Number.isFinite(pagination.offset)
+        ? Math.floor(pagination.offset)
+        : 0,
+    );
+    const normalizedLimit = Math.max(
+      0,
+      typeof pagination?.limit === 'number' && Number.isFinite(pagination.limit)
+        ? Math.min(Math.floor(pagination.limit), NetworkDebuggerStartTool.MAX_REQUESTS_PER_CAPTURE)
+        : NetworkDebuggerStartTool.MAX_REQUESTS_PER_CAPTURE,
+    );
+    const pagedRequests = isCountOnly
+      ? undefined
+      : allRequests.slice(normalizedOffset, normalizedOffset + normalizedLimit);
+    const returnedCount = pagedRequests?.length ?? 0;
+    const hasMore = normalizedOffset + returnedCount < totalCount;
+
     return {
       content: [
         {
@@ -988,7 +1022,11 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
             requestCount: resultData.requestCount || 0,
             commonRequestHeaders: resultData.commonRequestHeaders || {},
             commonResponseHeaders: resultData.commonResponseHeaders || {},
-            requests: resultData.requests || [],
+            ...(isCountOnly ? {} : { requests: pagedRequests }),
+            totalCount,
+            returnedCount,
+            offset: normalizedOffset,
+            hasMore,
             captureStartTime: resultData.captureStartTime,
             captureEndTime: resultData.captureEndTime,
             totalDurationMs: resultData.totalDurationMs,

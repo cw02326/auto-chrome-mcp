@@ -519,23 +519,44 @@
   }
 
   /**
-   * Traverse DOM and build pageContent lines; collect ref map for interactive nodes.
+   * scalemaker fork(T4): 압축 시 "이름 없는 껍데기"로 볼 수 있는 role 집합.
+   * 여기에 없는 role(link/button/heading/list/...)은 정보이므로 절대 접지 않는다.
+   */
+  const COMPACT_NOISE_ROLES = new Set(['generic', 'group', 'none', 'presentation']);
+
+  /** scalemaker fork(T4): 라벨 비교용 정규화 */
+  function normLabel(s) {
+    return String(s || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Traverse DOM and build a node tree; collect ref map for interactive nodes.
+   *
+   * scalemaker fork(T4): 예전에는 여기서 곧바로 출력 문자열(line)을 만들었지만,
+   * 이제는 노드 객체 트리를 만든다. 문자열화 전에 "구조 단위"로 무손실 압축을
+   * 적용하기 위함(정규식으로 최종 문자열을 건드리지 않는다).
+   * compact=false 경로는 renderTree(list, false) 가 기존 포맷을 그대로 재현한다.
+   *
    * @param {Element} el
    * @param {number} depth
    * @param {{filter?: 'all'|'interactive', maxDepth?: number}} cfg
-   * @param {string[]} out
+   * @param {Array<any>} sink 부모 노드의 children 배열(최상위는 roots 배열)
    * @param {Array<{ref:string, selector:string, rect:{x:number,y:number,width:number,height:number}}>} refMap
    */
-  function traverse(el, depth, cfg, out, refMap, state) {
+  function traverse(el, depth, cfg, sink, refMap, state) {
     const maxDepth = cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
     if (depth > maxDepth || !el || !el.tagName) return;
     if (state.processed >= MAX_NODES) return;
     if (state.visited.has(el)) return;
     state.visited.add(el);
     const include = shouldInclude(el, cfg) || depth === 0;
+    // 포함되지 않은 요소의 자식들은 가장 가까운 조상 노드에 그대로 붙는다(기존 들여쓰기 규칙과 동일).
+    let childSink = sink;
     if (include) {
       const role = inferRole(el);
-      let label = inferLabel(el);
+      const rawLabel = inferLabel(el);
       let refId = null;
       for (const k in window.__claudeElementMap) {
         if (window.__claudeElementMap[k].deref && window.__claudeElementMap[k].deref() === el) {
@@ -548,36 +569,43 @@
         window.__claudeElementMap[refId] = new WeakRef(el);
       }
       const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
-      const cx = Math.round(rect.left + rect.width / 2);
-      const cy = Math.round(rect.top + rect.height / 2);
-      let line = `${'  '.repeat(depth)}- ${role}`;
-      if (label) {
-        label = label.replace(/\s+/g, ' ').substring(0, MAX_LINE_LABEL);
-        line += ` "${label.replace(/"/g, '\\"')}"`;
-      }
-      line += ` [ref=${refId}] (x=${cx},y=${cy})`;
-      if (/** @type {HTMLElement} */ (el).id) line += ` id="${/** @type {HTMLElement} */ (el).id}"`;
+      const node = {
+        depth,
+        role,
+        label: rawLabel ? rawLabel.replace(/\s+/g, ' ').substring(0, MAX_LINE_LABEL) : '',
+        ref: /** @type {string} */ (refId),
+        cx: Math.round(rect.left + rect.width / 2),
+        cy: Math.round(rect.top + rect.height / 2),
+        attrs: /** @type {Array<[string,string]>} */ ([]),
+        flags: /** @type {string[]} */ ([]),
+        interactive: false,
+        children: /** @type {Array<any>} */ ([]),
+      };
+      if (/** @type {HTMLElement} */ (el).id)
+        node.attrs.push(['id', String(/** @type {HTMLElement} */ (el).id)]);
       const href = el.getAttribute('href');
-      if (href) line += ` href="${href}"`;
+      if (href) node.attrs.push(['href', href]);
       const type = el.getAttribute('type');
-      if (type) line += ` type="${type}"`;
+      if (type) node.attrs.push(['type', type]);
       const placeholder = el.getAttribute('placeholder');
-      if (placeholder) line += ` placeholder="${placeholder}"`;
+      if (placeholder) node.attrs.push(['placeholder', placeholder]);
       // Surface disabled/pointer-events for better agent judgement
       try {
         const disabled = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
-        if (disabled) line += ` disabled`;
+        if (disabled) node.flags.push('disabled');
         const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
-        if (cs && cs.pointerEvents === 'none') line += ` pe=none`;
+        if (cs && cs.pointerEvents === 'none') node.flags.push('pe=none');
       } catch (_) {
         /* ignore style issues */
       }
-      out.push(line);
+      node.interactive = isInteractive(el);
+      sink.push(node);
+      childSink = node.children;
       state.included++;
       state.processed++;
 
       // Only collect ref mapping for interactive elements to limit cost
-      if (isInteractive(el) && refMap.length < REF_MAP_LIMIT) {
+      if (node.interactive && refMap.length < REF_MAP_LIMIT) {
         refMap.push({
           ref: /** @type {string} */ (refId),
           selector: generateSelector(el),
@@ -596,7 +624,7 @@
       const children = /** @type {HTMLElement} */ (el).children;
       for (let i = 0; i < children.length; i++) {
         if (state.processed >= MAX_NODES) break;
-        traverse(children[i], include ? depth + 1 : depth, cfg, out, refMap, state);
+        traverse(children[i], include ? depth + 1 : depth, cfg, childSink, refMap, state);
       }
     }
     // Traverse shadow DOM roots (limited by maxDepth and MAX_NODES)
@@ -606,7 +634,7 @@
         const srChildren = anyEl.shadowRoot.children || [];
         for (let i = 0; i < srChildren.length; i++) {
           if (state.processed >= MAX_NODES) break;
-          traverse(srChildren[i], include ? depth + 1 : depth, cfg, out, refMap, state);
+          traverse(srChildren[i], include ? depth + 1 : depth, cfg, childSink, refMap, state);
         }
       }
     } catch (_) {
@@ -615,14 +643,134 @@
   }
 
   /**
+   * scalemaker fork(T4): 노드 한 줄 문자열화.
+   * compact=false → 기존 포맷 그대로:  "  - role \"label\" [ref=ref_1] (x=1,y=2) id=\"..\" ... disabled"
+   * compact=true  → 무손실 축약 포맷:  " - role \"label\" ref_1 @1,2 id=\"..\" ... disabled"
+   *   (들여쓰기 2칸→1칸, [ref=..] 래퍼 제거하되 ref_N 토큰 자체는 그대로 유지, 좌표 표기 축약)
+   */
+  function renderNodeLine(node, level, compact) {
+    let line = `${(compact ? ' ' : '  ').repeat(level)}- ${node.role}`;
+    if (node.label) line += ` "${node.label.replace(/"/g, '\\"')}"`;
+    line += compact
+      ? ` ${node.ref} @${node.cx},${node.cy}`
+      : ` [ref=${node.ref}] (x=${node.cx},y=${node.cy})`;
+    for (let i = 0; i < node.attrs.length; i++) {
+      line += ` ${node.attrs[i][0]}="${node.attrs[i][1]}"`;
+    }
+    for (let i = 0; i < node.flags.length; i++) line += ` ${node.flags[i]}`;
+    return line;
+  }
+
+  /** scalemaker fork(T4): 노드 트리 → 라인 배열 */
+  function renderTree(roots, compact) {
+    const out = [];
+    const walk = (nodes, level) => {
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        // verbose 는 원본 depth 를 그대로 써서 기존 출력과 바이트 단위로 동일하게 유지한다.
+        out.push(renderNodeLine(n, compact ? level : n.depth, compact));
+        if (n.children.length) walk(n.children, level + 1);
+      }
+    };
+    walk(roots, 0);
+    return out;
+  }
+
+  /**
+   * scalemaker fork(T4): 기본값/중복 속성 정리(무손실).
+   * - 빈 문자열 속성 제거(정보 0)
+   * - placeholder 가 이미 label 로 출력된 경우 중복 제거
+   * - role=textbox 에 type="text" 는 role 이 이미 말해주는 기본값
+   */
+  function compactAttrs(node) {
+    const kept = [];
+    const label = normLabel(node.label);
+    for (let i = 0; i < node.attrs.length; i++) {
+      const k = node.attrs[i][0];
+      const v = node.attrs[i][1];
+      if (v === '') continue;
+      if (k === 'placeholder' && label && normLabel(v).substring(0, MAX_LINE_LABEL) === label)
+        continue;
+      if (k === 'type' && v === 'text' && node.role === 'textbox') continue;
+      kept.push(node.attrs[i]);
+    }
+    node.attrs = kept;
+  }
+
+  /** scalemaker fork(T4): 이름·속성·상호작용성이 전혀 없는 순수 래퍼인가 */
+  function isNoiseWrapper(node) {
+    return (
+      !node.interactive &&
+      COMPACT_NOISE_ROLES.has(node.role) &&
+      !node.label &&
+      node.attrs.length === 0 &&
+      node.flags.length === 0
+    );
+  }
+
+  /** scalemaker fork(T4): 라벨 중복 시 버려도 되는 쪽인가(역할·상태 정보가 없어야 함) */
+  function canDropForDuplicateLabel(node, keptRole) {
+    return (
+      !node.interactive &&
+      node.attrs.length === 0 &&
+      node.flags.length === 0 &&
+      (COMPACT_NOISE_ROLES.has(node.role) || node.role === keptRole)
+    );
+  }
+
+  /**
+   * scalemaker fork(T4): 무손실 압축 패스(문자열화 전, 구조 단위).
+   * 규칙:
+   *  1) 이름·속성·상호작용 없는 generic/group 래퍼
+   *     - 자식 0개 → 정보가 ref 뿐이므로 제거
+   *     - 자식 1개 → splice(자식을 부모 자리로 승격) → 래퍼 체인이 통째로 접힘
+   *     - 자식 2개 이상 → "묶음" 자체가 정보이므로 유지
+   *  2) 부모-단일자식의 이름이 같으면(라벨 래핑) 껍데기 쪽 하나만 제거
+   * 제거하지 않는 것: interactive 요소, 이름 있는 요소, role, ref, 상태(disabled/pe=none), 속성
+   */
+  function compactNodes(list, isRoot) {
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      compactAttrs(n);
+      n.children = compactNodes(n.children, false); // bottom-up
+      if (isNoiseWrapper(n)) {
+        // 최상위 노드(body/refId 루트)는 비어 있어도 남긴다 — 결과가 통째로 빈 문자열이 되는 걸 방지
+        if (n.children.length === 0) {
+          if (isRoot) out.push(n);
+          continue;
+        }
+        if (n.children.length === 1) {
+          out.push(n.children[0]);
+          continue;
+        }
+      }
+      if (n.children.length === 1) {
+        const c = n.children[0];
+        if (n.label && c.label && normLabel(n.label) === normLabel(c.label)) {
+          if (canDropForDuplicateLabel(c, n.role)) {
+            n.children = c.children;
+          } else if (canDropForDuplicateLabel(n, c.role)) {
+            out.push(c);
+            continue;
+          }
+        }
+      }
+      out.push(n);
+    }
+    return out;
+  }
+
+  /**
    * Generate tree and return
    * @param {'all'|'interactive'|null} filter
-   * @param {{maxDepth?: number, refId?: string}|undefined} options
+   * @param {{maxDepth?: number, refId?: string, compact?: boolean}|undefined} options
    */
   function __generateAccessibilityTree(filter, options) {
     try {
       const start = performance && performance.now ? performance.now() : Date.now();
-      const out = [];
+      // scalemaker fork(T4): 문자열 대신 노드 트리를 모은다.
+      const roots = [];
       const cfg = { filter: filter || undefined };
 
       // Clamp maxDepth to MAX_DEPTH to keep costs bounded
@@ -649,17 +797,30 @@
         }
       }
 
-      if (root) traverse(root, 0, cfg, out, refMap, state);
+      if (root) traverse(root, 0, cfg, roots, refMap, state);
+      // NOTE(scalemaker fork): ref 는 window.__claudeElementMap 에 페이지 수명 동안 유지되며,
+      // 이 스윕은 "GC 된(=DOM 에서 사라진) 요소"의 ref 만 지운다. 살아있는 요소는 매 호출마다
+      // 같은 ref 를 그대로 재사용하므로, 이전 호출의 ref 는 계속 유효하다(T2 unchanged 모드 근거).
       for (const k in window.__claudeElementMap) {
         if (!window.__claudeElementMap[k].deref || !window.__claudeElementMap[k].deref())
           delete window.__claudeElementMap[k];
       }
-      const pageContent = out
+      // 기존(verbose) 포맷 — 바이트 단위로 종전과 동일
+      const verbose = renderTree(roots, false)
         .filter((line) => !/^\s*- generic \[ref=ref_\d+\]$/.test(line))
         .join('\n');
+      let pageContent = verbose;
+      let rawChars = null;
+      // scalemaker fork(T4): compact 요청 시에만 압축 패스를 태운다(기본값은 종전 동작 유지).
+      if (options && options.compact) {
+        pageContent = renderTree(compactNodes(roots, true), true).join('\n');
+        rawChars = verbose.length; // 절감량 측정용
+      }
       const end = performance && performance.now ? performance.now() : Date.now();
       return {
         pageContent,
+        rawChars,
+        compact: !!(options && options.compact),
         focus,
         viewport: {
           width: window.innerWidth,
@@ -1035,6 +1196,8 @@
         const result = __generateAccessibilityTree(request.filter || null, {
           maxDepth: request.depth,
           refId: request.refId,
+          // scalemaker fork(T4): 명시적으로 true 일 때만 압축(다른 호출자 영향 없음)
+          compact: request.compact === true,
         });
         if (result && result.error) {
           sendResponse({ success: false, error: result.error });

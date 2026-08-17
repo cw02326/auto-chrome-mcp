@@ -4,6 +4,10 @@ import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { isBackgroundModeEnabled } from '@/utils/background-mode';
 import { getWorkTabId, DEFAULT_SESSION_ID } from '@/utils/work-tab-manager';
 import { applyAutomationGuard } from '@/utils/automation-guard';
+import { getSpawnedTabsSince } from '@/utils/spawned-tab-tracker';
+import { getDownloadsSince } from '@/utils/download-tracker';
+import { looksLikeLoginUrl } from '@/utils/login-detector';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import * as browserTools from './browser';
 import { setBatchToolInvoker } from './browser/batch';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
@@ -53,6 +57,9 @@ const TAB_ID_INJECT_TOOLS = new Set<string>([
   B.PERFORMANCE_START_TRACE,
   B.PERFORMANCE_STOP_TRACE,
   B.PERFORMANCE_ANALYZE_INSIGHT,
+  B.WAIT_FOR,
+  B.SCROLL_COLLECT,
+  B.EXTRACT,
 ]);
 
 /**
@@ -134,6 +141,43 @@ async function withTabLock<T>(tabId: unknown, fn: () => Promise<T>): Promise<T> 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * scalemaker fork(F4): 도구 실패 시 대상 탭 화면을 JPEG 로 캡처해 결과에 첨부.
+ * chrome.storage.local 'errorScreenshotOnFailure' (기본 ON) 로 끌 수 있다.
+ */
+async function isErrorScreenshotEnabled(): Promise<boolean> {
+  try {
+    const r = await chrome.storage.local.get(['errorScreenshotOnFailure']);
+    return r['errorScreenshotOnFailure'] !== false;
+  } catch {
+    return true;
+  }
+}
+
+async function captureFailureScreenshot(tabId: number): Promise<string | null> {
+  try {
+    const shot: any = await cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 50,
+    });
+    if (typeof shot?.data !== 'string' || shot.data.length === 0) return null;
+    // scalemaker fork(T7): 원인 파악엔 축소본으로 충분 — 이미지 토큰 최소화
+    try {
+      const { compressImage } = await import('@/utils/image-utils');
+      const compressed = await compressImage(`data:image/jpeg;base64,${shot.data}`, {
+        scale: 0.6,
+        quality: 0.6,
+        format: 'image/jpeg',
+      });
+      return compressed.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+    } catch {
+      return shot.data;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Handle tool execution
  */
 export const handleCallTool = async (param: ToolCallParam) => {
@@ -159,7 +203,128 @@ export const handleCallTool = async (param: ToolCallParam) => {
     // chrome_batch 는 내부에서 step 별로 handleCallTool 을 재진입해 각자 탭 락을 잡는다.
     // 배치 자체가 락을 잡으면 step 과 이중 획득 → 교착이므로 배치는 락 없이 실행.
     const lockTabId = param.name === TOOL_NAMES.BROWSER.BATCH ? undefined : args?.tabId;
-    return await withTabLock(lockTabId, () => tool.execute(args));
+
+    // scalemaker fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
+    // 새 탭/팝업 창을 열었으면 결과에 알림을 첨부한다. 이게 없으면 모델은 팝업이
+    // 열린 사실을 모르고 원래 탭에만 명령을 보내다 실패한다.
+    const spawnWatchStart = Date.now();
+    const openerCandidates: number[] = [];
+    if (typeof args?.tabId === 'number') openerCandidates.push(args.tabId);
+    const sessionWorkTab = await getWorkTabId(getSessionId(args));
+    if (sessionWorkTab !== null && !openerCandidates.includes(sessionWorkTab)) {
+      openerCandidates.push(sessionWorkTab);
+    }
+
+    // scalemaker fork(F2): 로그인 리다이렉트 감지용 — 실행 전 대상 탭 URL 기록
+    const primaryTabId = openerCandidates.length > 0 ? openerCandidates[0] : null;
+    let preCallUrl: string | null = null;
+    if (primaryTabId !== null) {
+      try {
+        preCallUrl = (await chrome.tabs.get(primaryTabId)).url ?? null;
+      } catch {
+        preCallUrl = null;
+      }
+    }
+
+    const result = await withTabLock(lockTabId, () => tool.execute(args));
+
+    if (openerCandidates.length > 0 && result && Array.isArray(result.content)) {
+      const spawned = getSpawnedTabsSince(spawnWatchStart, openerCandidates);
+      if (spawned.length > 0) {
+        const tabs = [];
+        for (const s of spawned) {
+          try {
+            const live = await chrome.tabs.get(s.tabId);
+            tabs.push({
+              tabId: s.tabId,
+              url: live.url || live.pendingUrl || s.url,
+              title: live.title,
+              windowId: live.windowId,
+              windowType: s.windowType,
+              openerTabId: s.openerTabId,
+            });
+          } catch {
+            // 이미 닫힌 탭은 보고하지 않음
+          }
+        }
+        if (tabs.length > 0) {
+          result.content.push({
+            type: 'text',
+            text: JSON.stringify({
+              event: 'new_tabs_opened',
+              message:
+                'This tool call opened new tab(s)/popup window(s). To interact with one, pass its tabId to subsequent tools, or call chrome_set_work_tab to retarget this session’s default work tab.',
+              tabs,
+            }),
+          });
+        }
+      }
+    }
+
+    if (result && Array.isArray(result.content)) {
+      // scalemaker fork(F5): 이 호출 중 시작된 다운로드를 결과에 첨부
+      const downloads = getDownloadsSince(spawnWatchStart);
+      if (downloads.length > 0) {
+        result.content.push({
+          type: 'text',
+          text: JSON.stringify({
+            event: 'downloads_started',
+            message:
+              'Download(s) started during this tool call. Use chrome_handle_download to wait for completion / get the final saved path.',
+            downloads: downloads.map((d) => ({
+              id: d.id,
+              url: d.url,
+              filename: d.filename,
+              state: d.state,
+              totalBytes: d.totalBytes,
+            })),
+          }),
+        });
+      }
+
+      // scalemaker fork(F2): 실행 후 대상 탭이 로그인 페이지로 "바뀐" 경우 경고
+      if (primaryTabId !== null && !looksLikeLoginUrl(preCallUrl)) {
+        try {
+          const postUrl = (await chrome.tabs.get(primaryTabId)).url ?? null;
+          if (postUrl && postUrl !== preCallUrl && looksLikeLoginUrl(postUrl)) {
+            result.content.push({
+              type: 'text',
+              text: JSON.stringify({
+                event: 'login_required_suspected',
+                message:
+                  'The target tab appears to have been redirected to a login page (session may have expired). Ask the user to log in, or handle authentication before retrying.',
+                url: postUrl,
+                tabId: primaryTabId,
+              }),
+            });
+          }
+        } catch {
+          // 탭이 닫혔으면 무시
+        }
+      }
+
+      // scalemaker fork(F4): 도구 실패 시 현재 화면 자동 첨부 (원인 파악용)
+      if (result.isError === true && primaryTabId !== null && (await isErrorScreenshotEnabled())) {
+        const jpegBase64 = await captureFailureScreenshot(primaryTabId);
+        if (jpegBase64) {
+          result.content.push({
+            type: 'text',
+            text: JSON.stringify({
+              event: 'failure_screenshot_attached',
+              tabId: primaryTabId,
+              note: 'Screenshot of the target tab at failure time (disable via chrome.storage.local errorScreenshotOnFailure=false)',
+            }),
+          });
+          result.content.push({
+            type: 'image',
+            data: jpegBase64,
+            mimeType: 'image/jpeg',
+          });
+        }
+      }
+    }
+
+    return result;
   } catch (error) {
     console.error(`Tool execution failed for ${param.name}:`, error);
     return createErrorResponse(

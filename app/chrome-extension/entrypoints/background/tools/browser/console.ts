@@ -31,6 +31,9 @@ interface ConsoleToolParams {
   pattern?: string;
   onlyErrors?: boolean;
   limit?: number;
+  // scalemaker fork: 페이지네이션 — 필터링 이후 결과 배열을 자르는 offset, 개수만 반환하는 countOnly
+  offset?: number;
+  countOnly?: boolean;
 }
 
 interface ConsoleMessage {
@@ -135,6 +138,34 @@ function applyResultFilters(
   };
 }
 
+// scalemaker fork: countOnly/limit/offset 페이지네이션 — messages 배열에만 적용(필터링 이후), exceptions는 그대로 유지
+interface PaginationResult {
+  messages?: ConsoleMessage[];
+  totalCount: number;
+  returnedCount: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+function paginateMessages(
+  messages: ConsoleMessage[],
+  options: { limit: number; offset: number; countOnly: boolean },
+): PaginationResult {
+  const { limit, offset, countOnly } = options;
+  const totalCount = messages.length;
+  if (countOnly) {
+    return { totalCount, returnedCount: 0, offset, hasMore: offset < totalCount };
+  }
+  const sliced = messages.slice(offset, offset + limit);
+  return {
+    messages: sliced,
+    totalCount,
+    returnedCount: sliced.length,
+    offset,
+    hasMore: offset + sliced.length < totalCount,
+  };
+}
+
 function isDebuggerConflictError(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return msg.includes('debugger is already attached') || msg.includes('another client');
@@ -169,6 +200,8 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       pattern,
       onlyErrors = false,
       limit,
+      offset,
+      countOnly,
     } = args;
 
     let targetTab: chrome.tabs.Tab;
@@ -216,10 +249,14 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
       // 计算有效的消息限制
       const normalizedMaxMessages = normalizeLimit(maxMessages, DEFAULT_MAX_MESSAGES);
+      // scalemaker fork: limit은 상한(normalizedMaxMessages)을 더 작게만 줄일 수 있다 — 늘리는 용도로는 쓰지 않는다
       const effectiveLimit =
         typeof limit === 'number'
-          ? normalizeLimit(limit, normalizedMaxMessages)
+          ? Math.min(normalizeLimit(limit, normalizedMaxMessages), normalizedMaxMessages)
           : normalizedMaxMessages;
+      // scalemaker fork: 필터링 이후 결과 배열을 자르는 offset (기본 0)
+      const normalizedOffset = normalizeLimit(offset, 0);
+      const isCountOnly = countOnly === true;
 
       // Buffer 模式
       if (resolvedMode === 'buffer') {
@@ -266,19 +303,26 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           clearedSummary += ` Cleared ${clearedAfter.clearedMessages} messages and ${clearedAfter.clearedExceptions} exceptions after reading.`;
         }
 
-        const result: ConsoleResult = {
+        // scalemaker fork: countOnly/limit/offset — buffer 모드에서도 읽어온 messages 배열에 동일하게 페이지네이션 적용
+        const bufferPagination = paginateMessages(read.messages as ConsoleMessage[], {
+          limit: effectiveLimit,
+          offset: normalizedOffset,
+          countOnly: isCountOnly,
+        });
+
+        const result = {
           success: true,
           message:
             `Console buffer read for tab ${targetTabId}.` +
             clearedSummary +
-            ` Returned ${read.messageCount} messages and ${read.exceptionCount} exceptions.`,
+            ` Returned ${bufferPagination.returnedCount} messages and ${read.exceptionCount} exceptions.`,
           tabId: targetTabId,
           tabUrl: read.tabUrl || '',
           tabTitle: read.tabTitle || '',
           captureStartTime: read.captureStartTime,
           captureEndTime: read.captureEndTime,
           totalDurationMs: read.totalDurationMs,
-          messages: read.messages as ConsoleMessage[],
+          ...(isCountOnly ? {} : { messages: bufferPagination.messages }),
           exceptions: read.exceptions as ConsoleException[],
           messageCount: read.messageCount,
           exceptionCount: read.exceptionCount,
@@ -286,6 +330,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           droppedMessageCount: read.droppedMessageCount,
           droppedExceptionCount: read.droppedExceptionCount,
           deepSerializationSkipped: read.deepSerializationSkipped,
+          totalCount: bufferPagination.totalCount,
+          returnedCount: bufferPagination.returnedCount,
+          offset: bufferPagination.offset,
+          hasMore: bufferPagination.hasMore,
         };
 
         return {
@@ -307,8 +355,24 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         includeExceptions,
       });
 
+      // scalemaker fork: countOnly/limit/offset — 필터링 이후 messages 배열에 페이지네이션 적용
+      const { messages: filteredMessages, ...filteredRest } = filtered;
+      const snapshotPagination = paginateMessages(filteredMessages, {
+        limit: effectiveLimit,
+        offset: normalizedOffset,
+        countOnly: isCountOnly,
+      });
+      const paginatedResult = {
+        ...filteredRest,
+        ...(isCountOnly ? {} : { messages: snapshotPagination.messages }),
+        totalCount: snapshotPagination.totalCount,
+        returnedCount: snapshotPagination.returnedCount,
+        offset: snapshotPagination.offset,
+        hasMore: snapshotPagination.hasMore,
+      };
+
       return {
-        content: [{ type: 'text', text: JSON.stringify(filtered) }],
+        content: [{ type: 'text', text: JSON.stringify(paginatedResult) }],
         isError: false,
       };
     } catch (error: unknown) {

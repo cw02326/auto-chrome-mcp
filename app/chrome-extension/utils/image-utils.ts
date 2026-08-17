@@ -192,3 +192,93 @@ export async function compressImage(
 
   return { dataUrl, mimeType: format };
 }
+
+/**
+ * scalemaker fork: Claude 이미지 입력 최적 크기(긴 변 기준).
+ * 이보다 큰 이미지를 보내도 인식률은 좋아지지 않고 토큰만 늘어난다.
+ */
+export const MODEL_INPUT_MAX_LONG_EDGE = 1568;
+
+/** scalemaker fork: 모델 입력용으로 축소/압축된 이미지 정보 */
+export interface ModelInputImage {
+  /** 최종 data URL */
+  dataUrl: string;
+  /** 최종 MIME 타입 (보통 image/jpeg, PNG 가 더 작으면 image/png 유지) */
+  mimeType: string;
+  /** 최종 이미지 실제 픽셀 크기 */
+  width: number;
+  height: number;
+  /** 축소 전 원본 이미지 실제 픽셀 크기 */
+  originalWidth: number;
+  originalHeight: number;
+  /** 적용된 축소 비율 (1 이면 축소 없음) */
+  scale: number;
+}
+
+/** data URL 에서 MIME 과 base64 페이로드를 분리 (형식이 아니면 undefined) */
+function splitDataUrl(dataUrl: string): { mimeType: string; payload: string } | undefined {
+  const match = /^data:([^;,]+);base64,/.exec(dataUrl);
+  if (!match) return undefined;
+  return { mimeType: match[1], payload: dataUrl.slice(match[0].length) };
+}
+
+/**
+ * scalemaker fork: 이미지를 "모델에게 보내기 좋은" 크기/포맷으로 정규화한다.
+ *
+ * - 긴 변이 maxLongEdge 를 넘으면 비율을 유지한 채 축소한다(실제 비트맵 크기 기준으로 배율 계산).
+ * - 축소가 필요 없어도 기본적으로 JPEG(quality) 로 재인코딩한다.
+ *   단, 원본(예: 단색이 많은 PNG)이 더 작으면 원본을 그대로 쓴다.
+ *
+ * @param imageDataUrl 원본 이미지 data URL
+ * @param options maxLongEdge(기본 1568), quality(기본 0.8), format(기본 image/jpeg)
+ */
+export async function prepareImageForModelInput(
+  imageDataUrl: string,
+  options: {
+    maxLongEdge?: number;
+    quality?: number;
+    format?: 'image/jpeg' | 'image/webp';
+  } = {},
+): Promise<ModelInputImage> {
+  const { maxLongEdge = MODEL_INPUT_MAX_LONG_EDGE, quality = 0.8, format = 'image/jpeg' } = options;
+
+  const bitmap = await createImageBitmapFromUrl(imageDataUrl);
+  const originalWidth = bitmap.width;
+  const originalHeight = bitmap.height;
+  bitmap.close();
+
+  const longEdge = Math.max(originalWidth, originalHeight);
+  const scale = longEdge > maxLongEdge && longEdge > 0 ? maxLongEdge / longEdge : 1;
+
+  const compressed = await compressImage(imageDataUrl, { scale, quality, format });
+  // compressImage 와 동일한 반올림 규칙을 써야 실제 픽셀 크기와 메타데이터가 어긋나지 않는다
+  const width = Math.max(1, Math.round(originalWidth * scale));
+  const height = Math.max(1, Math.round(originalHeight * scale));
+
+  if (scale === 1) {
+    const original = splitDataUrl(imageDataUrl);
+    const encoded = splitDataUrl(compressed.dataUrl);
+    // 축소가 없었고 원본이 더 작으면(주로 PNG) 굳이 JPEG 로 바꾸지 않는다
+    if (original && encoded && original.payload.length < encoded.payload.length) {
+      return {
+        dataUrl: imageDataUrl,
+        mimeType: original.mimeType,
+        width: originalWidth,
+        height: originalHeight,
+        originalWidth,
+        originalHeight,
+        scale: 1,
+      };
+    }
+  }
+
+  return {
+    dataUrl: compressed.dataUrl,
+    mimeType: compressed.mimeType,
+    width,
+    height,
+    originalWidth,
+    originalHeight,
+    scale,
+  };
+}

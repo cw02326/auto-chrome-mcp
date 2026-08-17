@@ -7,7 +7,9 @@ import {
   createImageBitmapFromUrl,
   cropAndResizeImage,
   stitchImages,
-  compressImage,
+  prepareImageForModelInput,
+  MODEL_INPUT_MAX_LONG_EDGE,
+  type ModelInputImage,
 } from '../../../../utils/image-utils';
 import { screenshotContextManager } from '@/utils/screenshot-context';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -262,6 +264,18 @@ interface ScreenshotToolParams {
   // scalemaker fork: 캡처 결과를 chrome.downloads 로 자동 저장하기 위한 옵션
   saveToDownloads?: boolean;
   filename?: string;
+  /**
+   * scalemaker fork: true 면 모델 입력용 축소(긴 변 1568px)를 건너뛴다.
+   * 이미지는 여전히 MCP image 블록으로 반환된다. 화질이 꼭 필요할 때의 탈출구.
+   */
+  fullResolution?: boolean;
+  /**
+   * scalemaker fork(internal): true 면 텍스트 JSON 에도 base64Data 를 넣는다.
+   * MCP 스키마에는 노출하지 않는다 — 모델에게 base64 를 텍스트로 주는 것이 바로
+   * 이 수정이 없애려는 토큰 낭비이기 때문. 확장 내부에서 이미지 바이트가 필요한
+   * 호출자(record-replay 워크플로 등)만 사용한다.
+   */
+  includeBase64InText?: boolean;
 }
 
 /** Page details returned by screenshot-helper content script */
@@ -327,6 +341,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       savePng = true,
       saveToDownloads = false,
       filename,
+      fullResolution = false,
+      includeBase64InText = false,
     } = args;
 
     console.log(`Starting screenshot with options:`, args);
@@ -350,7 +366,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let finalImageDataUrl: string | undefined;
     let finalImageWidthCss: number | undefined;
     let finalImageHeightCss: number | undefined;
-    const results: any = { base64: null, fileSaved: false };
+    // scalemaker fork: results 에서 base64 필드를 제거했다. 이미지 바이트는 절대
+    // 텍스트/JSON 응답에 섞지 않고 MCP image 블록으로만 내보낸다(토큰 폭발 방지).
+    const results: any = { fileSaved: false };
     let originalScroll: { x: number; y: number } | null = null;
     let didPreparePage = false;
     let pageDetails: ScreenshotPageDetails | undefined;
@@ -462,6 +480,21 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         Object.assign(results, downloadsSaveResult);
       }
 
+      // scalemaker fork: 모델에게 돌려줄 이미지를 먼저 만든다.
+      // 좌표 컨텍스트(screenshotWidth/Height)에는 "모델이 실제로 보는 이미지의 픽셀 크기"를
+      // 기록해야 chrome_computer 의 좌표 역변환이 맞으므로, setContext 보다 앞에서 계산한다.
+      // 주의: savePng / saveToDownloads 는 이 축소본이 아니라 원본(finalImageDataUrl)을 저장한다.
+      let modelImage: ModelInputImage | undefined;
+      if (storeBase64 === true) {
+        modelImage = await prepareImageForModelInput(finalImageDataUrl, {
+          // fullResolution:true 면 축소를 건너뛴다(사실상 무제한 긴 변)
+          maxLongEdge:
+            fullResolution === true ? Number.MAX_SAFE_INTEGER : MODEL_INPUT_MAX_LONG_EDGE,
+          quality: 0.8,
+          format: 'image/jpeg',
+        });
+      }
+
       // 2. Process output
       // Update screenshot context for coordinate scaling by tools like chrome_computer
       try {
@@ -473,11 +506,16 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             // ignore
           }
           // Use pageDetails if available, otherwise fall back to final image dimensions
+          // scalemaker fork: viewportWidth/Height 는 예전과 완전히 동일하게 "원본 CSS 뷰포트" 크기를 기록한다.
           const viewportWidth = pageDetails?.viewportWidth ?? finalImageWidthCss;
           const viewportHeight = pageDetails?.viewportHeight ?? finalImageHeightCss;
+          // scalemaker fork: 좌표 기준 프레임은 모델에게 넘어간 이미지의 실제 픽셀 크기.
+          // (이미지를 반환하지 않는 경로에서는 기존과 동일하게 CSS 기준 크기를 유지)
+          const screenshotWidth = modelImage ? modelImage.width : finalImageWidthCss;
+          const screenshotHeight = modelImage ? modelImage.height : finalImageHeightCss;
           screenshotContextManager.setContext(tab.id!, {
-            screenshotWidth: finalImageWidthCss,
-            screenshotHeight: finalImageHeightCss,
+            screenshotWidth,
+            screenshotHeight,
             viewportWidth,
             viewportHeight,
             devicePixelRatio: pageDetails?.devicePixelRatio,
@@ -487,27 +525,56 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       } catch (e) {
         console.warn('Failed to set screenshot context:', e);
       }
-      if (storeBase64 === true) {
-        // Compress image for base64 output to reduce size
-        const compressed = await compressImage(finalImageDataUrl, {
-          scale: 0.7, // Reduce dimensions by 30%
-          quality: 0.8, // 80% quality for good balance
-          format: 'image/jpeg', // JPEG for better compression
-        });
+      if (storeBase64 === true && modelImage) {
+        // scalemaker fork: 이미지를 텍스트(JSON) 안에 base64 로 넣어 돌려주면 MCP 클라이언트가
+        // 이미지 1장에 텍스트 토큰 10만~30만개를 지불한다. 정식 MCP image 블록으로 분리하고
+        // Claude 입력 최적 크기(긴 변 1568px)로 축소해 ~1-2k 토큰 수준으로 낮춘다.
+        const base64Data = modelImage.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+        const isDownscaled = modelImage.scale < 1;
 
-        // Include base64 data in response (without prefix)
-        const base64Data = compressed.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
-        results.base64 = base64Data;
+        // imageScale = 반환 이미지 1px 이 CSS 픽셀 몇 개에 해당하는지의 역수.
+        // 즉 imageScale = (반환 이미지 폭 px) / (이미지가 덮는 CSS 폭 px).
+        // 뷰포트 캡처면 분모가 곧 CSS 뷰포트 폭이므로 "이미지 vs 뷰포트" 배율이 된다.
+        // 수동 환산: cssX = imageX / imageScale
+        const imageScale =
+          typeof finalImageWidthCss === 'number' && finalImageWidthCss > 0
+            ? Number((modelImage.width / finalImageWidthCss).toFixed(4))
+            : 1;
+
         return {
           content: [
             {
               type: 'text',
-              // scalemaker fork: saveToDownloads 결과(있다면)를 base64 응답에도 동일하게 포함
+              // scalemaker fork: 메타데이터만 텍스트로. base64 는 여기 절대 넣지 않는다.
+              // saveToDownloads 결과(있다면)는 예전과 동일하게 포함한다.
               text: JSON.stringify({
-                base64Data,
-                mimeType: compressed.mimeType,
+                success: true,
+                message: `Screenshot [${name}] captured successfully`,
+                tabId: tab.id,
+                url: tab.url,
+                name,
+                mimeType: modelImage.mimeType,
+                width: modelImage.width,
+                height: modelImage.height,
+                imageScale,
+                cssWidth: finalImageWidthCss,
+                cssHeight: finalImageHeightCss,
+                downscaled: isDownscaled,
+                ...(isDownscaled
+                  ? { downscaledFrom: `${modelImage.originalWidth}x${modelImage.originalHeight}` }
+                  : {}),
+                note:
+                  'The image is attached as an MCP image content block (no base64 in this text). ' +
+                  'Coordinates you read off the image are in image pixels; chrome_computer converts them ' +
+                  'automatically via the screenshot context. To convert manually: cssX = imageX / imageScale.',
+                ...(includeBase64InText === true ? { base64Data } : {}),
                 ...downloadsSaveResult,
               }),
+            },
+            {
+              type: 'image',
+              data: base64Data,
+              mimeType: modelImage.mimeType,
             },
           ],
           isError: false,

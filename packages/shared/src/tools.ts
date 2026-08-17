@@ -41,6 +41,10 @@ export const TOOL_NAMES = {
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
     GIF_RECORDER: 'chrome_gif_recorder',
     BATCH: 'chrome_batch',
+    SET_WORK_TAB: 'chrome_set_work_tab',
+    WAIT_FOR: 'chrome_wait_for',
+    SCROLL_COLLECT: 'chrome_scroll_collect',
+    EXTRACT: 'chrome_extract',
   },
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
@@ -77,8 +81,120 @@ export const TOOL_SCHEMAS: Tool[] = [
     },
   },
   {
+    name: TOOL_NAMES.BROWSER.EXTRACT,
+    description:
+      'Extract ONLY the fields you need from the page via CSS selectors — far cheaper than reading the whole page when you know what you want (e.g. price, title, links). Deterministic and precise. Prefer this over chrome_get_web_content/chrome_read_page for targeted scraping.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        fields: {
+          type: 'object',
+          description:
+            'Map of fieldName → CSS selector (string) or { selector, attr?, all? }. Default value = trimmed innerText of first match; attr returns that attribute (href/src resolve to absolute URLs); all:true returns an array over every match (max 100, 2000 chars each). Max 20 fields.',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Optional frame id to extract from a specific iframe.',
+        },
+      },
+      required: ['fields'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.WAIT_FOR,
+    description:
+      'Wait until the page is actually ready before acting — prevents "clicked/read too early" failures after navigation, clicks, or AJAX updates. Conditions (AND-combined, at least one required): selector appears/visible/hidden, text appears, document ready, or network idle. A timeout returns success:false with the observed state (not an error) so you can decide next steps.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        selector: { type: 'string', description: 'CSS selector to wait for' },
+        state: {
+          type: 'string',
+          enum: ['visible', 'attached', 'hidden'],
+          description: "Selector condition (default 'visible'). 'hidden' = absent or not visible.",
+        },
+        text: { type: 'string', description: 'Wait until this text appears in the page body' },
+        documentReady: {
+          type: 'boolean',
+          description: "Wait for document.readyState === 'complete'",
+        },
+        networkIdleMs: {
+          type: 'number',
+          description:
+            'Wait until the tab has no in-flight network requests for this many ms (e.g. 500)',
+        },
+        timeoutMs: { type: 'number', description: 'Max wait (default 15000, max 60000)' },
+        pollMs: { type: 'number', description: 'Poll interval (default 250, min 100)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SCROLL_COLLECT,
+    description:
+      'Collect content from infinite-scroll / lazy-loaded pages in ONE call: repeatedly scrolls to the bottom (window or a container element), waits for new content, and returns the accumulated text or links. Stops when the page stops growing, stopText appears, maxScrolls or maxChars is reached.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        maxScrolls: { type: 'number', description: 'Max scroll passes (default 10, max 30)' },
+        delayMs: {
+          type: 'number',
+          description: 'Wait after each scroll for content to load (default 700, 200–3000)',
+        },
+        containerSelector: {
+          type: 'string',
+          description: 'Scroll this element instead of the window (e.g. a feed container)',
+        },
+        stopText: { type: 'string', description: 'Stop early when this text appears' },
+        collect: {
+          type: 'string',
+          enum: ['text', 'links'],
+          description: "What to return (default 'text'). 'links' = deduped [{text, href}]",
+        },
+        maxChars: { type: 'number', description: 'Output cap (default 100000, max 300000)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SET_WORK_TAB,
+    description:
+      "Retarget this session's default work tab WITHOUT activating/focusing anything (unlike chrome_switch_tab). Use when a tool result reports new_tabs_opened (a popup/new tab appeared, e.g. OAuth login) and you want subsequent tabId-less tool calls to target it — then call again with the original tabId to return. No args = report current work tab. clear:true = unset.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            "Tab id to make this session's work tab. Omit to just query the current one.",
+        },
+        clear: {
+          type: 'boolean',
+          description: 'Unset the session work tab (default false)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
-    description: 'Get all currently open browser windows and tabs',
+    description:
+      'Get all currently open browser windows and tabs. Marks MCP session work tabs (mcpWorkTabSessions), the dedicated MCP work window (isMcpWorkWindow), and tabs recently spawned by page actions such as popups (recentlySpawned with openerTabId).',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -231,6 +347,21 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           description: 'Target window ID to pick active tab when tabId is omitted.',
         },
+        allFrames: {
+          type: 'boolean',
+          description:
+            'Also collect content from iframes (merged, annotated with frameId — pair frame-local refs with that frameId). Default: false',
+        },
+        diff: {
+          type: 'boolean',
+          description:
+            'When true (default), returns {unchanged:true} instead of the full body if the page content is identical to your previous read — reuse the earlier content. Pass false to force full re-send.',
+        },
+        compact: {
+          type: 'boolean',
+          description:
+            'Lossless output compaction (collapse empty wrappers etc., ~30-50% smaller). Default: true. Pass false for the verbose format.',
+        },
       },
       required: [],
     },
@@ -247,6 +378,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description:
             'Avoid focusing/activating tab/window for certain operations (best-effort). Default: false',
+        },
+        fullResolution: {
+          type: 'boolean',
+          description:
+            'For action="screenshot"/"zoom": skip the ≤1568px downscale of the returned image (default: false)',
         },
         action: {
           type: 'string',
@@ -515,7 +651,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         storeBase64: {
           type: 'boolean',
           description:
-            'return screenshot in base64 format (default: false) if you want to see the page, recommend set this to be true',
+            'Return the screenshot as an MCP image content block (default: false). Recommended when you want to SEE the page. The image is auto-downscaled to ≤1568px long edge (metadata reports imageScale vs the CSS viewport for coordinate math); pass fullResolution:true to skip downscaling.',
+        },
+        fullResolution: {
+          type: 'boolean',
+          description: 'Skip the ≤1568px downscale for the returned image (default: false)',
         },
         fullPage: {
           type: 'boolean',
@@ -611,6 +751,16 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'CSS selector to get content from a specific element. If provided, only content from this element will be returned',
         },
+        raw: {
+          type: 'boolean',
+          description:
+            'Text mode returns reader-view content by default (navigation/footer/cookie-banner noise stripped, main content kept — fullTextChars vs returnedChars reported). Pass true for the unfiltered full text. Default: false',
+        },
+        diff: {
+          type: 'boolean',
+          description:
+            'When true (default), returns {unchanged:true} instead of the body if identical to your previous read of this tab — reuse the earlier content. Pass false to force full re-send.',
+        },
       },
       required: [],
     },
@@ -694,6 +844,20 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
         },
+        limit: {
+          type: 'number',
+          description:
+            'action="stop": return at most this many captured requests (default 100; paginate with offset)',
+        },
+        offset: {
+          type: 'number',
+          description: 'action="stop": skip this many captured requests (default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description:
+            'action="stop": return only counts/summary without the request array (default: false)',
+        },
       },
       required: ['action'],
     },
@@ -741,6 +905,18 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description:
             "When set to true, filters out URLs that are currently open in any browser tab. Useful for finding pages you've visited but don't have open anymore. (default: false)",
+        },
+        limit: {
+          type: 'number',
+          description: 'Return at most this many entries (default 100; pagination with offset)',
+        },
+        offset: {
+          type: 'number',
+          description: 'Skip this many entries before returning (default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description: 'Return only totalCount without the entries array (default: false)',
         },
       },
       required: [],
@@ -1169,6 +1345,14 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           description:
             'Maximum number of console messages to capture in snapshot mode (default: 100). If limit is provided, it takes precedence.',
+        },
+        offset: {
+          type: 'number',
+          description: 'Skip this many messages before returning (pagination; default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description: 'Return only counts/summary without the message array (default: false)',
         },
         mode: {
           type: 'string',

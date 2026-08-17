@@ -331,6 +331,63 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     return element === elementAtPoint || element.contains(elementAtPoint);
   }
 
+  /**
+   * scalemaker fork: iframe 탐색용 probe.
+   * 부수효과 없이 "이 프레임에 해당 셀렉터/ref 요소가 있는가"만 확인한다.
+   * background 의 frame-resolver 가 각 프레임에 이 메시지를 보내 대상 프레임을 고른다.
+   * 주의: 응답에 `error` 키를 쓰면 sendMessageToTab 이 throw 하므로 probeError 를 쓴다.
+   */
+  function probeTarget(selector, ref, isXPath) {
+    try {
+      let element = null;
+      if (ref && typeof ref === 'string') {
+        try {
+          const map = window.__claudeElementMap;
+          const weak = map && map[ref];
+          const target = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+          element = target instanceof Element ? target : null;
+        } catch (e) {
+          element = null;
+        }
+      } else if (selector && typeof selector === 'string') {
+        if (isXPath) {
+          try {
+            const result = document.evaluate(
+              selector,
+              document,
+              null,
+              XPathResult.FIRST_ORDERED_NODE_TYPE,
+              null,
+            );
+            const node = result && result.singleNodeValue;
+            element = node && node.nodeType === 1 ? node : null;
+          } catch (e) {
+            element = null;
+          }
+        } else {
+          element = document.querySelector(selector);
+        }
+      }
+
+      return {
+        success: true,
+        found: !!element,
+        visible: element ? isElementVisible(element) : false,
+        tagName: element ? element.tagName : null,
+        frameUrl: location.href,
+      };
+    } catch (e) {
+      return {
+        success: true,
+        found: false,
+        visible: false,
+        tagName: null,
+        frameUrl: location.href,
+        probeError: String((e && e.message) || e),
+      };
+    }
+  }
+
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'fillElement') {
@@ -344,6 +401,10 @@ if (window.__FILL_HELPER_INITIALIZED__) {
       return true; // Indicates async response
     } else if (request.action === 'chrome_fill_or_select_ping') {
       sendResponse({ status: 'pong' });
+      return false;
+    } else if (request.action === 'chrome_fill_or_select_probe_selector') {
+      // scalemaker fork: iframe 대상 프레임 탐색용 probe (조회 전용)
+      sendResponse(probeTarget(request.selector, request.ref, request.isXPath));
       return false;
     }
   });

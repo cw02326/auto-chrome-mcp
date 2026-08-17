@@ -78,6 +78,7 @@ if (typeof globalThis.chrome === 'undefined') {
       onCommitted: { addListener: vi.fn(), removeListener: vi.fn() },
       onDOMContentLoaded: { addListener: vi.fn(), removeListener: vi.fn() },
       onCompleted: { addListener: vi.fn(), removeListener: vi.fn() },
+      onCreatedNavigationTarget: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     debugger: {
       onEvent: { addListener: vi.fn(), removeListener: vi.fn() },

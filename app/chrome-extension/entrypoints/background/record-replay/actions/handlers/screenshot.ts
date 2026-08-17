@@ -63,6 +63,9 @@ export const screenshotHandler: ActionHandler<'screenshot'> = {
       args: {
         name: 'workflow',
         storeBase64: true,
+        // scalemaker fork: 스크린샷 도구는 이제 base64 를 MCP image 블록으로만 내보낸다.
+        // 워크플로는 이미지 바이트를 변수에 저장해야 하므로(모델 입력이 아님) 내부 플래그로 텍스트 동봉을 요청한다.
+        includeBase64InText: true,
         fullPage: action.params.fullPage === true,
         selector,
         tabId,

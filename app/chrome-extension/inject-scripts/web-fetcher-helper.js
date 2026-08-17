@@ -2718,17 +2718,26 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     // Get text content
     else if (request.action === 'getTextContent') {
       try {
+        // scalemaker fork (T5): readerMode 는 배경 스크립트가 명시적으로 켤 때만 동작한다.
+        // (content-indexer 등 다른 호출자는 플래그를 보내지 않으므로 기존 동작 유지)
+        const readerMode = request.readerMode === true;
+        const fullText = (document.body && document.body.innerText) || '';
+        const fullTextChars = fullText.length;
+
         // If selector is specified, only get content from the matching element
         if (request.selector) {
           const element = document.querySelector(request.selector);
           if (element) {
-            // Directly get the text content of the element
-            const textContent = element.innerText;
+            // reader 모드에서는 선택 요소 안의 보일러플레이트(nav/aside/광고 등)만 제거한다.
+            const textContent = readerMode ? readerTextOf(element) : element.innerText;
 
             sendResponse({
               success: true,
               textContent: textContent,
               selector: request.selector,
+              mode: readerMode ? 'reader' : 'raw',
+              fullTextChars: fullTextChars,
+              returnedChars: textContent.length,
             });
           } else {
             throw new Error(`No element found matching selector: ${request.selector}`);
@@ -2738,44 +2747,87 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
           const documentClone = document.cloneNode(true);
 
           const reader = new Readability(documentClone);
-          const article = reader.parse();
+          let article = null;
+          try {
+            article = reader.parse();
+          } catch (readabilityError) {
+            console.warn('Readability parse failed:', readabilityError);
+            article = null;
+          }
 
+          // 기존(raw) 경로가 만들던 본문 — reader 모드에서도 후보 중 하나로 재사용한다.
+          let readabilityText = '';
           if (article && article.textContent) {
-            // Get metadata
-            const metadata = extractPageMetadata();
-
-            // Get iframe content if available
             const iframeContent = extractIframeContent();
-
-            // Combine content
             let fullContent = article.textContent;
             if (iframeContent && iframeContent.trim().length > config.minTextLength) {
               fullContent += '\n\n--- Embedded Content ---\n\n' + iframeContent;
             }
+            readabilityText = cleanContent(fullContent);
+          }
 
-            // Clean content
-            fullContent = cleanContent(fullContent);
+          const articlePayload =
+            article && article.textContent
+              ? {
+                  title: article.title,
+                  byline: article.byline,
+                  siteName: article.siteName,
+                  excerpt: article.excerpt,
+                  lang: article.lang,
+                  content: article.content, // HTML content
+                }
+              : null;
 
-            sendResponse({
-              success: true,
-              textContent: fullContent,
-              article: {
-                title: article.title,
-                byline: article.byline,
-                siteName: article.siteName,
-                excerpt: article.excerpt,
-                lang: article.lang,
-                content: article.content, // HTML content
-              },
-              metadata: metadata,
-            });
+          if (!readerMode) {
+            // raw: 오늘과 완전히 동일한 본문 (부가 계측 필드만 추가)
+            if (readabilityText) {
+              sendResponse({
+                success: true,
+                textContent: readabilityText,
+                article: articlePayload,
+                metadata: extractPageMetadata(),
+                mode: 'raw',
+                fullTextChars: fullTextChars,
+                returnedChars: readabilityText.length,
+              });
+            } else {
+              sendResponse({
+                success: true,
+                textContent: fullText,
+                fallback: true,
+                mode: 'raw',
+                fullTextChars: fullTextChars,
+                returnedChars: fullTextChars,
+              });
+            }
           } else {
-            // Fallback to basic extraction
-            const textContent = document.body.innerText;
+            // reader: 본문 루트 선택 + 보일러플레이트 제거 결과와 Readability 결과 중 하나를 고른다.
+            const readerResult = extractReaderText(fullTextChars);
+            let textContent;
+            let source;
+
+            if (readabilityText && readabilityText.length >= 0.3 * readerResult.text.length) {
+              // Readability 가 본문의 30% 이상을 살렸다면 가장 깔끔하고 짧은 결과다.
+              textContent = readabilityText;
+              source = 'readability';
+            } else if (readerResult.text) {
+              textContent = readerResult.text;
+              source = readerResult.rootDesc;
+            } else {
+              textContent = readabilityText || fullText;
+              source = readabilityText ? 'readability' : 'full-text';
+            }
+
             sendResponse({
               success: true,
               textContent: textContent,
-              fallback: true,
+              article: articlePayload,
+              metadata: extractPageMetadata(),
+              mode: 'reader',
+              readerSource: source,
+              readerFallback: readerResult.fallback || undefined,
+              fullTextChars: fullTextChars,
+              returnedChars: textContent.length,
             });
           }
         }
@@ -2928,6 +2980,288 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       .replace(/\n\s*\n/g, '\n\n')
       .trim()
       .substring(0, config.maxTotalLength);
+  }
+
+  /*
+   * ---------------------------------------------------------------------------
+   * scalemaker fork (T5): reader 모드 본문 추출
+   *
+   * 목적: get_web_content 기본 응답에서 nav/header/footer/광고/쿠키 배너 같은 보일러플레이트를
+   * 걷어내 토큰을 줄인다. 원문 그대로가 필요하면 도구 인자 raw:true 로 언제든 되돌릴 수 있다.
+   *
+   * 보수적 설계:
+   *  1) 본문 루트를 먼저 고른다 — article(단일) → main → [role=main] → 최대 텍스트 블록.
+   *  2) 그 루트를 걸으며 제외 셀렉터/비표시 요소를 건너뛰고 텍스트를 모은다.
+   *  3) 결과가 전체 페이지 텍스트의 30% 미만이면 루트 선택이 틀렸다고 보고
+   *     body 전체 - 제외 요소로 폴백한다 (내용 유실 방지).
+   * ---------------------------------------------------------------------------
+   */
+
+  /** 본문에서 제외할 요소들. article/main 안의 header/footer 는 본문 일부이므로 남긴다. */
+  const READER_EXCLUDE_SELECTORS = [
+    'nav',
+    'header:not(article header):not(main header)',
+    'footer:not(article footer):not(main footer)',
+    'aside',
+    '[role="navigation"]',
+    '[role="banner"]',
+    '[role="contentinfo"]',
+    '[role="complementary"]',
+    '[aria-hidden="true"]',
+    '[hidden]',
+    'script',
+    'style',
+    'noscript',
+    'template',
+    '[class*="cookie" i]',
+    '[id*="cookie" i]',
+    '[class*="consent" i]',
+    '[id*="consent" i]',
+    '[class*="banner" i][class*="consent" i]',
+    '[class*="ad-" i]:not(article *)',
+    '[class*="advertis" i]:not(article *)',
+    'ins.adsbygoogle',
+    'iframe[src*="ads"]',
+    'iframe[src*="doubleclick"]',
+    'iframe[src*="googlesyndication"]',
+  ];
+
+  /**
+   * 제외 대상 요소 집합. 셀렉터를 하나씩 적용해, 브라우저가 지원하지 않는 셀렉터가 섞여도
+   * 나머지 제외 규칙은 계속 동작하게 한다.
+   * @param {Element} root
+   * @returns {Set<Element>}
+   */
+  function collectReaderExcluded(root) {
+    const excluded = new Set();
+    if (!root || typeof root.querySelectorAll !== 'function') return excluded;
+    for (const sel of READER_EXCLUDE_SELECTORS) {
+      let found;
+      try {
+        found = root.querySelectorAll(sel);
+      } catch (_) {
+        continue; // 지원하지 않는 셀렉터는 건너뛴다
+      }
+      for (let i = 0; i < found.length; i++) excluded.add(found[i]);
+    }
+    return excluded;
+  }
+
+  /** 텍스트를 만들지 않는 태그 (제외 셀렉터와 별개로 항상 건너뜀) */
+  const READER_SKIP_TAGS = new Set([
+    'SCRIPT',
+    'STYLE',
+    'NOSCRIPT',
+    'TEMPLATE',
+    'SVG',
+    'CANVAS',
+    'IFRAME',
+    'OBJECT',
+    'EMBED',
+  ]);
+
+  /** 앞뒤로 줄바꿈을 넣을 블록 태그 */
+  const READER_BLOCK_TAGS = new Set([
+    'ADDRESS',
+    'ARTICLE',
+    'ASIDE',
+    'BLOCKQUOTE',
+    'BR',
+    'DD',
+    'DIV',
+    'DL',
+    'DT',
+    'FIELDSET',
+    'FIGCAPTION',
+    'FIGURE',
+    'FOOTER',
+    'FORM',
+    'H1',
+    'H2',
+    'H3',
+    'H4',
+    'H5',
+    'H6',
+    'HEADER',
+    'HR',
+    'LI',
+    'MAIN',
+    'NAV',
+    'OL',
+    'P',
+    'PRE',
+    'SECTION',
+    'TABLE',
+    'TD',
+    'TH',
+    'TR',
+    'UL',
+  ]);
+
+  /** display:none 등 화면에 없는 요소인지 (레이아웃 캐시를 쓰므로 반복 호출도 저렴) */
+  function isRenderedForReader(el) {
+    if (el.hidden) return false;
+    try {
+      if (typeof el.getClientRects === 'function' && el.getClientRects().length === 0) {
+        // display:contents 는 박스가 없지만 자식은 렌더링되므로 살려둔다.
+        const style = window.getComputedStyle(el);
+        if (!style || style.display !== 'contents') return false;
+      }
+    } catch (_) {
+      // 계산 실패 시에는 내용을 잃지 않도록 포함시킨다.
+    }
+    return true;
+  }
+
+  function normalizeReaderText(text) {
+    return text
+      .replace(/[ \t\u00a0]+/g, ' ')
+      .replace(/ ?\n ?/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .substring(0, config.maxTotalLength);
+  }
+
+  /**
+   * root 아래의 텍스트를 모으되 제외 셀렉터/비표시 요소는 건너뛴다.
+   * DOM 을 변경하지 않는 읽기 전용 순회다.
+   * @param {Element} root
+   * @returns {string}
+   */
+  function readerTextOf(root) {
+    if (!root) return '';
+
+    const excluded = collectReaderExcluded(root);
+
+    const parts = [];
+    const visit = (node) => {
+      if (node.nodeType === 3) {
+        const t = node.nodeValue;
+        if (t && t.trim()) parts.push(t);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (READER_SKIP_TAGS.has(node.tagName)) return;
+      if (excluded.has(node)) return;
+      if (!isRenderedForReader(node)) return;
+
+      const block = READER_BLOCK_TAGS.has(node.tagName);
+      if (block) parts.push('\n');
+      const kids = node.childNodes;
+      for (let i = 0; i < kids.length; i++) visit(kids[i]);
+      if (block) parts.push('\n');
+    };
+
+    visit(root);
+    return normalizeReaderText(parts.join(''));
+  }
+
+  /**
+   * 최대 텍스트 블록 휴리스틱: 보일러플레이트를 뺀 텍스트 길이를 한 번의 순회로 계산한 뒤,
+   * 전체의 90% 이상을 담은 요소 중 가장 깊은(가장 구체적인) 요소를 본문 컨테이너로 본다.
+   * @returns {Element|null}
+   */
+  function largestReaderTextBlock(body) {
+    const excluded = collectReaderExcluded(body);
+
+    const lengths = new Map();
+    const depths = new Map();
+
+    const compute = (el, depth) => {
+      if (READER_SKIP_TAGS.has(el.tagName) || excluded.has(el)) return 0;
+      let len = 0;
+      const kids = el.childNodes;
+      for (let i = 0; i < kids.length; i++) {
+        const k = kids[i];
+        if (k.nodeType === 3) {
+          const t = k.nodeValue;
+          if (t) len += t.trim().length;
+        } else if (k.nodeType === 1) {
+          len += compute(k, depth + 1);
+        }
+      }
+      lengths.set(el, len);
+      depths.set(el, depth);
+      return len;
+    };
+
+    const total = compute(body, 0);
+    if (total <= 0) return null;
+
+    let best = null;
+    let bestDepth = -1;
+    lengths.forEach((len, el) => {
+      if (el === body) return;
+      if (len < total * 0.9) return;
+      const depth = depths.get(el) || 0;
+      if (depth > bestDepth) {
+        best = el;
+        bestDepth = depth;
+      }
+    });
+
+    return best;
+  }
+
+  /**
+   * 본문 루트 후보 선택. 목록 페이지처럼 article 이 여러 개면 의미 태그를 신뢰하지 않는다.
+   * @returns {{el: Element, how: string}|null}
+   */
+  function pickReaderRoot() {
+    const body = document.body;
+    if (!body) return null;
+
+    let articles = [];
+    try {
+      articles = Array.prototype.slice.call(document.querySelectorAll('article'));
+    } catch (_) {
+      articles = [];
+    }
+    if (articles.length === 1 && (articles[0].textContent || '').trim().length > 0) {
+      return { el: articles[0], how: 'article' };
+    }
+
+    for (const sel of ['main', '[role="main"]']) {
+      let el = null;
+      try {
+        el = document.querySelector(sel);
+      } catch (_) {
+        el = null;
+      }
+      if (el && (el.textContent || '').trim().length > 0) return { el, how: sel };
+    }
+
+    const largest = largestReaderTextBlock(body);
+    return largest
+      ? { el: largest, how: 'largest-text-block' }
+      : { el: body, how: 'body-minus-boilerplate' };
+  }
+
+  /**
+   * reader 모드 본문 추출 (루트 선택 → 제외 순회 → 30% 미만이면 body 폴백).
+   * @param {number} fullTextChars - 페이지 전체 innerText 길이
+   * @returns {{text: string, rootDesc: string, fallback: string|null}}
+   */
+  function extractReaderText(fullTextChars) {
+    const body = document.body;
+    if (!body) return { text: '', rootDesc: 'none', fallback: 'no_body' };
+
+    const picked = pickReaderRoot();
+    let rootDesc = picked ? picked.how : 'body-minus-boilerplate';
+    let text = picked && picked.el ? readerTextOf(picked.el) : '';
+    let fallback = null;
+
+    // 루트를 잘못 골랐을 가능성 — 본문이 전체의 30% 미만이면 body 전체에서 보일러플레이트만 뺀다.
+    if (text.length < fullTextChars * 0.3) {
+      const bodyText = readerTextOf(body);
+      if (bodyText.length > text.length) {
+        text = bodyText;
+        rootDesc = 'body-minus-boilerplate';
+        fallback = 'root_below_30pct';
+      }
+    }
+
+    return { text, rootDesc, fallback };
   }
 
   /**

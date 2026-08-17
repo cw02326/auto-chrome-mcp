@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.0] — Auto Chrome MCP (2026-08-17)
+
+### Added — 팝업 인지 · 신뢰성 (F1–F7)
+
+- **Popup/new-tab awareness**: tool calls that spawn new tabs/popup windows (OAuth logins, target=\_blank) now report `new_tabs_opened` in the result; new `chrome_set_work_tab` retargets the session work tab without focusing anything; `get_windows_and_tabs` marks work tabs, the MCP window, and recently spawned tabs.
+- **`chrome_wait_for`**: wait for selector/text/document-ready/network-idle before acting (timeout returns observed state, not an error).
+- **Frame-aware interaction**: click/fill auto-search iframes when the selector isn't in the top frame (probe protocol, first-found wins, frameId reported); `read_page`/interactive-elements gain `allFrames`.
+- **Failure screenshots**: failed tool calls attach a downscaled JPEG of the target tab (`errorScreenshotOnFailure` to disable).
+- **Login-redirect detection**: `login_required_suspected` warning when the target tab lands on a login page mid-call.
+- **Download awareness**: downloads started during a call are reported (`downloads_started`).
+- **Popup focus return**: popup windows opened by MCP work tabs are blurred so the user's window regains OS focus.
+- **`chrome_scroll_collect`**: one-call infinite-scroll content collection (virtualized-list overlap handling included).
+
+### Added — 토큰 절감 (T1–T7, 품질 무손실)
+
+- **Screenshots as MCP image blocks**: `storeBase64` no longer returns base64 inside text (was 100k+ text tokens per shot); images are auto-downscaled to ≤1568px long edge with exact `imageScale` metadata (also fixes a long-standing coordinate-mapping drift on downscaled screenshots); `fullResolution` opt-out. computer zoom had the same leak — fixed.
+- **Diff mode** (`diff`, default on): `read_page`/`get_web_content` return `{unchanged:true}` instead of re-sending identical content (ref map stays fresh).
+- **`chrome_extract`**: CSS-selector field extraction — return only the values you need instead of full-page reads.
+- **Reader mode** (`raw:false` default): `get_web_content` strips nav/footer/cookie/ad boilerplate and no longer dumps full body text when Readability fails.
+- **Lossless a11y-tree compaction** (`compact`, default on): 35–50% smaller `read_page` output (wrapper collapse, dedup, notation shortening; refs/roles/states preserved).
+- **Pagination**: console/network-capture/history gain `limit`/`offset`/`countOnly`.
+- Failure screenshots are downscaled ~40% further.
+
 ## [v1.1.0] — scalemaker fork (2026-08-17)
 
 ### Added — 백그라운드 작업 모드 (non-interference)
