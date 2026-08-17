@@ -6,9 +6,9 @@
   }
   body { font-size: 11pt; line-height: 1.65; }
   code, pre { font-family: Consolas, "Malgun Gothic", monospace !important; }
-  pre { padding: 12px 14px; margin: 8px 0 12px 0; line-height: 1.45; font-size: 10.5pt;
+  pre { padding: 12px 14px; margin: 8px 0 12px 0; line-height: 1.45; font-size: 9pt;
         background: #1e293b !important; color: #e2e8f0 !important;
-        border: 1px solid #0f172a; border-radius: 8px; }
+        border: 1px solid #0f172a; border-radius: 8px; white-space: pre !important; }
   pre code { background: none !important; color: #e2e8f0 !important; }
   h1 { font-size: 20pt; margin: 0 0 4px 0; letter-spacing: -0.5px; }
   h2 { font-size: 14.5pt; margin: 24px 0 8px 0; padding: 6px 12px;
