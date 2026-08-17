@@ -1,6 +1,6 @@
 # chrome-mcp-scalemaker-shared
 
-Internal shared types, constants, and message contracts used by the [mcp-chrome-scalemaker](https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker) Chrome extension and the [`mcp-chrome-scalemaker-bridge`](https://www.npmjs.com/package/mcp-chrome-scalemaker-bridge) Node.js Native Messaging host.
+Internal shared types, constants, and message contracts used by the [mcp-chrome-scalemaker](https://github.com/cw02326/auto-chrome-mcp) Chrome extension and the [`mcp-chrome-scalemaker-bridge`](https://www.npmjs.com/package/mcp-chrome-scalemaker-bridge) Node.js Native Messaging host.
 
 **Not intended for direct end-user consumption.** Public APIs are not guaranteed stable across minor versions — pin a specific version if you depend on it.
 
@@ -20,7 +20,7 @@ Subpath exports: `constants`, `types`, `tools`, `rr-graph`, `step-types`, `label
 
 ## Links
 
-- Source & issues: <https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker>
+- Source & issues: <https://github.com/cw02326/auto-chrome-mcp>
 - Bridge package: <https://www.npmjs.com/package/mcp-chrome-scalemaker-bridge>
 
 ## License

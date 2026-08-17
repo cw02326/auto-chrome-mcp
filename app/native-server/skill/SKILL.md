@@ -201,7 +201,7 @@ doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
 
 1. `mcp-chrome-scalemaker-bridge report --copy` 실행 (사용자 환경 정보 + doctor
    결과를 마크다운으로 클립보드에 복사. username/path/token 자동 redact)
-2. GitHub Issue 생성: https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker/issues/new
+2. GitHub Issue 생성: https://github.com/cw02326/auto-chrome-mcp/issues/new
 3. 사용자에게 "클립보드에 진단 리포트가 있으니 issue 본문에 붙여넣기" 안내
 
 **옵션:**

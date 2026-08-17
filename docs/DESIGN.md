@@ -2,7 +2,7 @@
 
 > **상태**: 디자인 합의 완료, implementation 미착수
 > **베이스**: [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) `master @ commit TBD` (11.7k stars, TS/Vue monorepo)
-> **fork repo**: `scalemaker-ship-it/mcp-chrome-scalemaker` (예정, 별도 npm 패키지 + GitHub Releases 사이드로드 extension)
+> **fork repo**: `cw02326/auto-chrome-mcp` (예정, 별도 npm 패키지 + GitHub Releases 사이드로드 extension)
 > **brainstorming 일자**: 2026-05-25
 > **합의 결정 5개**: (1) scope = L1+L2+L3+L4 풀패키지 / (2) Playwright 진입 = Chrome Launcher 별도 / (3) Force Reconnect = A→B→C 점진 escalation / (4) Playwright 미러 = 33 도구 전체 (native-only stub) / (5) fork 위치 = GitHub 별도 repo + npm 배포
 
@@ -475,7 +475,7 @@ extension popup → "Open Diagnostic Report" 클릭 → 별창 (`chrome-extensio
 ### Repo 초기 구조
 
 ```
-mcp-chrome-scalemaker/                       ← scalemaker-ship-it/mcp-chrome-scalemaker
+mcp-chrome-scalemaker/                       ← cw02326/auto-chrome-mcp
 ├── README.md                               ← fork 의 motivation + 5 fix + 진입 방법
 ├── UPSTREAM_DIFF.md                        ← 우리 fork 가 upstream 대비 추가한 6 카테고리 명세
 ├── app/

@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker.git",
+    "url": "https://github.com/cw02326/auto-chrome-mcp.git",
     "directory": "packages/chrome-launcher"
   },
   "engines": {

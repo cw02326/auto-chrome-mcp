@@ -5,7 +5,7 @@
   "author": "hangye (upstream), scalemaker-ship-it (scalemaker fork)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scalemaker-ship-it/auto-chrome-mcp.git"
+    "url": "https://github.com/cw02326/auto-chrome-mcp.git"
   },
   "type": "module",
   "scripts": {
