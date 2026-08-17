@@ -14,7 +14,7 @@ import {
   type QuickPanelShadowHostElements,
   type QuickPanelShadowHostManager,
 } from '@/shared/quick-panel/ui';
-import type { PickedElement } from 'chrome-mcp-scalemaker-shared';
+import type { PickedElement } from 'auto-chrome-mcp-shared';
 
 // ============================================================
 // Types

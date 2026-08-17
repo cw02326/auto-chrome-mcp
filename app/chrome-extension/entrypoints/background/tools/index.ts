@@ -1,6 +1,6 @@
 import { createErrorResponse } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { isBackgroundModeEnabled } from '@/utils/background-mode';
 import { getWorkTabId, DEFAULT_SESSION_ID } from '@/utils/work-tab-manager';
 import { applyAutomationGuard } from '@/utils/automation-guard';

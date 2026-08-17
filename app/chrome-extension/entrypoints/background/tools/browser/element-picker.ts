@@ -15,7 +15,7 @@ import {
   type ElementPickerResult,
   type ElementPickerResultItem,
   type PickedElement,
-} from 'chrome-mcp-scalemaker-shared';
+} from 'auto-chrome-mcp-shared';
 
 // ============================================================
 // Types

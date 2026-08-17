@@ -28,7 +28,7 @@
  * ```
  */
 
-import type { RealtimeEvent } from 'chrome-mcp-scalemaker-shared';
+import type { RealtimeEvent } from 'auto-chrome-mcp-shared';
 
 import {
   BACKGROUND_MESSAGE_TYPES,

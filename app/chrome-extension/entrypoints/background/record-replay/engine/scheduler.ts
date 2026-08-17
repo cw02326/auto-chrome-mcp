@@ -1,4 +1,4 @@
-import { STEP_TYPES, TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { STEP_TYPES, TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import type { Edge, Flow, NodeBase, RunLogEntry, RunResult, Step } from '../types';

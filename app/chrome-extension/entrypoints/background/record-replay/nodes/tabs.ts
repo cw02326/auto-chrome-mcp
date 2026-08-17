@@ -1,4 +1,4 @@
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';

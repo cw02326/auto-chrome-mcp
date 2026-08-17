@@ -1,4 +1,4 @@
-import { NativeMessageType } from 'chrome-mcp-scalemaker-shared';
+import { NativeMessageType } from 'auto-chrome-mcp-shared';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/common/constants';
 import { handleCallTool } from './tools';

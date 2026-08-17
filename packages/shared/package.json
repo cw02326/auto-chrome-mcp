@@ -1,5 +1,5 @@
 {
-  "name": "chrome-mcp-scalemaker-shared",
+  "name": "auto-chrome-mcp-shared",
   "version": "1.1.0",
   "author": "hangye (upstream), scalemaker-ship-it (scalemaker fork)",
   "main": "dist/index.js",

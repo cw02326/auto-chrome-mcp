@@ -1,4 +1,4 @@
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepHttp } from '../types';
 import { applyAssign, expandTemplatesDeep } from '../rr-utils';

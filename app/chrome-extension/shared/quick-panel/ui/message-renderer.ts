@@ -10,7 +10,7 @@
  * - Memory-efficient DOM recycling
  */
 
-import type { AgentMessage, AgentRole } from 'chrome-mcp-scalemaker-shared';
+import type { AgentMessage, AgentRole } from 'auto-chrome-mcp-shared';
 import { createMarkdownRenderer, type MarkdownRendererInstance } from './markdown-renderer';
 
 // ============================================================

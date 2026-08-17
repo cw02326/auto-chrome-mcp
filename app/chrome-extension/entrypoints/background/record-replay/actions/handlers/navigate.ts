@@ -8,7 +8,7 @@
  */
 
 import { handleCallTool } from '@/entrypoints/background/tools';
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { ENGINE_CONSTANTS } from '../../engine/constants';
 import { ensureReadPageIfWeb, waitForNavigationDone } from '../../engine/policies/wait';
 import { failed, invalid, ok } from '../registry';

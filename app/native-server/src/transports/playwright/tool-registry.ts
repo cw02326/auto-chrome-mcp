@@ -36,7 +36,7 @@ const NATIVE_ONLY_REASON =
 
 /**
  * 33 tool name → handler 매핑.
- * Tool 이름은 chrome-mcp-scalemaker-shared 의 TOOL_NAMES 와 1:1 일치.
+ * Tool 이름은 auto-chrome-mcp-shared 의 TOOL_NAMES 와 1:1 일치.
  */
 export const TOOL_REGISTRY: Record<string, ToolHandler> = {
   // -------- 🟢 1:1 매핑 (MVP — 3개 진짜 구현) --------

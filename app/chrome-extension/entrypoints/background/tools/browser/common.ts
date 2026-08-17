@@ -1,6 +1,6 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
 import { focusWindowIfAllowed, isForceFocusEnabled } from '@/utils/focus-policy';
 import { getWorkTabId, setWorkTab } from '@/utils/work-tab-manager';

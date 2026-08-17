@@ -6,7 +6,7 @@
  */
 
 import { handleCallTool } from '@/entrypoints/background/tools';
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
 import { resolveString } from './common';

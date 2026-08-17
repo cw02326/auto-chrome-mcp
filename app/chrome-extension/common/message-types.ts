@@ -3,7 +3,7 @@
  * Note: Native message types are imported from the shared package
  */
 
-import type { RealtimeEvent } from 'chrome-mcp-scalemaker-shared';
+import type { RealtimeEvent } from 'auto-chrome-mcp-shared';
 
 // Message targets for routing
 export enum MessageTarget {

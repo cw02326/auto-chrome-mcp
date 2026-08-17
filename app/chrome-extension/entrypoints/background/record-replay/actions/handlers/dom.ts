@@ -13,7 +13,7 @@
 
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { handleCallTool } from '@/entrypoints/background/tools';
-import { TOOL_NAMES } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok, tryResolveJson } from '../registry';
 import type {
   ActionExecutionResult,

@@ -6,14 +6,14 @@ import {
   ListPromptsRequestSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { TOOL_SCHEMAS } from 'chrome-mcp-scalemaker-shared';
+import { TOOL_SCHEMAS } from 'auto-chrome-mcp-shared';
 import { attachCdp, isCdpAttached } from './cdp-client.js';
 import { TOOL_REGISTRY } from './tool-registry.js';
 
 /**
  * Playwright fallback transport — MCP Server 에 tools 를 등록.
  *
- * 동일 TOOL_SCHEMAS (chrome-mcp-scalemaker-shared) 노출 (클라이언트 입장에서는 transport 무관 동일 API).
+ * 동일 TOOL_SCHEMAS (auto-chrome-mcp-shared) 노출 (클라이언트 입장에서는 transport 무관 동일 API).
  * 실제 dispatch 는 TOOL_REGISTRY 의 handler — stub 인 경우 isError + 안내 메시지.
  */
 export const setupPlaywrightTools = (server: Server): void => {

@@ -1,1 +1,1 @@
-export * from 'chrome-mcp-scalemaker-shared';
+export * from 'auto-chrome-mcp-shared';
