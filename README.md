@@ -6,7 +6,7 @@
 ## 한 줄 설치
 
 ```bash
-npm install -g mcp-chrome-scalemaker-bridge
+npm install -g auto-chrome-mcp-bridge
 ```
 
 postinstall 이 자동으로 처리하는 것:
@@ -18,7 +18,7 @@ postinstall 이 자동으로 처리하는 것:
 
 > Node.js 20+ 필요 — `node -v` 로 확인. macOS / Windows / Linux 공통.
 >
-> **자동 스킬 설치를 원하지 않으면:** `SCALEMAKER_NO_SKILL=1 npm install -g mcp-chrome-scalemaker-bridge`
+> **자동 스킬 설치를 원하지 않으면:** `SCALEMAKER_NO_SKILL=1 npm install -g auto-chrome-mcp-bridge`
 > 사용자 custom 스킬 (frontmatter `name` 이 다른 경우) 은 절대 덮어쓰지 않음.
 > 같은 스킬이 이미 있으면 `scalemaker-version` 비교 후 새 버전일 때만 갱신.
 

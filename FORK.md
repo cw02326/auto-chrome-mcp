@@ -41,7 +41,7 @@ upstream diff → [`UPSTREAM_DIFF.md`](./UPSTREAM_DIFF.md)
 
 ```bash
 # 1. bridge (npm)
-npm i -g mcp-chrome-scalemaker-bridge
+npm i -g auto-chrome-mcp-bridge
 
 # 2. extension (Chrome Web Store 사용 안 함 — Releases 의 .zip 사이드로드)
 # https://github.com/cw02326/auto-chrome-mcp/releases 에서 latest .zip 다운로드
