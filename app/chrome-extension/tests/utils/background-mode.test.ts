@@ -12,10 +12,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type BackgroundMode = typeof import('@/utils/background-mode');
 type McpWindowManager = typeof import('@/utils/mcp-window-manager');
 
+interface UserWindow {
+  id: number;
+  type: string;
+  incognito: boolean;
+  focused: boolean;
+}
+
 interface ChromeHarness {
   localStore: Record<string, unknown>;
   sessionStore: Record<string, unknown>;
   openWindows: Set<number>;
+  userWindows: UserWindow[];
+  lastFocusedId: { value: number | null };
   windowRemovedListeners: Array<(windowId: number) => void>;
   localGet: ReturnType<typeof vi.fn>;
   localSet: ReturnType<typeof vi.fn>;
@@ -31,6 +40,9 @@ function installChromeMocks(): ChromeHarness {
   const sessionStore: Record<string, unknown> = {};
   const openWindows = new Set<number>();
   const windowRemovedListeners: Array<(windowId: number) => void> = [];
+  // getCurrentUserWindowId 가 훑는 "사용자가 열어 둔 창" 목록 — 테스트가 직접 조작한다.
+  const userWindows: UserWindow[] = [];
+  const lastFocusedId = { value: null as number | null };
   let nextWindowId = 1000;
 
   const toKeys = (keys: unknown): string[] =>
@@ -72,7 +84,11 @@ function installChromeMocks(): ChromeHarness {
         if (!openWindows.has(windowId)) throw new Error(`No window with id: ${windowId}`);
         return { id: windowId };
       }),
-      getLastFocused: vi.fn(async () => ({ id: 1 })),
+      getAll: vi.fn(async () => userWindows.map((w) => ({ ...w }))),
+      getLastFocused: vi.fn(async () => {
+        if (lastFocusedId.value === null) throw new Error('no focused window');
+        return { id: lastFocusedId.value };
+      }),
       create: windowsCreate,
       remove: vi.fn(async () => undefined),
       onRemoved: {
@@ -92,6 +108,8 @@ function installChromeMocks(): ChromeHarness {
     localStore,
     sessionStore,
     openWindows,
+    userWindows,
+    lastFocusedId,
     windowRemovedListeners,
     localGet: local.get,
     localSet: local.set,
@@ -155,39 +173,136 @@ describe('background-mode (scalemaker fork — 백그라운드 작업 모드 정
   });
 });
 
-describe('mcp-window-manager (scalemaker fork — 전용 MCP 작업 창)', () => {
+describe('mcp-window-manager (scalemaker fork — 작업 창 모드)', () => {
   let h: ChromeHarness;
 
   beforeEach(() => {
     h = installChromeMocks();
   });
 
-  describe('정책 접근자', () => {
-    it('키가 없으면 켜짐이 기본값이다', async () => {
+  describe('모드 접근자', () => {
+    it("키가 없으면 'current'(현재 창 새 탭)가 기본값이다", async () => {
       const mod = await loadWindowManager();
-      expect(await mod.isDedicatedWindowEnabled()).toBe(true);
-    });
-
-    it('명시적 false 만 꺼짐으로 읽는다', async () => {
-      const mod = await loadWindowManager();
-      h.localStore.dedicatedWorkWindow = false;
+      expect(await mod.getWorkWindowMode()).toBe('current');
       expect(await mod.isDedicatedWindowEnabled()).toBe(false);
-      h.localStore.dedicatedWorkWindow = true;
-      expect(await mod.isDedicatedWindowEnabled()).toBe(true);
     });
 
-    it('storage 읽기 실패 시에도 켜짐으로 fail-safe', async () => {
+    it('신규 키를 그대로 읽는다', async () => {
+      const mod = await loadWindowManager();
+      h.localStore.mcpWorkWindowMode = 'dedicated';
+      expect(await mod.getWorkWindowMode()).toBe('dedicated');
+      h.localStore.mcpWorkWindowMode = 'current';
+      expect(await mod.getWorkWindowMode()).toBe('current');
+    });
+
+    it('알 수 없는 값이면 기본값으로 떨어진다', async () => {
+      const mod = await loadWindowManager();
+      h.localStore.mcpWorkWindowMode = 'weird';
+      expect(await mod.getWorkWindowMode()).toBe('current');
+    });
+
+    it('구버전 boolean 설정을 그대로 승계한다 (마이그레이션)', async () => {
+      const mod = await loadWindowManager();
+      h.localStore.dedicatedWorkWindow = true;
+      expect(await mod.getWorkWindowMode()).toBe('dedicated');
+      h.localStore.dedicatedWorkWindow = false;
+      expect(await mod.getWorkWindowMode()).toBe('current');
+    });
+
+    it('신규 키가 구버전 boolean 보다 우선한다', async () => {
+      const mod = await loadWindowManager();
+      h.localStore.dedicatedWorkWindow = true;
+      h.localStore.mcpWorkWindowMode = 'current';
+      expect(await mod.getWorkWindowMode()).toBe('current');
+    });
+
+    it("storage 읽기 실패 시에도 'current' 로 fail-safe", async () => {
       const mod = await loadWindowManager();
       h.localGet.mockRejectedValueOnce(new Error('storage down'));
-      expect(await mod.isDedicatedWindowEnabled()).toBe(true);
+      expect(await mod.getWorkWindowMode()).toBe('current');
     });
 
-    it('setter 는 dedicatedWorkWindow 키에만 쓴다', async () => {
+    it('setter 는 신규 키와 구버전 boolean 을 함께 쓴다', async () => {
       const mod = await loadWindowManager();
-      await mod.setDedicatedWindowEnabled(false);
-      expect(h.localSet).toHaveBeenCalledWith({ dedicatedWorkWindow: false });
-      expect(h.localStore).toEqual({ dedicatedWorkWindow: false });
+      await mod.setWorkWindowMode('dedicated');
+      expect(h.localStore).toEqual({
+        mcpWorkWindowMode: 'dedicated',
+        dedicatedWorkWindow: true,
+      });
+      await mod.setWorkWindowMode('current');
+      expect(h.localStore).toEqual({
+        mcpWorkWindowMode: 'current',
+        dedicatedWorkWindow: false,
+      });
+      expect(mod.WORK_WINDOW_MODE_STORAGE_KEY).toBe('mcpWorkWindowMode');
       expect(mod.DEDICATED_WINDOW_STORAGE_KEY).toBe('dedicatedWorkWindow');
+    });
+  });
+
+  describe("현재 사용자 창 선택 ('current' 모드)", () => {
+    it('마지막으로 포커스된 일반 창을 고른다', async () => {
+      const mod = await loadWindowManager();
+      h.userWindows.push(
+        { id: 11, type: 'normal', incognito: false, focused: false },
+        { id: 12, type: 'normal', incognito: false, focused: false },
+      );
+      h.lastFocusedId.value = 12;
+      expect(await mod.getCurrentUserWindowId()).toBe(12);
+    });
+
+    it('팝업·앱 창은 후보에서 제외한다', async () => {
+      const mod = await loadWindowManager();
+      h.userWindows.push(
+        { id: 20, type: 'popup', incognito: false, focused: true },
+        { id: 21, type: 'normal', incognito: false, focused: false },
+      );
+      h.lastFocusedId.value = 20;
+      expect(await mod.getCurrentUserWindowId()).toBe(21);
+    });
+
+    it('시크릿 창은 후보에서 제외한다', async () => {
+      const mod = await loadWindowManager();
+      h.userWindows.push(
+        { id: 30, type: 'normal', incognito: true, focused: true },
+        { id: 31, type: 'normal', incognito: false, focused: false },
+      );
+      h.lastFocusedId.value = 30;
+      expect(await mod.getCurrentUserWindowId()).toBe(31);
+    });
+
+    it('이전에 만들어 둔 전용 MCP 작업 창은 후보에서 제외한다', async () => {
+      const mod = await loadWindowManager();
+      const dedicatedId = await mod.getOrCreateMcpWindow();
+      h.userWindows.push(
+        { id: dedicatedId, type: 'normal', incognito: false, focused: true },
+        { id: 41, type: 'normal', incognito: false, focused: false },
+      );
+      h.lastFocusedId.value = dedicatedId;
+      expect(await mod.getCurrentUserWindowId()).toBe(41);
+    });
+
+    it('getLastFocused 가 실패해도 포커스된 적격 창으로 떨어진다', async () => {
+      const mod = await loadWindowManager();
+      h.userWindows.push(
+        { id: 50, type: 'normal', incognito: false, focused: false },
+        { id: 51, type: 'normal', incognito: false, focused: true },
+      );
+      h.lastFocusedId.value = null; // getLastFocused throws
+      expect(await mod.getCurrentUserWindowId()).toBe(51);
+    });
+
+    it('열린 일반 창이 하나도 없으면 null — 호출부가 새 창으로 fallback 한다', async () => {
+      const mod = await loadWindowManager();
+      h.lastFocusedId.value = null;
+      expect(await mod.getCurrentUserWindowId()).toBeNull();
+    });
+
+    it("'current' 모드 판정만으로는 창을 새로 만들지 않는다", async () => {
+      const mod = await loadWindowManager();
+      h.userWindows.push({ id: 60, type: 'normal', incognito: false, focused: true });
+      h.lastFocusedId.value = 60;
+      await mod.getCurrentUserWindowId();
+      expect(h.windowsCreate).not.toHaveBeenCalled();
     });
   });
 

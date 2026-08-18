@@ -64,7 +64,7 @@
                   <!-- scalemaker fork: 전용 MCP 작업 창 토글 -->
                   <label
                     class="force-focus-switch"
-                    title="ON: MCP 작업 탭을 별도 'MCP 작업 창'에 모아서 사용자 창과 분리합니다. OFF: 현재 창에 백그라운드 탭으로 만듭니다."
+                    title="OFF(기본): 지금 열려 있는 크롬 창에 새 탭을 백그라운드로 만들어 작업합니다 — 보던 화면이 바뀌지 않습니다. ON: MCP 작업 탭을 별도 'MCP 작업 창'에 모아 사용자 창과 완전히 분리합니다."
                   >
                     <input
                       type="checkbox"
@@ -299,9 +299,9 @@ import {
   BACKGROUND_MODE_STORAGE_KEY,
 } from '@/utils/background-mode';
 import {
-  isDedicatedWindowEnabled,
-  setDedicatedWindowEnabled,
-  DEDICATED_WINDOW_STORAGE_KEY,
+  getWorkWindowMode,
+  setWorkWindowMode,
+  WORK_WINDOW_MODE_STORAGE_KEY,
 } from '@/utils/mcp-window-manager';
 import {
   getToggles,
@@ -492,9 +492,9 @@ const forceFocusEnabled = ref<boolean>(false);
 // 건드리지 않고 MCP 작업 탭에서 동작. false = 이전처럼 작업 탭을 앞으로 가져옴.
 const backgroundModeEnabled = ref<boolean>(true);
 
-// scalemaker fork: 전용 작업 창 토글. true(기본) = MCP 작업 탭을 별도 "MCP 작업 창"에 모아
-// 사용자 창과 분리. false = 현재(마지막 활성) 창에 백그라운드 탭으로 생성.
-const dedicatedWindowEnabled = ref<boolean>(true);
+// scalemaker fork: 전용 작업 창 토글. false(기본) = 사용자가 열어 둔 현재 창에 백그라운드
+// 새 탭으로 작업. true = MCP 작업 탭을 별도 "MCP 작업 창"에 모아 사용자 창과 분리.
+const dedicatedWindowEnabled = ref<boolean>(false);
 
 // v1.0.31+: site permissions consent gate (camera / microphone / geolocation)
 const sitePermissionToggles = ref<SitePermissionToggles>({
@@ -1280,7 +1280,7 @@ const toggleBackgroundMode = async () => {
 // scalemaker fork: 전용 작업 창 토글 — load + toggle handler.
 const loadDedicatedWindowPreference = async () => {
   try {
-    dedicatedWindowEnabled.value = await isDedicatedWindowEnabled();
+    dedicatedWindowEnabled.value = (await getWorkWindowMode()) === 'dedicated';
   } catch (error) {
     console.error('전용 작업 창 설정 로드 실패:', error);
   }
@@ -1290,7 +1290,7 @@ const toggleDedicatedWindow = async () => {
   const next = !dedicatedWindowEnabled.value;
   dedicatedWindowEnabled.value = next; // optimistic
   try {
-    await setDedicatedWindowEnabled(next);
+    await setWorkWindowMode(next ? 'dedicated' : 'current');
   } catch (error) {
     console.error('전용 작업 창 설정 저장 실패:', error);
     dedicatedWindowEnabled.value = !next; // revert
@@ -1691,9 +1691,10 @@ onMounted(async () => {
         if (Object.prototype.hasOwnProperty.call(changes || {}, BACKGROUND_MODE_STORAGE_KEY)) {
           backgroundModeEnabled.value = changes[BACKGROUND_MODE_STORAGE_KEY]?.newValue !== false;
         }
-        // scalemaker fork: 전용 작업 창도 동일하게 동기화 (기본값 true — false 만 OFF).
-        if (Object.prototype.hasOwnProperty.call(changes || {}, DEDICATED_WINDOW_STORAGE_KEY)) {
-          dedicatedWindowEnabled.value = changes[DEDICATED_WINDOW_STORAGE_KEY]?.newValue !== false;
+        // scalemaker fork: 작업 창 모드도 동일하게 동기화 (기본값 'current' — 'dedicated' 만 ON).
+        if (Object.prototype.hasOwnProperty.call(changes || {}, WORK_WINDOW_MODE_STORAGE_KEY)) {
+          dedicatedWindowEnabled.value =
+            changes[WORK_WINDOW_MODE_STORAGE_KEY]?.newValue === 'dedicated';
         }
         // v1.0.31+: 사이트 권한 토글 동기화 (background 가 consent 후 ON 으로 바꿀 때도)
         if (Object.prototype.hasOwnProperty.call(changes || {}, SITE_PERMS_STORAGE_KEY)) {
