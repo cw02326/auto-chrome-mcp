@@ -49,7 +49,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: navigate 가 확정한 탭을 "MCP 작업 탭"으로 기록.
+   * auto-chrome-mcp fork: navigate 가 확정한 탭을 "MCP 작업 탭"으로 기록.
    * 이후 tabId 미지정 도구 호출이 사용자의 활성 탭 대신 이 탭을 대상으로 한다.
    */
   private async rememberWorkTab(tabId?: number, sessionId?: string): Promise<void> {
@@ -62,7 +62,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: MCP 작업 탭을 만들 창을 판정한다.
+   * auto-chrome-mcp fork: MCP 작업 탭을 만들 창을 판정한다.
    *
    * 백그라운드 작업 모드(게이트가 background:true 주입)이고 호출자가 windowId 를 명시하지
    * 않은 경우에만 동작하며, 창 모드에 따라 대상이 갈린다:
@@ -88,7 +88,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: 전용 작업 창을 만들 때 같이 생긴 about:blank 탭 정리 (best-effort).
+   * auto-chrome-mcp fork: 전용 작업 창을 만들 때 같이 생긴 about:blank 탭 정리 (best-effort).
    * 방금 만든 탭은 건드리지 않고, url 이 정확히 'about:blank' 인 탭만 닫는다.
    * 창에 탭이 하나뿐이면 닫지 않는다 (창 자체가 사라지므로).
    */
@@ -119,7 +119,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
       background,
       windowId,
     } = args;
-    // scalemaker fork: 게이트가 실어 보낸 세션 id — 세션별 작업 탭 기록에 사용
+    // auto-chrome-mcp fork: 게이트가 실어 보낸 세션 id — 세션별 작업 탭 기록에 사용
     const mcpSessionId = (args as any)._mcpSessionId as string | undefined;
 
     console.log(
@@ -257,7 +257,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
       let candidateTabs = await chrome.tabs.query({ url: urlPatterns });
       console.log(`Found ${candidateTabs.length} matching tabs with patterns:`, urlPatterns);
 
-      // scalemaker fork: 백그라운드 작업 모드에서는 사용자가 열어둔 탭을 재사용하지 않는다
+      // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 사용자가 열어둔 탭을 재사용하지 않는다
       // — 사용자가 보던 동일 URL 탭을 MCP 가 잡아 조작하는 간섭 방지. 이 세션의 기존 작업 탭과
       // (dedicated 모드일 때) MCP 작업 창 안의 탭만 재사용 후보로 인정하고, 없으면 아래에서
       // 새 탭을 만든다. 창 모드와 무관하게 적용 — 'current' 모드에서도 하이재킹은 막아야 한다.
@@ -392,7 +392,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         console.log('Opening URL in a new window.');
 
         // Create new window
-        // scalemaker fork: 강제포커스 정책 OFF 면 항상 background. background 인자가 명시적으로
+        // auto-chrome-mcp fork: 강제포커스 정책 OFF 면 항상 background. background 인자가 명시적으로
         // true 인 경우도 동일.
         const allowFocus = background === true ? false : await isForceFocusEnabled();
         const newWindow = await chrome.windows.create({
@@ -433,7 +433,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           };
         }
       } else {
-        // scalemaker fork: 백그라운드 작업 모드면 창 모드에 따라 작업 탭을 만든다.
+        // auto-chrome-mcp fork: 백그라운드 작업 모드면 창 모드에 따라 작업 탭을 만든다.
         // 아래 last-focused-window / fallback-window 경로를 모두 대체한다.
         // null 이면(백그라운드 OFF·열린 창 없음·창 생성 실패) 기존 동작 그대로 진행.
         const workWindow = await this.resolveWorkWindow(background, windowId);
@@ -500,7 +500,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             active: background === true ? false : true,
           });
           if (background !== true) {
-            // scalemaker fork: 강제포커스 정책 통과 시에만 OS 윈도우 포커스.
+            // auto-chrome-mcp fork: 강제포커스 정책 통과 시에만 OS 윈도우 포커스.
             await focusWindowIfAllowed(targetWindow.id);
           }
 
@@ -534,7 +534,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           // Fall back to opening in a new window
           console.warn('No last focused window found, falling back to creating a new window.');
 
-          // scalemaker fork: 강제포커스 정책 OFF 면 background 윈도우로 생성.
+          // auto-chrome-mcp fork: 강제포커스 정책 OFF 면 background 윈도우로 생성.
           const allowFocus = await isForceFocusEnabled();
           const fallbackWindow = await chrome.windows.create({
             url: url,
@@ -740,7 +740,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
         };
       }
 
-      // scalemaker fork: 인자 없이 호출되면 원래는 사용자의 활성 탭을 닫았다.
+      // auto-chrome-mcp fork: 인자 없이 호출되면 원래는 사용자의 활성 탭을 닫았다.
       // 백그라운드 작업 모드 ON 이면 사용자 탭 대신 MCP 작업 탭만 닫는다 (없으면 에러).
       // 닫힌 탭이 작업 탭이면 work-tab-manager 의 onRemoved 리스너가 알아서 정리한다.
       if (await isBackgroundModeEnabled()) {
@@ -822,7 +822,7 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
     console.log(`Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`);
 
     try {
-      // scalemaker fork: switch_tab 호출이어도 OS 포커스는 정책 게이트 통과 시에만.
+      // auto-chrome-mcp fork: switch_tab 호출이어도 OS 포커스는 정책 게이트 통과 시에만.
       if (windowId !== undefined) {
         await focusWindowIfAllowed(windowId);
       }

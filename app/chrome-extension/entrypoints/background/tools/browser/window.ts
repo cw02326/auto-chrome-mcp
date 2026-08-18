@@ -12,7 +12,7 @@ class WindowTool extends BaseBrowserToolExecutor {
       const windows = await chrome.windows.getAll({ populate: true });
       let tabCount = 0;
 
-      // scalemaker fork: 세션 작업 탭 / 전용 작업 창 / 최근 스폰(팝업) 표시용 컨텍스트
+      // auto-chrome-mcp fork: 세션 작업 탭 / 전용 작업 창 / 최근 스폰(팝업) 표시용 컨텍스트
       const workTabs = await getAllWorkTabs(); // sessionId -> tabId
       const workTabSessions = new Map<number, string[]>();
       for (const [sid, tid] of Object.entries(workTabs)) {

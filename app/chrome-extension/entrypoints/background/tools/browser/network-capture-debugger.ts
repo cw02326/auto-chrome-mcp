@@ -55,7 +55,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   private lastActivityTime: Map<number, number> = new Map(); // tabId -> timestamp of last network activity
   private pendingResponseBodies: Map<string, Promise<any>> = new Map(); // requestId -> promise for getResponseBody
   private requestCounters: Map<number, number> = new Map(); // tabId -> count of captured requests (after filtering)
-  // scalemaker fork: STOP 결과 페이지네이션 기본 limit 계산을 위해 NetworkDebuggerStopTool에서도 참조 — public으로 완화
+  // auto-chrome-mcp fork: STOP 결과 페이지네이션 기본 limit 계산을 위해 NetworkDebuggerStopTool에서도 참조 — public으로 완화
   public static MAX_REQUESTS_PER_CAPTURE = 100; // Max requests to store to prevent memory issues
   public static instance: NetworkDebuggerStartTool | null = null;
 
@@ -792,7 +792,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         if (existingTabs.length > 0 && existingTabs[0]?.id) {
           tabToOperateOn = existingTabs[0];
           // Ensure window gets focus (tab activation removed — the CDP Network domain
-          // works fine on background tabs; scalemaker fork: OS 윈도우 포커스는 정책 통과 시에만).
+          // works fine on background tabs; auto-chrome-mcp fork: OS 윈도우 포커스는 정책 통과 시에만).
           await focusWindowIfAllowed(tabToOperateOn.windowId);
         } else {
           tabToOperateOn = await chrome.tabs.create({
@@ -882,7 +882,7 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
 
   async execute(args?: {
     tabId?: number;
-    // scalemaker fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+    // auto-chrome-mcp fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
     limit?: number;
     offset?: number;
     countOnly?: boolean;
@@ -987,7 +987,7 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
       );
     }
 
-    // scalemaker fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
+    // auto-chrome-mcp fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
     const allRequests: NetworkRequestInfo[] = resultData.requests || [];
     const totalCount = allRequests.length;
     const isCountOnly = pagination?.countOnly === true;

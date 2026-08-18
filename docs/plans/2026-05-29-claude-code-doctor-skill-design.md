@@ -93,7 +93,7 @@ description: |
     - "권한 에러" / "EACCES" / "run_host.sh"
     - "강제 재연결 눌렀는데도 안 돼"
 
-  Skip if the user is using upstream hangwin/mcp-chrome (not the scalemaker
+  Skip if the user is using upstream hangwin/mcp-chrome (not the auto-chrome-mcp
   fork) — this skill knows fork-specific commands and architecture.
 
 
@@ -159,7 +159,7 @@ popup port input + 강제포커스 토글
 
 - description 첫 줄에 "chrome-mcp-scalemaker" 패키지명 명시
 - "Skip if upstream hangwin/mcp-chrome" line → 다른 fork 사용자에게 false trigger 안 함
-- 본문 (A) Architecture 섹션 첫 줄에 "This skill assumes you're on the scalemaker fork — verify with `mcp-chrome-scalemaker-bridge -V`"
+- 본문 (A) Architecture 섹션 첫 줄에 "This skill assumes you're on the auto-chrome-mcp fork — verify with `mcp-chrome-scalemaker-bridge -V`"
 
 ### 2.4 갱신 정책 (사용자 dirty 보호)
 

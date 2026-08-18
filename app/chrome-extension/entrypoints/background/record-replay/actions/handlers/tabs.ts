@@ -10,7 +10,7 @@
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, DownloadInfo, DownloadState, VariableStore } from '../types';
-// scalemaker fork: OS 윈도우 포커스는 강제 포커스 정책 게이트를 통과해야 함
+// auto-chrome-mcp fork: OS 윈도우 포커스는 강제 포커스 정책 게이트를 통과해야 함
 import { focusWindowIfAllowed, isForceFocusEnabled } from '@/utils/focus-policy';
 
 /** Default timeout for tab operations */

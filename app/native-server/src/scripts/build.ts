@@ -36,7 +36,7 @@ try {
   console.error('[build] 설정 파일 복사 실패:', error);
 }
 
-// scalemaker fork v1.0.29+: Claude Code SKILL.md 복사 + version stamp 주입.
+// auto-chrome-mcp fork v1.0.29+: Claude Code SKILL.md 복사 + version stamp 주입.
 // 사용자가 welcome 페이지의 prompt 로 ~/.claude/skills/ 로 install 함.
 console.log('[build] SKILL.md 복사 + version stamp...');
 const skillSourcePath = path.join(__dirname, '..', '..', 'skill', 'SKILL.md');
@@ -65,7 +65,7 @@ console.log('[build] README.md 생성...');
 const packageJson = require('../../package.json');
 const readmeContent = `# ${packageJson.name}
 
-Chrome 확장의 Native Messaging host (scalemaker fork).
+Chrome 확장의 Native Messaging host (auto-chrome-mcp fork).
 
 ## 설치
 

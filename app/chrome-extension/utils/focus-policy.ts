@@ -1,5 +1,5 @@
 /**
- * Force-focus policy gate (scalemaker fork).
+ * Force-focus policy gate (auto-chrome-mcp fork).
  *
  * MCP 도구 실행 시 chrome.windows.update({focused: true}) 가 OS 레벨로 Chrome 윈도우를
  * 다른 앱 앞으로 끌어내는 동작을 사용자가 popup 토글로 끌 수 있게 한다.

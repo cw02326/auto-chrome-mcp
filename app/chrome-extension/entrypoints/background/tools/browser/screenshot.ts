@@ -47,7 +47,7 @@ if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
 }
 
 /**
- * scalemaker fork: 백그라운드(비활성) 탭 캡처 지원.
+ * auto-chrome-mcp fork: 백그라운드(비활성) 탭 캡처 지원.
  *
  * chrome.tabs.captureVisibleTab 은 "윈도우에서 지금 보이는 탭"만 캡처하므로, MCP 도구가
  * 백그라운드 작업 탭을 대상으로 동작할 때 조용히 엉뚱한 탭을 찍는다.
@@ -57,13 +57,13 @@ if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
 const CDP_CAPTURE_TIMEOUT_MS = 20000; // 비활성 탭 합성 지연 시 무한 대기 방지
 const MAX_CDP_FULLPAGE_HEIGHT_PX = 16000; // Chrome 텍스처 한계(~16384) 안쪽 안전값
 
-// scalemaker fork: captureVisibleTab 호출 최소 간격 (폴백 경로에만 적용)
+// auto-chrome-mcp fork: captureVisibleTab 호출 최소 간격 (폴백 경로에만 적용)
 const MIN_CAPTURE_VISIBLE_TAB_INTERVAL_MS =
   typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0 ? Math.ceil(1000 / __MAX_CAP_RATE) : 0;
 let lastCaptureVisibleTabAtMs = 0;
 
 /**
- * scalemaker fork: captureVisibleTab 폴백 전용 래퍼.
+ * auto-chrome-mcp fork: captureVisibleTab 폴백 전용 래퍼.
  * - 대상 탭이 자기 윈도우의 활성 탭이 아니면 다른 탭이 찍히므로, 캡처하지 않고 명확한 에러를 던진다.
  * - Chrome 의 captureVisibleTab 호출 빈도 제한을 이 지점에서만 적용한다.
  */
@@ -100,7 +100,7 @@ async function captureVisibleTabFallback(tabId: number, windowId?: number): Prom
 }
 
 /**
- * scalemaker fork: 사용자 지정 filename 을 안전하게 정규화한다.
+ * auto-chrome-mcp fork: 사용자 지정 filename 을 안전하게 정규화한다.
  * - 경로 순회('..'), 선행 슬래시, 허용되지 않는 문자를 제거한다.
  * - 항상 mcp-screenshots/ 폴더 하위에 저장되도록 강제한다(사용자가 이미 폴더를 포함해도 접두사 유지).
  */
@@ -128,7 +128,7 @@ function sanitizeDownloadFilename(userFilename?: string): string {
 }
 
 /**
- * scalemaker fork: 캡처된 이미지를 chrome.downloads 로 저장한다.
+ * auto-chrome-mcp fork: 캡처된 이미지를 chrome.downloads 로 저장한다.
  * saveToDownloads 요청 시 모든 캡처 경로(CDP viewport/fullPage/element, captureVisibleTab 폴백) 이후
  * 공통으로 호출되며, 실패해도 스크린샷 자체는 성공으로 유지한다(호출부에서 saveError 만 첨부).
  */
@@ -164,7 +164,7 @@ interface NormalizedLayoutMetrics {
 }
 
 /**
- * scalemaker fork: Page.getLayoutMetrics 결과를 CSS 픽셀 기준으로 정규화한다.
+ * auto-chrome-mcp fork: Page.getLayoutMetrics 결과를 CSS 픽셀 기준으로 정규화한다.
  * css* 필드(cssLayoutViewport/cssContentSize)를 우선 사용하고, 없으면 구 필드로 폴백.
  * CDP clip 좌표계도 CSS 픽셀이므로 여기서 나온 값을 그대로 clip 에 쓸 수 있다.
  */
@@ -193,7 +193,7 @@ function normalizeLayoutMetrics(metrics: any): NormalizedLayoutMetrics {
   };
 }
 
-/** scalemaker fork: CDP 호출이 비활성 탭에서 매달리는 경우를 대비한 타임아웃 래퍼 */
+/** auto-chrome-mcp fork: CDP 호출이 비활성 탭에서 매달리는 경우를 대비한 타임아웃 래퍼 */
 async function withCdpTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   // 타임아웃이 이겨도 원본 promise 의 rejection 이 unhandled 로 남지 않게 한다
   void promise.catch(() => undefined);
@@ -214,7 +214,7 @@ async function withCdpTimeout<T>(promise: Promise<T>, label: string): Promise<T>
 }
 
 /**
- * scalemaker fork: 스티칭 경로와 동일한 규칙으로 options.width/height 를 적용한다.
+ * auto-chrome-mcp fork: 스티칭 경로와 동일한 규칙으로 options.width/height 를 적용한다.
  * (한쪽만 지정하면 비율 유지, 둘 다 지정하면 그대로 늘림. 출력은 물리 픽셀 = CSS * dpr)
  */
 async function resizeToRequestedSize(
@@ -261,16 +261,16 @@ interface ScreenshotToolParams {
   fullPage?: boolean;
   savePng?: boolean;
   maxHeight?: number; // Maximum height to capture in pixels (for infinite scroll pages)
-  // scalemaker fork: 캡처 결과를 chrome.downloads 로 자동 저장하기 위한 옵션
+  // auto-chrome-mcp fork: 캡처 결과를 chrome.downloads 로 자동 저장하기 위한 옵션
   saveToDownloads?: boolean;
   filename?: string;
   /**
-   * scalemaker fork: true 면 모델 입력용 축소(긴 변 1568px)를 건너뛴다.
+   * auto-chrome-mcp fork: true 면 모델 입력용 축소(긴 변 1568px)를 건너뛴다.
    * 이미지는 여전히 MCP image 블록으로 반환된다. 화질이 꼭 필요할 때의 탈출구.
    */
   fullResolution?: boolean;
   /**
-   * scalemaker fork(internal): true 면 텍스트 JSON 에도 base64Data 를 넣는다.
+   * auto-chrome-mcp fork(internal): true 면 텍스트 JSON 에도 base64Data 를 넣는다.
    * MCP 스키마에는 노출하지 않는다 — 모델에게 base64 를 텍스트로 주는 것이 바로
    * 이 수정이 없애려는 토큰 낭비이기 때문. 확장 내부에서 이미지 바이트가 필요한
    * 호출자(record-replay 워크플로 등)만 사용한다.
@@ -366,7 +366,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let finalImageDataUrl: string | undefined;
     let finalImageWidthCss: number | undefined;
     let finalImageHeightCss: number | undefined;
-    // scalemaker fork: results 에서 base64 필드를 제거했다. 이미지 바이트는 절대
+    // auto-chrome-mcp fork: results 에서 base64 필드를 제거했다. 이미지 바이트는 절대
     // 텍스트/JSON 응답에 섞지 않고 MCP image 블록으로만 내보낸다(토큰 폭발 방지).
     const results: any = { fileSaved: false };
     let originalScroll: { x: number; y: number } | null = null;
@@ -374,7 +374,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let pageDetails: ScreenshotPageDetails | undefined;
 
     try {
-      // scalemaker fork: CDP 는 대상 탭이 보이지 않아도 정확히 그 탭을 캡처하므로,
+      // auto-chrome-mcp fork: CDP 는 대상 탭이 보이지 않아도 정확히 그 탭을 캡처하므로,
       // background 플래그와 무관하게 항상 1순위 경로로 사용한다.
       // 뷰포트 캡처는 콘텐츠 스크립트 없이 CDP 만으로 처리 가능.
       const canUseCdpCapture = !fullPage && !selector;
@@ -469,7 +469,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         throw new Error('Failed to capture image data');
       }
 
-      // scalemaker fork: 캡처 성공 후(모든 경로 공통) saveToDownloads 요청 시 다운로드로 저장.
+      // auto-chrome-mcp fork: 캡처 성공 후(모든 경로 공통) saveToDownloads 요청 시 다운로드로 저장.
       // 실패해도 스크린샷 자체는 성공 처리하고 saveError 만 응답에 첨부한다.
       let downloadsSaveResult:
         | { saved: true; downloadId: number; savedFilename: string }
@@ -480,7 +480,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         Object.assign(results, downloadsSaveResult);
       }
 
-      // scalemaker fork: 모델에게 돌려줄 이미지를 먼저 만든다.
+      // auto-chrome-mcp fork: 모델에게 돌려줄 이미지를 먼저 만든다.
       // 좌표 컨텍스트(screenshotWidth/Height)에는 "모델이 실제로 보는 이미지의 픽셀 크기"를
       // 기록해야 chrome_computer 의 좌표 역변환이 맞으므로, setContext 보다 앞에서 계산한다.
       // 주의: savePng / saveToDownloads 는 이 축소본이 아니라 원본(finalImageDataUrl)을 저장한다.
@@ -506,10 +506,10 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             // ignore
           }
           // Use pageDetails if available, otherwise fall back to final image dimensions
-          // scalemaker fork: viewportWidth/Height 는 예전과 완전히 동일하게 "원본 CSS 뷰포트" 크기를 기록한다.
+          // auto-chrome-mcp fork: viewportWidth/Height 는 예전과 완전히 동일하게 "원본 CSS 뷰포트" 크기를 기록한다.
           const viewportWidth = pageDetails?.viewportWidth ?? finalImageWidthCss;
           const viewportHeight = pageDetails?.viewportHeight ?? finalImageHeightCss;
-          // scalemaker fork: 좌표 기준 프레임은 모델에게 넘어간 이미지의 실제 픽셀 크기.
+          // auto-chrome-mcp fork: 좌표 기준 프레임은 모델에게 넘어간 이미지의 실제 픽셀 크기.
           // (이미지를 반환하지 않는 경로에서는 기존과 동일하게 CSS 기준 크기를 유지)
           const screenshotWidth = modelImage ? modelImage.width : finalImageWidthCss;
           const screenshotHeight = modelImage ? modelImage.height : finalImageHeightCss;
@@ -526,7 +526,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         console.warn('Failed to set screenshot context:', e);
       }
       if (storeBase64 === true && modelImage) {
-        // scalemaker fork: 이미지를 텍스트(JSON) 안에 base64 로 넣어 돌려주면 MCP 클라이언트가
+        // auto-chrome-mcp fork: 이미지를 텍스트(JSON) 안에 base64 로 넣어 돌려주면 MCP 클라이언트가
         // 이미지 1장에 텍스트 토큰 10만~30만개를 지불한다. 정식 MCP image 블록으로 분리하고
         // Claude 입력 최적 크기(긴 변 1568px)로 축소해 ~1-2k 토큰 수준으로 낮춘다.
         const base64Data = modelImage.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
@@ -545,7 +545,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           content: [
             {
               type: 'text',
-              // scalemaker fork: 메타데이터만 텍스트로. base64 는 여기 절대 넣지 않는다.
+              // auto-chrome-mcp fork: 메타데이터만 텍스트로. base64 는 여기 절대 넣지 않는다.
               // saveToDownloads 결과(있다면)는 예전과 동일하게 포함한다.
               text: JSON.stringify({
                 success: true,
@@ -671,7 +671,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: CDP Page.captureScreenshot 실행 (타임아웃 + 빈 데이터 검증).
+   * auto-chrome-mcp fork: CDP Page.captureScreenshot 실행 (타임아웃 + 빈 데이터 검증).
    * 호출자는 cdpSessionManager.withSession 안에서 호출해야 한다.
    */
   private async _cdpCaptureScreenshot(
@@ -692,7 +692,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   /**
    * Capture specific element
    *
-   * scalemaker fork: CDP clip 캡처를 우선 사용한다. 대상 탭이 보이지 않아도 정확하고,
+   * auto-chrome-mcp fork: CDP clip 캡처를 우선 사용한다. 대상 탭이 보이지 않아도 정확하고,
    * captureVisibleTab + crop 과 달리 뷰포트보다 큰 요소도 온전히 담을 수 있다.
    */
   async _captureElement(
@@ -749,7 +749,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: 요소 영역을 CDP clip 으로 캡처.
+   * auto-chrome-mcp fork: 요소 영역을 CDP clip 으로 캡처.
    * clip 은 문서(페이지) 좌표계의 CSS 픽셀이므로 뷰포트 기준 rect 에 스크롤 오프셋을 더한다.
    * 결과 이미지는 기존 crop 경로와 동일하게 물리 픽셀(= CSS * dpr) 해상도를 갖는다.
    */
@@ -800,7 +800,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: 전체 페이지를 CDP 한 번의 captureBeyondViewport 로 캡처.
+   * auto-chrome-mcp fork: 전체 페이지를 CDP 한 번의 captureBeyondViewport 로 캡처.
    * 스크롤-스티칭이 필요 없고, 대상 탭이 보이지 않아도 동작한다.
    * 캡처가 불가능/위험하다고 판단되면 null 을 돌려 스티칭 경로로 넘긴다.
    */

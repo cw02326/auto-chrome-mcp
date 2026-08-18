@@ -1,5 +1,5 @@
 /**
- * Background work mode policy gate (scalemaker fork).
+ * Background work mode policy gate (auto-chrome-mcp fork).
  *
  * ON 이면 MCP 도구 실행이 사용자의 브라우징을 방해하지 않는다:
  *   - 도구 args 에 background 가 미지정이면 true 로 주입 (tools/index.ts handleCallTool 게이트)

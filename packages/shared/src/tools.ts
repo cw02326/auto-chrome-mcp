@@ -1521,7 +1521,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.REQUEST_USER_CONSENT,
     description:
-      'Request user consent BEFORE invoking sensitive site features (camera, microphone, geolocation). Returns { approved, source } JSON. If the matching popup toggle is ON, returns { approved: true, source: "toggle" } immediately and sticky-sets the current active tab origin to allow via chrome.contentSettings (camera/mic/location). If OFF, opens a small consent popup window and awaits the user response (max 60s). scalemaker fork v1.0.32+ (geolocation moved from bulk-install to per-origin consent gate for parity with camera/mic and OS-permission consistency); design: docs/plans/2026-05-29-site-permissions-design.md.',
+      'Request user consent BEFORE invoking sensitive site features (camera, microphone, geolocation). Returns { approved, source } JSON. If the matching popup toggle is ON, returns { approved: true, source: "toggle" } immediately and sticky-sets the current active tab origin to allow via chrome.contentSettings (camera/mic/location). If OFF, opens a small consent popup window and awaits the user response (max 60s). auto-chrome-mcp fork v1.0.32+ (geolocation moved from bulk-install to per-origin consent gate for parity with camera/mic and OS-permission consistency); design: docs/plans/2026-05-29-site-permissions-design.md.',
     inputSchema: {
       type: 'object',
       properties: {

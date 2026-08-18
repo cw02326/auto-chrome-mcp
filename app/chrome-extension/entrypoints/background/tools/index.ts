@@ -118,7 +118,7 @@ async function applyBackgroundModeGate(name: string, args: any): Promise<any> {
 }
 
 /**
- * 탭 단위 직렬화 (scalemaker fork): 같은 탭을 대상으로 한 도구 호출은 순차 실행.
+ * 탭 단위 직렬화 (auto-chrome-mcp fork): 같은 탭을 대상으로 한 도구 호출은 순차 실행.
  * 두 세션이 같은 탭에 동시에 입력을 보내 꼬이는 것을 방지한다.
  * tabId 를 특정할 수 없는 호출은 락 없이 실행.
  */
@@ -142,7 +142,7 @@ async function withTabLock<T>(tabId: unknown, fn: () => Promise<T>): Promise<T> 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * scalemaker fork(F4): 도구 실패 시 대상 탭 화면을 JPEG 로 캡처해 결과에 첨부.
+ * auto-chrome-mcp fork(F4): 도구 실패 시 대상 탭 화면을 JPEG 로 캡처해 결과에 첨부.
  * chrome.storage.local 'errorScreenshotOnFailure' (기본 ON) 로 끌 수 있다.
  */
 async function isErrorScreenshotEnabled(): Promise<boolean> {
@@ -161,7 +161,7 @@ async function captureFailureScreenshot(tabId: number): Promise<string | null> {
       quality: 50,
     });
     if (typeof shot?.data !== 'string' || shot.data.length === 0) return null;
-    // scalemaker fork(T7): 원인 파악엔 축소본으로 충분 — 이미지 토큰 최소화
+    // auto-chrome-mcp fork(T7): 원인 파악엔 축소본으로 충분 — 이미지 토큰 최소화
     try {
       const { compressImage } = await import('@/utils/image-utils');
       const compressed = await compressImage(`data:image/jpeg;base64,${shot.data}`, {
@@ -205,7 +205,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
     // 배치 자체가 락을 잡으면 step 과 이중 획득 → 교착이므로 배치는 락 없이 실행.
     const lockTabId = param.name === TOOL_NAMES.BROWSER.BATCH ? undefined : args?.tabId;
 
-    // scalemaker fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
+    // auto-chrome-mcp fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
     // 새 탭/팝업 창을 열었으면 결과에 알림을 첨부한다. 이게 없으면 모델은 팝업이
     // 열린 사실을 모르고 원래 탭에만 명령을 보내다 실패한다.
     const spawnWatchStart = Date.now();
@@ -216,7 +216,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
       openerCandidates.push(sessionWorkTab);
     }
 
-    // scalemaker fork(F2): 로그인 리다이렉트 감지용 — 실행 전 대상 탭 URL 기록
+    // auto-chrome-mcp fork(F2): 로그인 리다이렉트 감지용 — 실행 전 대상 탭 URL 기록
     const primaryTabId = openerCandidates.length > 0 ? openerCandidates[0] : null;
     let preCallUrl: string | null = null;
     if (primaryTabId !== null) {
@@ -263,7 +263,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
     }
 
     if (result && Array.isArray(result.content)) {
-      // scalemaker fork(F5): 이 호출 중 시작된 다운로드를 결과에 첨부
+      // auto-chrome-mcp fork(F5): 이 호출 중 시작된 다운로드를 결과에 첨부
       const downloads = getDownloadsSince(spawnWatchStart);
       if (downloads.length > 0) {
         result.content.push({
@@ -283,7 +283,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
         });
       }
 
-      // scalemaker fork(F2): 실행 후 대상 탭이 로그인 페이지로 "바뀐" 경우 경고
+      // auto-chrome-mcp fork(F2): 실행 후 대상 탭이 로그인 페이지로 "바뀐" 경우 경고
       if (primaryTabId !== null && !looksLikeLoginUrl(preCallUrl)) {
         try {
           const postUrl = (await chrome.tabs.get(primaryTabId)).url ?? null;
@@ -304,7 +304,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
         }
       }
 
-      // scalemaker fork(F4): 도구 실패 시 현재 화면 자동 첨부 (원인 파악용)
+      // auto-chrome-mcp fork(F4): 도구 실패 시 현재 화면 자동 첨부 (원인 파악용)
       if (result.isError === true && primaryTabId !== null && (await isErrorScreenshotEnabled())) {
         const jpegBase64 = await captureFailureScreenshot(primaryTabId);
         if (jpegBase64) {
@@ -334,10 +334,10 @@ export const handleCallTool = async (param: ToolCallParam) => {
   }
 };
 
-// scalemaker fork: chrome_batch 가 step 을 같은 게이트(handleCallTool)로 재진입시키도록 배선.
+// auto-chrome-mcp fork: chrome_batch 가 step 을 같은 게이트(handleCallTool)로 재진입시키도록 배선.
 // (barrel 재수출하면 toolsMap 에 함수가 섞이므로 직접 import — batch.ts 주석 참고)
 setBatchToolInvoker(handleCallTool);
 
-// scalemaker fork: chrome_shortcut(run) 도 저장된 step 을 같은 게이트로 실행
+// auto-chrome-mcp fork: chrome_shortcut(run) 도 저장된 step 을 같은 게이트로 실행
 import { setShortcutToolInvoker } from './browser/shortcut';
 setShortcutToolInvoker(handleCallTool);

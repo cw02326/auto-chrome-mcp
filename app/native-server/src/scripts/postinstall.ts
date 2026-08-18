@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import { COMMAND_NAME, EXTENSION_ID } from './constant';
 import { colorText, tryRegisterUserLevelHost, writeNodePathFile } from './utils';
 
-// scalemaker fork: extension zip 자동 다운로드
+// auto-chrome-mcp fork: extension zip 자동 다운로드
 // - 앱 런타임 상태 (cdp-port 등) 는 ~/.mcp-chrome-scalemaker/ 에 유지
 // - 사용자가 Finder 에서 직접 찾아야 하는 extension 폴더는 ~/Downloads/ 에 둠
 // - v1.0.20: 폴더명에 버전 박제 — 업데이트 시 구버전과 한눈에 구분 + 사용자가
@@ -151,7 +151,7 @@ async function downloadAndExtractExtension(): Promise<string | null> {
 
     // v1.0.6: Finder 에서 폴더 들어왔을 때 한눈에 버전 보이게 VERSION 파일 작성.
     try {
-      const versionLine = `mcp-chrome-scalemaker v${SCALEMAKER_VERSION}\n`;
+      const versionLine = `auto-chrome-mcp v${SCALEMAKER_VERSION}\n`;
       const buildLine = `Installed: ${new Date().toISOString()}\n`;
       const releaseLine = `Release: https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker/releases/tag/scalemaker-v${SCALEMAKER_VERSION}\n`;
       const extIdLine = `Extension ID: ${EXTENSION_ID}\n`;
@@ -188,7 +188,7 @@ function printDownloadFailureGuide(errorMessage: string): void {
 }
 
 function printScalemakerNextSteps(extDir: string | null): void {
-  console.log('\n' + colorText('===== mcp-chrome-scalemaker — 설치 완료 =====', 'green'));
+  console.log('\n' + colorText('===== auto-chrome-mcp — 설치 완료 =====', 'green'));
   if (extDir) {
     console.log('\n' + colorText('[1] Chrome 확장 로드:', 'blue'));
     console.log(`    chrome://extensions → Developer mode ON → "Load unpacked"`);
@@ -204,7 +204,7 @@ function printScalemakerNextSteps(extDir: string | null): void {
   );
   console.log(`    ┌────────────────────────────────────────────────────────────────────┐`);
   console.log(`    지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP`);
-  console.log(`    (mcp-chrome-scalemaker) 를 등록해줘. ~/.claude.json 같은 전역 설정엔`);
+  console.log(`    (auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정엔`);
   console.log(`    손대지 마. 이름 "chrome-mcp-stdio", command "node", args ["<npm root -g>`);
   console.log(`    /mcp-chrome-scalemaker-bridge/dist/mcp/mcp-server-stdio.js"], env`);
   console.log(`    { "CHROME_PORT": "12320" }. 먼저 \`npm root -g\` 실행해서 경로 얻고,`);
@@ -487,7 +487,7 @@ function printManualInstructions(): void {
  * Main entry — postinstall orchestrator.
  */
 /**
- * scalemaker fork v1.0.30+: Claude Code troubleshooting 스킬 자동 설치.
+ * auto-chrome-mcp fork v1.0.30+: Claude Code troubleshooting 스킬 자동 설치.
  *
  * 정책:
  * - ~/.claude/ 가 없으면 (= Claude Code 미설치 사용자) skip
@@ -582,9 +582,9 @@ async function main(): Promise<void> {
     // v1.0.36: agent chat 제거 → 잔존 sqlite DB 파일 청소 (있을 경우만)
     removeLegacyAgentDb();
     await tryRegisterNativeHost();
-    // scalemaker fork: extension zip 자동 다운로드 + 압축 해제
+    // auto-chrome-mcp fork: extension zip 자동 다운로드 + 압축 해제
     const extDir = await downloadAndExtractExtension();
-    // scalemaker fork v1.0.30+: Claude Code troubleshooting 스킬 자동 설치
+    // auto-chrome-mcp fork v1.0.30+: Claude Code troubleshooting 스킬 자동 설치
     installClaudeCodeSkill();
     printScalemakerNextSteps(extDir);
   } else {

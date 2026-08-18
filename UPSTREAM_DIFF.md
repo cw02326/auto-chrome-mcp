@@ -1,4 +1,4 @@
-# Upstream Diff — mcp-chrome-scalemaker vs hangwin/mcp-chrome
+# Upstream Diff — auto-chrome-mcp vs hangwin/mcp-chrome
 
 **Last sync**: 2026-05-25 (fork 생성일)
 **Baseline commit**: `f48e71751e00bc09725c7e173423cff4f2ccd12a` (upstream master @ Merge PR #272)

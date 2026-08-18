@@ -893,7 +893,7 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
 
   async execute(args?: {
     tabId?: number;
-    // scalemaker fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+    // auto-chrome-mcp fork: 페이지네이션 — STOP 결과의 requests 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
     limit?: number;
     offset?: number;
     countOnly?: boolean;
@@ -969,7 +969,7 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // scalemaker fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
+      // auto-chrome-mcp fork: 정적 리소스 필터링(존재 시) 이후의 requests 배열에 limit/offset/countOnly 페이지네이션 적용
       const allRequests: NetworkRequestInfo[] = stopResult.data?.requests || [];
       const totalCount = allRequests.length;
       const isCountOnly = args?.countOnly === true;

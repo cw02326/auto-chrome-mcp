@@ -3,7 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
-// scalemaker fork: iframe 안의 요소를 찾기 위한 프레임 탐색 공용 모듈
+// auto-chrome-mcp fork: iframe 안의 요소를 찾기 위한 프레임 탐색 공용 모듈
 import {
   isElementNotFoundError,
   probeActionFor,
@@ -24,7 +24,7 @@ interface ClickToolParams {
   coordinates?: Coordinates; // Coordinates to click at (x, y relative to viewport)
   waitForNavigation?: boolean; // Whether to wait for navigation to complete after click
   timeout?: number; // Timeout in milliseconds for waiting for the element or navigation
-  // scalemaker fork: frameId 를 주면 프레임 탐색 없이 해당 프레임에서 바로 실행한다.
+  // auto-chrome-mcp fork: frameId 를 주면 프레임 탐색 없이 해당 프레임에서 바로 실행한다.
   // 생략하면 top frame 을 먼저 시도하고, 요소를 못 찾은 경우에만 iframe 들을 탐색한다.
   frameId?: number; // Target frame for ref/selector resolution
   double?: boolean; // Perform double click when true
@@ -43,7 +43,7 @@ class ClickTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.CLICK;
 
   /**
-   * scalemaker fork: top frame 에서 요소를 못 찾았을 때 하위 iframe 들을 탐색한다.
+   * auto-chrome-mcp fork: top frame 에서 요소를 못 찾았을 때 하위 iframe 들을 탐색한다.
    * probe 는 조회 전용 메시지라 부수효과가 없다.
    */
   private async findTargetFrame(
@@ -99,7 +99,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       let finalRef = args.ref;
       let finalSelector = selector;
 
-      // scalemaker fork: frameId 를 명시하면 그 프레임만 대상으로 하고 탐색을 건너뛴다.
+      // auto-chrome-mcp fork: frameId 를 명시하면 그 프레임만 대상으로 하고 탐색을 건너뛴다.
       const explicitFrameId = typeof frameId === 'number' ? frameId : undefined;
       let targetFrameId: number | undefined = explicitFrameId;
       let resolvedFrame: FrameProbeHit | null = null;
@@ -131,7 +131,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           resolveError = error instanceof Error ? error.message : String(error);
         }
 
-        // scalemaker fork: top frame 에서 XPath 를 못 찾으면 iframe 들을 탐색해 다시 시도한다.
+        // auto-chrome-mcp fork: top frame 에서 XPath 를 못 찾으면 iframe 들을 탐색해 다시 시도한다.
         if (!(resolved && resolved.success && resolved.ref) && explicitFrameId === undefined) {
           const hit = await this.findTargetFrame(tab.id, { selector, isXPath: true });
           if (hit) {
@@ -205,7 +205,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       try {
         result = await this.sendMessageToTab(tab.id, clickMessage, targetFrameId);
       } catch (error) {
-        // scalemaker fork: top frame 에서 "요소 없음"이면 iframe 들을 탐색해 재시도한다.
+        // auto-chrome-mcp fork: top frame 에서 "요소 없음"이면 iframe 들을 탐색해 재시도한다.
         // 좌표 클릭, 명시적 frameId, 연결 오류 등은 기존과 동일하게 그대로 실패시킨다.
         const message = error instanceof Error ? error.message : String(error);
         const canSearchFrames =
@@ -246,7 +246,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         clickMethod,
       };
 
-      // scalemaker fork: top frame 이 아닌 프레임에서 실행된 경우에만 프레임 정보를 덧붙인다.
+      // auto-chrome-mcp fork: top frame 이 아닌 프레임에서 실행된 경우에만 프레임 정보를 덧붙인다.
       // (top frame 기본 경로의 응답 형식은 그대로 유지)
       if (typeof targetFrameId === 'number' && targetFrameId !== 0) {
         payload.frameId = targetFrameId;
@@ -280,7 +280,7 @@ interface FillToolParams {
   ref?: string; // Element ref from accessibility tree
   // Accept string | number | boolean for broader form input coverage
   value: string | number | boolean;
-  // scalemaker fork: frameId 를 주면 프레임 탐색 없이 해당 프레임에서 바로 실행한다.
+  // auto-chrome-mcp fork: frameId 를 주면 프레임 탐색 없이 해당 프레임에서 바로 실행한다.
   // 생략하면 top frame 을 먼저 시도하고, 요소를 못 찾은 경우에만 iframe 들을 탐색한다.
   frameId?: number;
   tabId?: number; // target existing tab id
@@ -294,7 +294,7 @@ class FillTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.FILL;
 
   /**
-   * scalemaker fork: top frame 에서 요소를 못 찾았을 때 하위 iframe 들을 탐색한다.
+   * auto-chrome-mcp fork: top frame 에서 요소를 못 찾았을 때 하위 iframe 들을 탐색한다.
    * probe 는 조회 전용 메시지라 부수효과가 없다.
    */
   private async findTargetFrame(
@@ -340,7 +340,7 @@ class FillTool extends BaseBrowserToolExecutor {
       let finalRef = ref;
       let finalSelector = selector;
 
-      // scalemaker fork: frameId 를 명시하면 그 프레임만 대상으로 하고 탐색을 건너뛴다.
+      // auto-chrome-mcp fork: frameId 를 명시하면 그 프레임만 대상으로 하고 탐색을 건너뛴다.
       const explicitFrameId = typeof frameId === 'number' ? frameId : undefined;
       let targetFrameId: number | undefined = explicitFrameId;
       let resolvedFrame: FrameProbeHit | null = null;
@@ -372,7 +372,7 @@ class FillTool extends BaseBrowserToolExecutor {
           resolveError = error instanceof Error ? error.message : String(error);
         }
 
-        // scalemaker fork: top frame 에서 XPath 를 못 찾으면 iframe 들을 탐색해 다시 시도한다.
+        // auto-chrome-mcp fork: top frame 에서 XPath 를 못 찾으면 iframe 들을 탐색해 다시 시도한다.
         if (!(resolved && resolved.success && resolved.ref) && explicitFrameId === undefined) {
           const hit = await this.findTargetFrame(tab.id, { selector, isXPath: true });
           if (hit) {
@@ -439,7 +439,7 @@ class FillTool extends BaseBrowserToolExecutor {
       try {
         result = await this.sendMessageToTab(tab.id, fillMessage, targetFrameId);
       } catch (error) {
-        // scalemaker fork: top frame 에서 "요소 없음"이면 iframe 들을 탐색해 재시도한다.
+        // auto-chrome-mcp fork: top frame 에서 "요소 없음"이면 iframe 들을 탐색해 재시도한다.
         const message = error instanceof Error ? error.message : String(error);
         const canSearchFrames =
           explicitFrameId === undefined &&
@@ -468,7 +468,7 @@ class FillTool extends BaseBrowserToolExecutor {
         elementInfo: result.elementInfo,
       };
 
-      // scalemaker fork: top frame 이 아닌 프레임에서 실행된 경우에만 프레임 정보를 덧붙인다.
+      // auto-chrome-mcp fork: top frame 이 아닌 프레임에서 실행된 경우에만 프레임 정보를 덧붙인다.
       if (typeof targetFrameId === 'number' && targetFrameId !== 0) {
         payload.frameId = targetFrameId;
         const info = resolvedFrame ?? (await resolveFrameInfo(tab.id, targetFrameId));

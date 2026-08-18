@@ -1,5 +1,5 @@
 /**
- * Automation guard (scalemaker fork) — 차단(밴) 예방 안전장치.
+ * Automation guard (auto-chrome-mcp fork) — 차단(밴) 예방 안전장치.
  *
  * E1. 도메인별 속도 제한(soft throttle): 같은 도메인에 액션성 도구 호출이 몰리면
  *     초과분에 지연을 넣어 버스트를 완만하게 만든다. 차단하지 않고 속도만 늦춘다.

@@ -50,7 +50,7 @@ CLAUDE.md
 
 .docs/
 .claude/
-# scalemaker fork — private RSA key for deterministic extension ID (NEVER commit)
+# auto-chrome-mcp fork — private RSA key for deterministic extension ID (NEVER commit)
 app/chrome-extension/.keys/
 .extension-id
 .extension-pubkey-b64

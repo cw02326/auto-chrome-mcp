@@ -19,7 +19,7 @@ interface HistoryToolParams {
   endTime?: string;
   maxResults?: number;
   excludeCurrentTabs?: boolean;
-  // scalemaker fork: 페이지네이션 — 필터링 이후 items 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
+  // auto-chrome-mcp fork: 페이지네이션 — 필터링 이후 items 배열을 자르는 limit/offset, 개수만 반환하는 countOnly
   limit?: number;
   offset?: number;
   countOnly?: boolean;
@@ -38,7 +38,7 @@ interface HistoryResult {
   success: boolean;
   items?: HistoryItem[];
   totalCount: number;
-  // scalemaker fork: 페이지네이션 메타 — 반환된 개수, 요청 offset, 다음 페이지 존재 여부
+  // auto-chrome-mcp fork: 페이지네이션 메타 — 반환된 개수, 요청 offset, 다음 페이지 존재 여부
   returnedCount: number;
   offset: number;
   hasMore: boolean;
@@ -127,7 +127,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
         text = '',
         maxResults = 100, // Default to 100 results
         excludeCurrentTabs = false,
-        limit = 100, // scalemaker fork: 결과 배열 페이지네이션 기본 상한(기존 maxResults 기본값과 동일)
+        limit = 100, // auto-chrome-mcp fork: 결과 배열 페이지네이션 기본 상한(기존 maxResults 기본값과 동일)
         offset = 0,
         countOnly = false,
       } = args;
@@ -201,7 +201,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // scalemaker fork: 필터링(excludeCurrentTabs) 이후 items 배열에 limit/offset/countOnly 페이지네이션 적용
+      // auto-chrome-mcp fork: 필터링(excludeCurrentTabs) 이후 items 배열에 limit/offset/countOnly 페이지네이션 적용
       const totalCount = filteredItems.length;
       const normalizedOffset = Math.max(
         0,

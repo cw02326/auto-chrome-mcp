@@ -1,5 +1,5 @@
 /**
- * Download tracker (scalemaker fork).
+ * Download tracker (auto-chrome-mcp fork).
  *
  * 도구 호출(클릭 등)이 파일 다운로드를 유발해도 결과에 아무 표시가 없어
  * 모델이 다운로드 사실·저장 경로를 모르는 문제 해결. 게이트가 도구 실행

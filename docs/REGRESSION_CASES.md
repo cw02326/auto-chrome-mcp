@@ -1,4 +1,4 @@
-# Regression Cases — mcp-chrome-scalemaker
+# Regression Cases — auto-chrome-mcp
 
 > `docs/DESIGN.md` §3 의 회귀 8 케이스 자동화 진행 상황과 사용자 환경 검증 방법.
 

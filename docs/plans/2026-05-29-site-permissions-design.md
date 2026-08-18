@@ -244,7 +244,7 @@ app/chrome-extension/
 ```markdown
 ## ⚠️ 사이트 권한 자동 허용 — 알아두세요
 
-scalemaker 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 prompt 를
+auto-chrome-mcp 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 prompt 를
 **자동으로 처리**합니다 (두 갈래):
 
 | 권한                | 처리 시점                        | 효과                                                                        |
@@ -265,7 +265,7 @@ scalemaker 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 promp
   사용자에게 허용 여부를 묻습니다.
 - 끄려면: 확장 아이콘 클릭 → popup 하단의 "권한 설정" 섹션에서 토글 OFF.
 
-> **보안 경고** — 이 설정은 scalemaker 의 dev / 자동화 용도에 최적화된 것입니다.
+> **보안 경고** — 이 설정은 auto-chrome-mcp 의 dev / 자동화 용도에 최적화된 것입니다.
 > 같은 Chrome 프로필로 일반 웹서핑도 한다면, 임의 사이트가 카메라 / 마이크 /
 > 위치 정보에 접근할 수 있습니다. 별도 Chrome 프로필 사용을 강하게 권장합니다.
 ```
@@ -281,7 +281,7 @@ scalemaker 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 promp
 ## 14. 보안 고려
 
 - **비민감 5종 (popups/notifications/clipboard/automaticDownloads/location)** 은 install 시점부터 모든 사이트에 `allow`. 일반 사용자가 같은 Chrome 프로필로 웹서핑하면 임의 사이트의 알림 / 위치 정보 prompt 가 안 뜸 → 위험. README §13.1 의 별도 Chrome 프로필 권장으로 완화.
-- **민감 2종 (camera/microphone)** 은 **AI 가 실제로 방문/조작한 사이트에 한해서만** 누적 allow. 사용자가 직접 방문하는 사이트에는 영향 0 (해당 origin set 안 되어 있음). scalemaker 의 신뢰 모델 = "AI 에게 위임한 사이트 = 사용자가 의식적으로 신뢰한 사이트" 와 일치.
+- **민감 2종 (camera/microphone)** 은 **AI 가 실제로 방문/조작한 사이트에 한해서만** 누적 allow. 사용자가 직접 방문하는 사이트에는 영향 0 (해당 origin set 안 되어 있음). auto-chrome-mcp 의 신뢰 모델 = "AI 에게 위임한 사이트 = 사용자가 의식적으로 신뢰한 사이트" 와 일치.
 - Popup 토글은 **민감 2종에 대해서만** 의미가 있음 (consent 거치고 origin set 까지의 게이트). 비민감 5종은 토글과 무관하게 항상 자동 허용.
 - chrome://settings 에서 사용자가 명시적으로 카메라/마이크를 차단해뒀다면 extension 의 set('allow') 가 못 override. 그 경우 native prompt 가 deny 됨 — 의도된 사용자 결정이라 그대로 존중.
 
@@ -291,7 +291,7 @@ scalemaker 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 promp
 | --------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MCP 함수 1개 (`chrome_request_user_consent`)        | set/get/reset 3개 함수로 contentSettings 매번 조작 | install 시 한 번 세팅하고 끝내면 함수 surface 가 단순해지고 AI 가 매번 권한 만질 일 없음                                                                                                                                                                                                              |
 | 무조건 글로벌 (`<all_urls>`)                        | origin 별 토글 / scope 인자                        | "모든 사이트에서 작동해야" 라는 사용자 요구                                                                                                                                                                                                                                                           |
-| 토글 default ON                                     | default OFF (보안 우선)                            | scalemaker 는 AI 자동화가 주 목적 — 매 호출마다 confirm 뜨면 흐름 끊김. 사용자 요청에 따라 "기본 위임" 으로 결정. 사용자는 popup 에서 언제든 OFF 가능. update 시엔 사용자가 내린 OFF 를 덮어쓰지 않음.                                                                                                |
+| 토글 default ON                                     | default OFF (보안 우선)                            | auto-chrome-mcp 는 AI 자동화가 주 목적 — 매 호출마다 confirm 뜨면 흐름 끊김. 사용자 요청에 따라 "기본 위임" 으로 결정. 사용자는 popup 에서 언제든 OFF 가능. update 시엔 사용자가 내린 OFF 를 덮어쓰지 않음.                                                                                           |
 | Consent 창 = 별도 popup window                      | Chrome notification / 새 탭 / side panel           | 작은 modal-like 창이 가장 명확하고 user gesture 없이 띄울 수 있음                                                                                                                                                                                                                                     |
 | "다음부터 묻지 않기" 체크박스                       | 항상 묻기                                          | 매번 confirm 귀찮은 사용자가 그 자리에서 ON 가능. Default 체크 해제로 명시적 opt-in 유지                                                                                                                                                                                                              |
 | 60초 timeout                                        | 무한 대기                                          | AI tool call 이 무한히 매달리지 않도록                                                                                                                                                                                                                                                                |

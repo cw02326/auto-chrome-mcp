@@ -4,9 +4,9 @@ import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { listMarkersForUrl } from '@/entrypoints/background/element-marker/element-marker-storage';
-// scalemaker fork: iframe 안의 콘텐츠까지 읽기 위한 프레임 열거 유틸
+// auto-chrome-mcp fork: iframe 안의 콘텐츠까지 읽기 위한 프레임 열거 유틸
 import { FRAME_COLLECT_MAX_FRAMES, listChildFrames } from './frame-resolver';
-// scalemaker fork(T2): 직전 호출과 내용이 같으면 본문을 다시 보내지 않기 위한 diff 캐시
+// auto-chrome-mcp fork(T2): 직전 호출과 내용이 같으면 본문을 다시 보내지 않기 위한 diff 캐시
 import { diffCheck } from '@/utils/content-cache';
 
 interface ReadPageStats {
@@ -21,16 +21,16 @@ interface ReadPageParams {
   refId?: string; // focus on subtree rooted at this refId
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
-  // scalemaker fork: true 면 top frame 외에 iframe 들의 결과도 함께 수집해 병합한다.
+  // auto-chrome-mcp fork: true 면 top frame 외에 iframe 들의 결과도 함께 수집해 병합한다.
   // 기본값 false → 기존 단일 프레임 동작 그대로.
   allFrames?: boolean;
-  // scalemaker fork(T2): 기본 true. 직전 호출과 본문이 동일하면 본문 없이 unchanged 마커만 반환.
+  // auto-chrome-mcp fork(T2): 기본 true. 직전 호출과 본문이 동일하면 본문 없이 unchanged 마커만 반환.
   diff?: boolean;
-  // scalemaker fork(T4): 기본 true. 무손실 압축 포맷. false 면 종전 포맷을 그대로 재현.
+  // auto-chrome-mcp fork(T4): 기본 true. 무손실 압축 포맷. false 면 종전 포맷을 그대로 재현.
   compact?: boolean;
 }
 
-/** scalemaker fork: allFrames 병합 결과에서 프레임 하나에 대한 요약 */
+/** auto-chrome-mcp fork: allFrames 병합 결과에서 프레임 하나에 대한 요약 */
 interface ReadPageFrameSummary {
   frameId: number;
   frameUrl: string;
@@ -41,23 +41,23 @@ interface ReadPageFrameSummary {
   reason?: string;
 }
 
-/** scalemaker fork: 프레임에서 수집한 접근성 트리 결과 */
+/** auto-chrome-mcp fork: 프레임에서 수집한 접근성 트리 결과 */
 interface ReadPageFrameResult {
   frameId: number;
   frameUrl: string;
   pageContent: string;
   refMapCount: number;
-  /** scalemaker fork(T4): 압축 전 문자 수(압축 안 했으면 null) */
+  /** auto-chrome-mcp fork(T4): 압축 전 문자 수(압축 안 했으면 null) */
   rawChars: number | null;
 }
 
 /**
- * scalemaker fork: allFrames 병합 시 pageContent 총량 상한(문자 수).
+ * auto-chrome-mcp fork: allFrames 병합 시 pageContent 총량 상한(문자 수).
  * top frame 은 항상 통째로 포함하고, 남은 예산 안에서 큰 프레임부터 채운다.
  */
 const MERGED_PAGE_CONTENT_MAX_CHARS = 80000;
 
-/** scalemaker fork: allFrames 폴백(interactive elements) 시 프레임당 / 전체 요소 상한 */
+/** auto-chrome-mcp fork: allFrames 폴백(interactive elements) 시 프레임당 / 전체 요소 상한 */
 const FRAME_FALLBACK_ELEMENTS_PER_FRAME = 50;
 const FRAME_FALLBACK_ELEMENTS_TOTAL = 250;
 
@@ -65,7 +65,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.READ_PAGE;
 
   /**
-   * scalemaker fork: 하위 iframe 들에서 접근성 트리를 수집한다(allFrames=true 일 때만 호출).
+   * auto-chrome-mcp fork: 하위 iframe 들에서 접근성 트리를 수집한다(allFrames=true 일 때만 호출).
    * 프레임마다 개별적으로 helper 주입을 보장한 뒤 메시지를 보낸다.
    * 실패하거나 내용이 비어 있는 프레임은 조용히 제외한다.
    */
@@ -98,7 +98,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
             filter: message.filter,
             depth: message.depth,
-            // scalemaker fork(T4): 프레임 트리도 동일하게 압축한다.
+            // auto-chrome-mcp fork(T4): 프레임 트리도 동일하게 압축한다.
             compact: message.compact,
           },
           frame.frameId,
@@ -129,7 +129,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: 하위 iframe 들에서 interactive elements 를 수집한다(allFrames 폴백 경로).
+   * auto-chrome-mcp fork: 하위 iframe 들에서 interactive elements 를 수집한다(allFrames 폴백 경로).
    */
   private async collectFrameInteractiveElements(tabId: number): Promise<any[]> {
     const frames = await listChildFrames(tabId, Math.max(0, FRAME_COLLECT_MAX_FRAMES - 1));
@@ -172,7 +172,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   }
 
   /**
-   * scalemaker fork: top frame 콘텐츠 + 프레임 콘텐츠를 크기 상한 안에서 병합한다.
+   * auto-chrome-mcp fork: top frame 콘텐츠 + 프레임 콘텐츠를 크기 상한 안에서 병합한다.
    * top frame 은 항상 전부 포함하고, 남은 예산 안에서 큰 프레임부터 채운다.
    */
   private mergeFrameContent(
@@ -218,11 +218,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   // Execute read page
   async execute(args: ReadPageParams): Promise<ToolResult> {
     const { filter, depth, refId } = args || {};
-    // scalemaker fork: allFrames 옵션 (기본 false → 기존 동작 유지)
+    // auto-chrome-mcp fork: allFrames 옵션 (기본 false → 기존 동작 유지)
     const allFrames = args?.allFrames === true;
-    // scalemaker fork(T4): compact 기본 true. compact:false 는 종전 포맷 그대로의 탈출구.
+    // auto-chrome-mcp fork(T4): compact 기본 true. compact:false 는 종전 포맷 그대로의 탈출구.
     const compact = args?.compact !== false;
-    // scalemaker fork(T2): diff 기본 true. diff:false 면 항상 본문을 다시 보낸다.
+    // auto-chrome-mcp fork(T2): diff 기본 true. diff:false 면 항상 본문을 다시 보낸다.
     const useDiff = args?.diff !== false;
 
     // Validate refId parameter
@@ -274,11 +274,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         filter: filter || null,
         depth: requestedDepth,
         refId: focusRefId || undefined,
-        // scalemaker fork(T4): helper 는 compact:true 일 때만 압축 패스를 태운다(기본 false).
+        // auto-chrome-mcp fork(T4): helper 는 compact:true 일 때만 압축 패스를 태운다(기본 false).
         compact,
       };
 
-      // scalemaker fork: allFrames 에서는 top frame 실패가 iframe 수집까지 막지 않도록 오류를 흡수한다.
+      // auto-chrome-mcp fork: allFrames 에서는 top frame 실패가 iframe 수집까지 막지 않도록 오류를 흡수한다.
       // allFrames=false 면 기존과 동일하게 그대로 throw 된다.
       let resp: any;
       let topFrameError: string | null = null;
@@ -316,13 +316,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Skip sparse heuristics when user explicitly controls output
       const isSparse = !userControlled && lines < 10 && refCount < 3;
 
-      // scalemaker fork(T4): 압축으로 아낀 문자 수(실제로 응답에 실린 콘텐츠 기준으로만 합산)
+      // auto-chrome-mcp fork(T4): 압축으로 아낀 문자 수(실제로 응답에 실린 콘텐츠 기준으로만 합산)
       let compactSavedChars =
         compact && typeof resp?.rawChars === 'number'
           ? Math.max(0, resp.rawChars - pageContent.length)
           : 0;
 
-      // scalemaker fork: allFrames=true 일 때만 하위 iframe 들의 트리를 추가 수집해 병합한다.
+      // auto-chrome-mcp fork: allFrames=true 일 때만 하위 iframe 들의 트리를 추가 수집해 병합한다.
       // refId 는 프레임 로컬이므로 refId 지정 시에는 수집하지 않는다.
       let mergedPageContent = pageContent;
       let frameSummaries: ReadPageFrameSummary[] | null = null;
@@ -354,7 +354,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // scalemaker fork: iframe 에서 내용을 찾았다면 top frame 이 비어 있어도 sparse 폴백을 타지 않는다.
+      // auto-chrome-mcp fork: iframe 에서 내용을 찾았다면 top frame 이 비어 있어도 sparse 폴백을 타지 않는다.
       const effectiveSparse = isSparse && !hasFrameContent;
 
       // Build user-marked elements for inclusion
@@ -409,7 +409,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         reason: null,
       };
 
-      // scalemaker fork: allFrames 를 켠 경우에만 프레임 메타데이터/안내를 덧붙인다.
+      // auto-chrome-mcp fork: allFrames 를 켠 경우에만 프레임 메타데이터/안내를 덧붙인다.
       // (기본 경로의 응답 형식은 그대로 유지)
       if (allFrames) {
         basePayload.allFrames = true;
@@ -420,10 +420,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       }
 
       // Normal path: return tree
-      // scalemaker fork: top frame 트리가 실패해도 iframe 에서 내용을 얻었다면 그대로 반환한다.
+      // auto-chrome-mcp fork: top frame 트리가 실패해도 iframe 에서 내용을 얻었다면 그대로 반환한다.
       // (allFrames=false 면 hasFrameContent 는 항상 false → 기존 조건과 동일)
       if ((treeOk || hasFrameContent) && !effectiveSparse) {
-        // scalemaker fork(T4): 압축 포맷 안내 + 절감량 보고 (트리 본문을 실제로 돌려주는 경로에서만)
+        // auto-chrome-mcp fork(T4): 압축 포맷 안내 + 절감량 보고 (트리 본문을 실제로 돌려주는 경로에서만)
         if (compact) {
           basePayload.compact = true;
           basePayload.compactSavedChars = compactSavedChars;
@@ -432,7 +432,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             ' Compact format (lossless): indentation is 1 space per tree level; the bare token ref_N is the element ref (pass it as refId/ref); @x,y is the element center. Unnamed empty wrapper nodes are collapsed. Pass compact:false for the verbose format.';
         }
 
-        // scalemaker fork(T2): 직전 호출과 본문이 완전히 같으면 본문을 다시 보내지 않는다.
+        // auto-chrome-mcp fork(T2): 직전 호출과 본문이 완전히 같으면 본문을 다시 보내지 않는다.
         //
         // ref 수명 확인 결과(핵심): ref 는 매 호출마다 새로 발급되지 않는다.
         // helper 의 window.__claudeElementMap 은 페이지 수명 동안 유지되고, traverse 는 요소마다
@@ -511,7 +511,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           const seen = new Set(markerEls.map((e) => e.selector));
           let merged = [...markerEls, ...limited.filter((e: any) => !seen.has(e.selector))];
 
-          // scalemaker fork: allFrames 폴백 — iframe 들의 interactive elements 도 덧붙인다.
+          // auto-chrome-mcp fork: allFrames 폴백 — iframe 들의 interactive elements 도 덧붙인다.
           if (allFrames) {
             try {
               const frameEls = await this.collectFrameInteractiveElements(tab.id);

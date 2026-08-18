@@ -4,7 +4,7 @@ import { ref } from 'vue';
 // agent-theme 디자인 토큰 시스템 (v1.0.36 chat UI 제거됐으나 CSS 변수는 유지)
 import '../sidepanel/styles/agent-chat.css';
 
-// scalemaker fork: 두 설치 경로별 next-step 분리
+// auto-chrome-mcp fork: 두 설치 경로별 next-step 분리
 // (A) npm 자동 설치자: bridge + manifest + extension zip 까지 자동
 // (B) zip 수동 설치자: extension 만 받은 상태 → bridge 따로 깔아야 함
 // v1.0.20: extension 폴더명에 버전 박제 — postinstall.ts 의 SCALEMAKER_EXT_DIR 과 동일 규약.
@@ -14,7 +14,7 @@ const COMMANDS = {
   // 메인 npm 설치 — postinstall 이 manifest 등록 + extension zip 다운로드 자동 수행
   npmInstall: 'npm install -g mcp-chrome-scalemaker-bridge',
   // Claude Code 에 줄 prompt — 사용자가 [Copy] → 터미널의 Claude Code 에 붙여넣기
-  claudePrompt: `지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP (mcp-chrome-scalemaker) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 손대지 마.
+  claudePrompt: `지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP (auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 손대지 마.
 
 규칙:
 - 이름: "chrome-mcp-stdio"
@@ -98,7 +98,7 @@ async function copyCommand(key: CommandKey): Promise<void> {
             </div>
             <div class="min-w-0">
               <h1 class="welcome-title text-lg font-medium tracking-tight truncate">
-                ScaleMaker Chrome Mcp
+                auto-chrome-mcp Chrome Mcp
               </h1>
               <p class="welcome-muted text-sm truncate"> 확장 설치 후 남은 마지막 단계입니다. </p>
             </div>

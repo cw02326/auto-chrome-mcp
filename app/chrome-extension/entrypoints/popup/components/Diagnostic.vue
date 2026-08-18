@@ -179,7 +179,7 @@ const runSelfTest = async () => {
 
 const copyAsJson = () => {
   const payload = {
-    fork: 'mcp-chrome-scalemaker',
+    fork: 'auto-chrome-mcp',
     extension_version: env.value.extensionVersion,
     env: {
       ua: env.value.ua,

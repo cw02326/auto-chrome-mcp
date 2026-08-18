@@ -203,7 +203,7 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
     const tabId = tab.id;
 
     // Focus the tab/window for user interaction
-    // scalemaker fork: 사용자가 직접 요소를 골라야 하는 UI 라서 탭이 반드시 앞에 있어야 한다.
+    // auto-chrome-mcp fork: 사용자가 직접 요소를 골라야 하는 UI 라서 탭이 반드시 앞에 있어야 한다.
     // forceActivate 로 백그라운드 작업 모드 게이트를 우회.
     try {
       await this.ensureFocus(tab, { activate: true, focusWindow: true, forceActivate: true });

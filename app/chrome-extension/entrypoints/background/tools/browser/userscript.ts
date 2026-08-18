@@ -459,7 +459,7 @@ class UserscriptTool extends BaseBrowserToolExecutor {
   }
 
   private async create(args: CreateArgs): Promise<ToolResult> {
-    // scalemaker fork: honor an explicit tabId before falling back to the active tab.
+    // auto-chrome-mcp fork: honor an explicit tabId before falling back to the active tab.
     const requestedTab =
       typeof args.tabId === 'number' ? await chrome.tabs.get(args.tabId).catch(() => null) : null;
     const active = requestedTab || (await getActiveTab());

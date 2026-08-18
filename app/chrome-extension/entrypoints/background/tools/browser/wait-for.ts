@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 
 /**
- * scalemaker fork: chrome_wait_for — "너무 일찍 클릭 / 빈 페이지 읽기" 실패를 없애는 대기 도구.
+ * auto-chrome-mcp fork: chrome_wait_for — "너무 일찍 클릭 / 빈 페이지 읽기" 실패를 없애는 대기 도구.
  *
  * selector / text / networkIdleMs / documentReady 조건을 폴링으로 확인하고, 지정한 조건이
  * 모두(AND) 성립하면 즉시 반환한다. 타임아웃은 도구 실패가 아니라 "정보"로 취급해

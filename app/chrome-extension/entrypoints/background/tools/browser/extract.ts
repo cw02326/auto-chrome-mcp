@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 
 /**
- * scalemaker fork: chrome_extract — "필요한 값만 뽑는다" 토큰 절약 읽기 도구.
+ * auto-chrome-mcp fork: chrome_extract — "필요한 값만 뽑는다" 토큰 절약 읽기 도구.
  *
  * 전체 페이지를 읽어서 모델이 그 안에서 값을 찾는 대신, 필드명 → CSS 셀렉터 매핑을 받아
  * 해당 값만 골라서 돌려준다. 가격/재고/제목/링크 확인처럼 "무엇을 볼지 이미 아는" 상황에서

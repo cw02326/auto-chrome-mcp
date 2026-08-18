@@ -1,5 +1,5 @@
 /**
- * MCP work-tab tracker (scalemaker fork) — 세션별 다중 작업 탭.
+ * MCP work-tab tracker (auto-chrome-mcp fork) — 세션별 다중 작업 탭.
  *
  * 각 Claude Code 세션(stdio 프로세스)은 고유 _mcpSessionId 를 모든 도구 호출 인자에 실어 보낸다.
  * 이 모듈은 세션별로 "MCP 작업 탭"을 기억해 두고, tabId 미지정 도구 호출이 사용자의 활성 탭

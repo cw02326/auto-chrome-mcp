@@ -339,7 +339,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
   }
 
   /**
-   * scalemaker fork: iframe 탐색용 probe.
+   * auto-chrome-mcp fork: iframe 탐색용 probe.
    * 부수효과 없이 "이 프레임에 해당 셀렉터/ref 요소가 있는가"만 확인한다.
    * background 의 frame-resolver 가 각 프레임에 이 메시지를 보내 대상 프레임을 고른다.
    * 주의: 응답에 `error` 키를 쓰면 sendMessageToTab 이 throw 하므로 probeError 를 쓴다.
@@ -423,7 +423,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       sendResponse({ status: 'pong' });
       return false;
     } else if (request.action === 'chrome_click_element_probe_selector') {
-      // scalemaker fork: iframe 대상 프레임 탐색용 probe (조회 전용)
+      // auto-chrome-mcp fork: iframe 대상 프레임 탐색용 probe (조회 전용)
       sendResponse(probeTarget(request.selector, request.ref, request.isXPath));
       return false;
     }

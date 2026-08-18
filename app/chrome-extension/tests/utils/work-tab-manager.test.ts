@@ -1,5 +1,5 @@
 /**
- * ScaleMaker fork — work-tab-manager unit tests (task C1, background work mode).
+ * auto-chrome-mcp fork — work-tab-manager unit tests (task C1, background work mode).
  *
  * 세션별 MCP 작업 탭 추적기의 계약을 검증한다:
  *   - 세션별 set/get 왕복
@@ -100,7 +100,7 @@ async function loadModule(): Promise<WorkTabManager> {
   return await import('@/utils/work-tab-manager');
 }
 
-describe('work-tab-manager (scalemaker fork — 세션별 MCP 작업 탭)', () => {
+describe('work-tab-manager (auto-chrome-mcp fork — 세션별 MCP 작업 탭)', () => {
   let h: ChromeHarness;
 
   beforeEach(() => {

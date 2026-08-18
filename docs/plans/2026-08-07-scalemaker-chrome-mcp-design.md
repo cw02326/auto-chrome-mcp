@@ -1,14 +1,14 @@
-# ScaleMaker Chrome MCP — 설계 문서
+# auto-chrome-mcp Chrome MCP — 설계 문서
 
 > 작성일: 2026-08-07 · 상태: 구현 착수
 > 한 줄 요약: `mcp-chrome-vibemaker`의 **업데이트 버전**. 이름·확장·명령어를 전부 스케일메이커로 리브랜딩하고, **자동 재연결(무인 self-heal)** 을 얹는다. 안정성은 최소한 vibemaker와 동급이어야 한다.
 
 ## 1. 목표 & 제약
 
-- **목표:** vibemaker 포크를 "ScaleMaker Chrome MCP"로 리브랜딩한 **나만의 배포판**. npm 공개 배포 + `scalemaker-ship-it` GitHub 레포.
+- **목표:** vibemaker 포크를 "auto-chrome-mcp Chrome MCP"로 리브랜딩한 **나만의 배포판**. npm 공개 배포 + `scalemaker-ship-it` GitHub 레포.
 - **핵심 제약:** 리브랜딩하면서 **작동 안정성이 vibemaker보다 나빠지면 안 된다.** 기능은 동결 복제 후 이름만 교체하는 순서로 회귀(regression)를 원천 차단.
 - **소유/배포:** npm(`mcp-chrome-scalemaker-bridge`) 공개 + GitHub `scalemaker-ship-it/mcp-chrome-scalemaker`.
-- **로컬 이관:** 완성 후 사용자 맥에서 vibemaker 제거 → scalemaker 설치.
+- **로컬 이관:** 완성 후 사용자 맥에서 vibemaker 제거 → auto-chrome-mcp 설치.
 
 ## 2. 베이스
 
@@ -28,7 +28,7 @@
 | 네이티브 호스트  | `com.chromemcpvibemaker.nativehost`                        | `com.chromemcpscalemaker.nativehost`                         |
 | 기본 포트        | `12316`                                                    | `12320`                                                      |
 | 확장 ID          | `epadcnnkkmnhalmhlemjlompmggbfjfa`                         | **새 RSA 키로 재생성(고정)**                                 |
-| 텍스트 브랜드    | Vibemaker/VibeMaker                                        | ScaleMaker                                                   |
+| 텍스트 브랜드    | Vibemaker/VibeMaker                                        | auto-chrome-mcp                                              |
 
 - **완전 분리 원칙:** 포트·확장ID·호스트명을 전부 다르게 → 제거 이관 중 vibemaker와 안 엉킴.
 - **잔재 0건:** `vibemaker`, `12316`, `chromemcpvibemaker`, 옛 확장ID를 grep 0건까지 훑음.

@@ -1,4 +1,4 @@
-# mcp-chrome-scalemaker — Fork 설계 (2026-05-25)
+# auto-chrome-mcp — Fork 설계 (2026-05-25)
 
 > **상태**: 디자인 합의 완료, implementation 미착수
 > **베이스**: [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) `master @ commit TBD` (11.7k stars, TS/Vue monorepo)
@@ -70,7 +70,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                       mcp-chrome-scalemaker (fork of hangwin/mcp-chrome)         │
+│                       auto-chrome-mcp (fork of hangwin/mcp-chrome)         │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
 │   Claude Code                                                                   │
@@ -246,7 +246,7 @@ Connect 버튼 클릭 = 항상 5단계 자동 실행. 실패 시 escalation 권�
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Chrome MCP Server (scalemaker fork)              │
+│  Chrome MCP Server (auto-chrome-mcp fork)              │
 ├──────────────────────────────────────────────────┤
 │                                                  │
 │  [  ⚡ Force Reconnect  ]   ← 메인 액션 버튼      │
@@ -318,7 +318,7 @@ packages/chrome-launcher/
 2. detect-profile → user-data-dir 자동 감지
 3. ensure-port-free → 9222 점유 검사
      - 점유 X → 9222 사용
-     - 점유 O 가 mcp-chrome-scalemaker 가 띄운 거면 → 그 인스턴스 재사용 (skip launch)
+     - 점유 O 가 auto-chrome-mcp 가 띄운 거면 → 그 인스턴스 재사용 (skip launch)
      - 점유 O 가 다른 거면 → 9223 → 9224... escalation
 4. spawn:
    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -384,7 +384,7 @@ extension popup → "Open Diagnostic Report" 클릭 → 별창 (`chrome-extensio
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Diagnostic Report — mcp-chrome-scalemaker                               │
+│  Diagnostic Report — auto-chrome-mcp                               │
 │                                          [Copy as JSON] [Run Self-Test] │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
@@ -440,7 +440,7 @@ extension popup → "Open Diagnostic Report" 클릭 → 별창 (`chrome-extensio
 
 ```json
 {
-  "fork": "mcp-chrome-scalemaker@1.2.0",
+  "fork": "auto-chrome-mcp@1.2.0",
   "env": { "os": "darwin", "arch": "arm64", "chrome": "140.0.7339.214" },
   "processes": { "bridge": { "pid": 12345, "uptime_s": 192 } },
   "ports": { "12306": "bridge", "12307": null, "9222": "chrome" },
@@ -547,7 +547,7 @@ jobs:
 
 ---
 
-## 7. mcp-chrome (원본) vs mcp-chrome-scalemaker (fork) 패치 비교표
+## 7. mcp-chrome (원본) vs auto-chrome-mcp (fork) 패치 비교표
 
 ### 7.1 흡수한 기존 PR 7개 — root cause fix (모두 OPEN 인 채 upstream 머지 안 됨)
 

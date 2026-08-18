@@ -9,7 +9,7 @@ import {
 } from '@/utils/work-tab-manager';
 
 /**
- * scalemaker fork: chrome_set_work_tab — 세션의 "작업 탭"을 화면 전환 없이 변경한다.
+ * auto-chrome-mcp fork: chrome_set_work_tab — 세션의 "작업 탭"을 화면 전환 없이 변경한다.
  * 팝업/새 창이 열렸을 때(도구 결과의 new_tabs_opened 알림 참고) 그 탭으로 작업
  * 대상을 옮기거나, 원래 탭으로 복귀할 때 사용. chrome_switch_tab 과 달리 탭을
  * 활성화하지 않으므로 백그라운드 작업 모드의 무간섭 원칙을 지킨다.

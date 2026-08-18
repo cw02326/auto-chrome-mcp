@@ -103,7 +103,7 @@ interface RecordingState {
   canvas: OffscreenCanvas;
   ctx: OffscreenCanvasRenderingContext2D;
   filename?: string;
-  // scalemaker fork: 배경 탭 녹화를 위해 창 안에서만 active로 전환했다면,
+  // auto-chrome-mcp fork: 배경 탭 녹화를 위해 창 안에서만 active로 전환했다면,
   // 녹화 종료 후 원래 활성 탭으로 되돌리기 위한 정보
   restoreTab?: { windowId: number; tabId: number };
 }
@@ -122,7 +122,7 @@ interface GifResult {
   mode?: 'fixed_fps' | 'auto_capture';
   actionsCount?: number;
   error?: string;
-  // scalemaker fork: 포커스된 창의 비활성 탭을 그대로 녹화할 때 남기는 경고
+  // auto-chrome-mcp fork: 포커스된 창의 비활성 탭을 그대로 녹화할 때 남기는 경고
   warning?: string;
   // Clear action specific
   clearedAutoCapture?: boolean;
@@ -317,7 +317,7 @@ async function captureTick(state: RecordingState): Promise<void> {
 // Recording Control
 // ============================================================================
 
-// scalemaker fork: 배경 탭 녹화를 위해 active로 전환했던 탭을 원래대로 되돌린다.
+// auto-chrome-mcp fork: 배경 탭 녹화를 위해 active로 전환했던 탭을 원래대로 되돌린다.
 // 탭이 이미 닫혔거나 창이 사라졌을 수 있으므로 실패는 무시한다(best-effort).
 async function restoreActiveTab(restoreTab?: { windowId: number; tabId: number }): Promise<void> {
   if (!restoreTab) return;
@@ -340,7 +340,7 @@ async function startRecording(
   restoreTab?: { windowId: number; tabId: number },
 ): Promise<GifResult> {
   if (stopPromise || recordingState?.isRecording || recordingState?.isStopping) {
-    // scalemaker fork: state 생성 전에 실패하므로 여기서도 활성 탭 전환을 되돌린다
+    // auto-chrome-mcp fork: state 생성 전에 실패하므로 여기서도 활성 탭 전환을 되돌린다
     await restoreActiveTab(restoreTab);
     return {
       success: false,
@@ -422,7 +422,7 @@ async function startRecording(
     } catch {
       // ignore
     }
-    // scalemaker fork: 녹화 시작이 실패했으니 활성 탭 전환도 되돌린다
+    // auto-chrome-mcp fork: 녹화 시작이 실패했으니 활성 탭 전환도 되돌린다
     await restoreActiveTab(restoreTab);
     return {
       success: false,
@@ -583,7 +583,7 @@ async function stopRecording(): Promise<GifResult> {
       } catch {
         // ignore
       }
-      // scalemaker fork: 녹화를 위해 전환했던 활성 탭을 원래대로 복원
+      // auto-chrome-mcp fork: 녹화를 위해 전환했던 활성 탭을 원래대로 복원
       await restoreActiveTab(state.restoreTab);
       recordingState = null;
     }
@@ -684,7 +684,7 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           const height = normalizePositiveInt(args.height, DEFAULT_HEIGHT, 1080);
           const maxColors = normalizePositiveInt(args.maxColors, DEFAULT_MAX_COLORS, 256);
 
-          // scalemaker fork: 배경(hidden) 탭은 requestAnimationFrame이 멈춰 GIF가 정지 이미지로 나온다.
+          // auto-chrome-mcp fork: 배경(hidden) 탭은 requestAnimationFrame이 멈춰 GIF가 정지 이미지로 나온다.
           // "포커스되지 않은 창" 안에서 탭을 active로 만들면 그 창 안에서는 렌더링이 재개되면서도
           // 사용자가 보고 있는 포커스 창은 건드리지 않는다 (windows.update({focused:true})는 호출하지 않음).
           let restoreTab: { windowId: number; tabId: number } | undefined;
@@ -987,7 +987,7 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             } catch {
               // ignore
             }
-            // scalemaker fork: 녹화 도중 clear로 중단되는 경우에도 활성 탭 복원
+            // auto-chrome-mcp fork: 녹화 도중 clear로 중단되는 경우에도 활성 탭 복원
             await restoreActiveTab(recordingState.restoreTab);
             const wasRecording = recordingState.isRecording || recordingState.isStopping;
             recordingState = null;

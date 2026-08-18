@@ -1,5 +1,5 @@
 /**
- * Sidepanel Composables (scalemaker v1.0.36 — agent chat 제거 후 남은 항목)
+ * Sidepanel Composables (auto-chrome-mcp v1.0.36 — agent chat 제거 후 남은 항목)
  */
 
 // Theme system (sidepanel + popup + welcome 의 공통 디자인 토큰)

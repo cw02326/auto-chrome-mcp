@@ -1,6 +1,6 @@
 # mcp-chrome-scalemaker-launcher
 
-> Chrome launcher with `--remote-debugging-port=9222` for [mcp-chrome-scalemaker](https://github.com/cw02326/auto-chrome-mcp) Playwright CDP fallback.
+> Chrome launcher with `--remote-debugging-port=9222` for [auto-chrome-mcp](https://github.com/cw02326/auto-chrome-mcp) Playwright CDP fallback.
 
 ## What it does
 

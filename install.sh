@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcp-chrome-scalemaker — one-liner installer
+# auto-chrome-mcp — one-liner installer
 #
 # 사용:
 #   curl -fsSL https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker/raw/main-scalemaker/install.sh | bash
@@ -31,7 +31,7 @@ ok()   { echo -e "${C_GREEN}✅${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}⚠️${C_RESET}  $*"; }
 err()  { echo -e "${C_RED}❌${C_RESET} $*" >&2; }
 
-echo -e "${C_BOLD}mcp-chrome-scalemaker installer${C_RESET}"
+echo -e "${C_BOLD}auto-chrome-mcp installer${C_RESET}"
 echo -e "release: ${RELEASE_TAG}"
 echo -e "install root: ${INSTALL_ROOT}"
 echo ""

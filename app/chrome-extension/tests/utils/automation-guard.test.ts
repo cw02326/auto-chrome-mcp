@@ -1,5 +1,5 @@
 /**
- * ScaleMaker fork — automation-guard unit tests (task C1, background work mode).
+ * auto-chrome-mcp fork — automation-guard unit tests (task C1, background work mode).
  *
  * E1 도메인별 soft throttle (10초/30회 초과분 지연, 상한 5초) 과
  * E2 동일 호출 반복 가드 (120초 내 12회 → 차단, 다른 호출이 끼면 리셋) 를 검증한다.
@@ -81,7 +81,7 @@ function delayOf(verdict: unknown): number {
   return 0;
 }
 
-describe('automation-guard (scalemaker fork — 밴 예방 안전장치)', () => {
+describe('automation-guard (auto-chrome-mcp fork — 밴 예방 안전장치)', () => {
   let h: ChromeHarness;
 
   beforeEach(() => {

@@ -2718,7 +2718,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     // Get text content
     else if (request.action === 'getTextContent') {
       try {
-        // scalemaker fork (T5): readerMode 는 배경 스크립트가 명시적으로 켤 때만 동작한다.
+        // auto-chrome-mcp fork (T5): readerMode 는 배경 스크립트가 명시적으로 켤 때만 동작한다.
         // (content-indexer 등 다른 호출자는 플래그를 보내지 않으므로 기존 동작 유지)
         const readerMode = request.readerMode === true;
         const fullText = (document.body && document.body.innerText) || '';
@@ -2984,7 +2984,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
   /*
    * ---------------------------------------------------------------------------
-   * scalemaker fork (T5): reader 모드 본문 추출
+   * auto-chrome-mcp fork (T5): reader 모드 본문 추출
    *
    * 목적: get_web_content 기본 응답에서 nav/header/footer/광고/쿠키 배너 같은 보일러플레이트를
    * 걷어내 토큰을 줄인다. 원문 그대로가 필요하면 도구 인자 raw:true 로 언제든 되돌릴 수 있다.

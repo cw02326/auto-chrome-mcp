@@ -5,7 +5,7 @@
  *
  * 핵심:
  * - `sitePermissionToggles` storage key 에 3종 boolean 박제 (camera/mic/geo)
- * - 토글 ON = AI 가 묻지 않고 즉시 사용 (scalemaker default — 자동화 흐름 안 끊김)
+ * - 토글 ON = AI 가 묻지 않고 즉시 사용 (auto-chrome-mcp default — 자동화 흐름 안 끊김)
  * - 토글 OFF = AI 가 consent 창으로 사용자 confirm 받음
  * - install 이벤트 시 default true 로 초기화 (update 시엔 사용자 OFF 보존)
  */
@@ -24,7 +24,7 @@ export type SitePermissionToggles = Record<SensitivePermission, boolean>;
 
 /**
  * Default 정책 (v1.0.31+ 옵션 A):
- * - 3종 모두 **true** — scalemaker 는 AI 자동화가 주 목적이라 default 위임.
+ * - 3종 모두 **true** — auto-chrome-mcp 는 AI 자동화가 주 목적이라 default 위임.
  * - camera / microphone 은 `chrome.contentSettings.X` 의 `<all_urls>` allow 가 Chrome
  *   정책상 거부되지만, `user-consent.ts` 의 `applyOriginAllow()` 가 consent 통과 시
  *   현재 active tab 의 origin 단위로 `set({primaryPattern:'https://X.com/*', setting:'allow'})`

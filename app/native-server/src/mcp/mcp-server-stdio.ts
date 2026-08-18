@@ -21,13 +21,13 @@ let mcpClient: Client | null = null;
 let sessionId: string | undefined = undefined;
 let isCleaningUp = false;
 
-// scalemaker fork: 이 stdio 프로세스(=Claude Code 세션 1개당 1개)의 고유 세션 id.
+// auto-chrome-mcp fork: 이 stdio 프로세스(=Claude Code 세션 1개당 1개)의 고유 세션 id.
 // 모든 tools/call 인자에 _mcpSessionId 로 실려 extension 까지 전달되고,
 // extension 은 세션별 "작업 탭"을 분리 관리한다 (최대 10 세션). extension 게이트에서 strip 됨.
 const MCP_SESSION_ID = `stdio-${process.pid}-${Math.random().toString(36).slice(2, 8).padEnd(6, '0')}`;
 
 // Read configuration from stdio-config.json.
-// scalemaker fork: .mcp.json 에서 전달된 env.CHROME_PORT 가 있으면 hardcoded 12320 을 override.
+// auto-chrome-mcp fork: .mcp.json 에서 전달된 env.CHROME_PORT 가 있으면 hardcoded 12320 을 override.
 // 이걸 안 하면 같은 머신에서 두 Chrome profile 을 다른 port 로 띄워도 모든 Claude Code 세션이
 // 12320 으로만 요청해서 한 profile 의 extension 만 잡힘 (multi-profile 라우팅 버그).
 const loadConfig = () => {
@@ -51,7 +51,7 @@ const loadConfig = () => {
 };
 
 // ============================================================
-// scalemaker fork: 세션 중 브라우저(프로필) 전환 — multi-browser switching
+// auto-chrome-mcp fork: 세션 중 브라우저(프로필) 전환 — multi-browser switching
 // ============================================================
 // Chrome profile 1개 = bridge 1개 = port 1개 (popup 에서 확인/변경).
 // 예전에는 CHROME_PORT 로 정한 url 이 프로세스 수명 내내 고정이라, 세션 도중 다른
@@ -345,7 +345,7 @@ export const ensureMcpClient = async (forceNew = false) => {
       mcpClient = null;
     }
 
-    // scalemaker fork: config 의 url 이 아니라 "현재 활성 url" 을 연결 시점에 읽는다.
+    // auto-chrome-mcp fork: config 의 url 이 아니라 "현재 활성 url" 을 연결 시점에 읽는다.
     // (chrome_use_browser 로 세션 도중 바뀔 수 있음 — 캐시하면 전환이 먹지 않는다)
     const url = getActiveUrl();
     mcpClient = new Client({ name: 'Mcp Chrome Proxy', version: '1.0.0' }, { capabilities: {} });
@@ -376,7 +376,7 @@ const cleanup = async () => {
   isCleaningUp = true;
 
   console.error('[stdio-mcp] Closing session...');
-  // scalemaker fork: config 의 url 이 아니라 "현재" 활성 url 로 DELETE
+  // auto-chrome-mcp fork: config 의 url 이 아니라 "현재" 활성 url 로 DELETE
   // (chrome_use_browser 로 전환한 뒤 종료해도 올바른 bridge 의 세션이 정리되도록)
   await terminateActiveSession();
   mcpClient?.close();
@@ -386,13 +386,13 @@ const cleanup = async () => {
 
 export const setupTools = (server: Server) => {
   // List tools handler
-  // scalemaker fork: extension 도구 + stdio 프록시 전용 브라우저 전환 도구 2개
+  // auto-chrome-mcp fork: extension 도구 + stdio 프록시 전용 브라우저 전환 도구 2개
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [...TOOL_SCHEMAS, LIST_BROWSERS_SCHEMA, USE_BROWSER_SCHEMA],
   }));
 
   // Call tool handler
-  // scalemaker fork: ① 브라우저 전환 도구는 여기서 처리하고 forward 하지 않는다
+  // auto-chrome-mcp fork: ① 브라우저 전환 도구는 여기서 처리하고 forward 하지 않는다
   //                  ② 나머지는 세션 id 주입 후 전달 (호출자가 명시한 _mcpSessionId 는 존중)
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const local = await handleLocalTool(request.params.name, request.params.arguments || {});

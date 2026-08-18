@@ -28,7 +28,7 @@ description: |
     - "MCP 작업 창이 자꾸 생겨" / "작업 창 끄고 싶어"
     - "팝업이 열렸는데 인식을 못해" / "새 창에서 작업이 안 이어져"
 
-  Skip if the user is using upstream hangwin/mcp-chrome (not the scalemaker
+  Skip if the user is using upstream hangwin/mcp-chrome (not the auto-chrome-mcp
   fork) — this skill knows fork-specific commands and architecture.
 
 # scalemaker-version: <bridge version at build time>
@@ -36,14 +36,14 @@ description: |
 
 # chrome-mcp-scalemaker doctor
 
-이 스킬은 사용자가 chrome-mcp-scalemaker (scalemaker fork) 의 MCP 서버, 확장,
+이 스킬은 사용자가 chrome-mcp-scalemaker (auto-chrome-mcp fork) 의 MCP 서버, 확장,
 bridge, 또는 도구 호출과 관련된 문제를 보고할 때 자동으로 진단·복구합니다.
 
 **모든 명령은 Bash tool 로 직접 실행하고 stdout/stderr 를 캡처해서 해석한 뒤
 사용자에게 자연어로 답변하세요.** "이 명령어를 직접 쳐주세요" 라고 사용자에게
 넘기지 마세요.
 
-먼저 `mcp-chrome-scalemaker-bridge -V` 로 scalemaker fork 인지 확인하세요.
+먼저 `mcp-chrome-scalemaker-bridge -V` 로 auto-chrome-mcp fork 인지 확인하세요.
 명령이 없거나 다른 패키지 (`mcp-chrome-bridge` 등) 면 이 스킬은 종료하고
 사용자에게 fork 안내만 합니다.
 

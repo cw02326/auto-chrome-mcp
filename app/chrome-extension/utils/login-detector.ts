@@ -1,5 +1,5 @@
 /**
- * Login-redirect detector (scalemaker fork).
+ * Login-redirect detector (auto-chrome-mcp fork).
  *
  * 도구 실행 중 대상 탭이 로그인 페이지로 리다이렉트되면(세션 만료 등),
  * 게이트가 결과에 login_required_suspected 경고를 첨부해 모델이 헛수고하지

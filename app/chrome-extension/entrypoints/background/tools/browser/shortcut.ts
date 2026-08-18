@@ -3,7 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 
 /**
- * scalemaker fork: chrome_shortcut — chrome_batch 의 step 목록을 이름 붙여 저장해두고
+ * auto-chrome-mcp fork: chrome_shortcut — chrome_batch 의 step 목록을 이름 붙여 저장해두고
  * 나중에 이름만으로 재실행하는 "저장된 매크로". 반복되는 로그인 흐름·정기 수집 루틴처럼
  * 세션이 바뀌어도 다시 쓰고 싶은 작업을 chrome.storage.local 에 영속 저장한다.
  */
@@ -45,7 +45,7 @@ const MAX_NAME_LENGTH = 64;
 const STORAGE_KEY = 'mcpShortcuts';
 
 /**
- * scalemaker fork: chrome_batch 의 DISALLOWED_STEP_TOOLS 와 같은 취지의 목록.
+ * auto-chrome-mcp fork: chrome_batch 의 DISALLOWED_STEP_TOOLS 와 같은 취지의 목록.
  * batch.ts 는 이 집합을 export 하지 않고(barrel 규약상 이 작업은 이 파일만 수정하도록
  * 지시받음) 이 파일에서 직접 import 할 경로도 없으므로, 동일 목록을 여기서 다시 정의하고
  * orchestrator 자기 자신(chrome_shortcut)을 추가한다 — 매크로 안에 매크로를 저장하는
@@ -61,7 +61,7 @@ const DISALLOWED_STEP_TOOLS = new Set<string>([
 ]);
 
 /**
- * scalemaker fork: 순환 import 를 피하기 위한 invoker 주입 (batch.ts 와 동일 패턴).
+ * auto-chrome-mcp fork: 순환 import 를 피하기 위한 invoker 주입 (batch.ts 와 동일 패턴).
  * tools/index.ts 가 setShortcutToolInvoker(handleCallTool) 로 배선한다.
  */
 type ToolInvoker = (param: { name: string; args: any }) => Promise<any>;
@@ -213,7 +213,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       description,
       createdAt: existing ? existing.createdAt : now,
       updatedAt: now,
-      // scalemaker fork: 덮어쓰기는 새 정의로 취급 — 실행 횟수는 리셋한다.
+      // auto-chrome-mcp fork: 덮어쓰기는 새 정의로 취급 — 실행 횟수는 리셋한다.
       runCount: 0,
     };
 
@@ -295,7 +295,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
           error: `tool "${toolName}" is not allowed inside chrome_shortcut`,
         };
       } else {
-        // scalemaker fork: run 호출 자체의 세션 id 를 각 단계에 주입 —
+        // auto-chrome-mcp fork: run 호출 자체의 세션 id 를 각 단계에 주입 —
         // 세션별 작업 탭 라우팅이 단계마다 동일하게 적용되도록.
         const stepArgs = { ...(step?.args ?? {}) } as Record<string, any>;
         if (typeof _mcpSessionId === 'string' && _mcpSessionId) {

@@ -194,12 +194,12 @@ export async function compressImage(
 }
 
 /**
- * scalemaker fork: Claude 이미지 입력 최적 크기(긴 변 기준).
+ * auto-chrome-mcp fork: Claude 이미지 입력 최적 크기(긴 변 기준).
  * 이보다 큰 이미지를 보내도 인식률은 좋아지지 않고 토큰만 늘어난다.
  */
 export const MODEL_INPUT_MAX_LONG_EDGE = 1568;
 
-/** scalemaker fork: 모델 입력용으로 축소/압축된 이미지 정보 */
+/** auto-chrome-mcp fork: 모델 입력용으로 축소/압축된 이미지 정보 */
 export interface ModelInputImage {
   /** 최종 data URL */
   dataUrl: string;
@@ -223,7 +223,7 @@ function splitDataUrl(dataUrl: string): { mimeType: string; payload: string } | 
 }
 
 /**
- * scalemaker fork: 이미지를 "모델에게 보내기 좋은" 크기/포맷으로 정규화한다.
+ * auto-chrome-mcp fork: 이미지를 "모델에게 보내기 좋은" 크기/포맷으로 정규화한다.
  *
  * - 긴 변이 maxLongEdge 를 넘으면 비율을 유지한 채 축소한다(실제 비트맵 크기 기준으로 배율 계산).
  * - 축소가 필요 없어도 기본적으로 JPEG(quality) 로 재인코딩한다.

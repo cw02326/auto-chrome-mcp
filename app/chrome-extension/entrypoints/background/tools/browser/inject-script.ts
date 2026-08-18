@@ -82,7 +82,7 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
       }
 
       // Optionally bring window to foreground based on background flag
-      // scalemaker fork: chrome.scripting.executeScript works on background tabs, so tab activation was unnecessary; window focus still goes through the policy gate.
+      // auto-chrome-mcp fork: chrome.scripting.executeScript works on background tabs, so tab activation was unnecessary; window focus still goes through the policy gate.
       if (background !== true) {
         await focusWindowIfAllowed(tab.windowId);
       }

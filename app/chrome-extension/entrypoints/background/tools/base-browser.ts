@@ -138,7 +138,7 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    * Optionally focus window and/or activate tab. Defaults preserve current behavior
    * when caller sets activate/focus flags explicitly.
    *
-   * scalemaker fork: 두 동작이 각각 별도 정책 게이트를 통과해야 한다.
+   * auto-chrome-mcp fork: 두 동작이 각각 별도 정책 게이트를 통과해야 한다.
    * - focusWindow: popup 의 "강제 포커스" 토글 정책(focus-policy)을 통과한 경우에만 실제로
    *   windows.update({focused:true}) 호출.
    * - activate: popup 의 "백그라운드 작업" 토글이 ON 이면 tabs.update({active:true}) 를 skip

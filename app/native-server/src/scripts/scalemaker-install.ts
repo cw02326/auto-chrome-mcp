@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * scalemaker-install — mcp-chrome-scalemaker fork 전용 설치 CLI.
+ * scalemaker-install — auto-chrome-mcp fork 전용 설치 CLI.
  *
  * upstream 의 `register` 명령은 unpacked extension ID 를 인자로 받지 않아,
  * fork extension 을 unpacked load 한 사용자가 silent native-messaging 거부에 빠짐.
@@ -50,7 +50,7 @@ const parseArgs = (argv: string[]): CliArgs => {
 };
 
 const printHelp = () => {
-  console.log(`scalemaker-install — mcp-chrome-scalemaker fork install helper
+  console.log(`scalemaker-install — auto-chrome-mcp fork install helper
 
 사용법:
   scalemaker-install --extension-id <ID>
@@ -148,7 +148,7 @@ const autoDetectExtensionId = (): string | null => {
         // 우리 fork extension 의 path 특징 = chrome-extension 하위의 chrome-mv3 dir
         if (
           typeof extPath === 'string' &&
-          (extPath.includes('mcp-chrome-scalemaker') || extPath.endsWith('chrome-mv3'))
+          (extPath.includes('auto-chrome-mcp') || extPath.endsWith('chrome-mv3'))
         ) {
           console.log(`  [auto-detect] profile=${profile} → ${id}`);
           return id;
@@ -205,7 +205,7 @@ const main = () => {
   // 4. manifest content
   const manifest = {
     name: HOST_NAME,
-    description: 'Node.js Host for Browser Bridge Extension (mcp-chrome-scalemaker fork)',
+    description: 'Node.js Host for Browser Bridge Extension (auto-chrome-mcp fork)',
     path: runHostPath,
     type: 'stdio',
     allowed_origins: allowedOrigins,

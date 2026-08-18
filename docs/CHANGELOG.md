@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pagination**: console/network-capture/history gain `limit`/`offset`/`countOnly`.
 - Failure screenshots are downscaled ~40% further.
 
-## [v1.1.0] — scalemaker fork (2026-08-17)
+## [v1.1.0] — auto-chrome-mcp fork (2026-08-17)
 
 ### Added — 백그라운드 작업 모드 (non-interference)
 

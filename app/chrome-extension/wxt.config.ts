@@ -10,7 +10,7 @@ import IconsResolver from 'unplugin-icons/resolver';
 config({ path: resolve(process.cwd(), '.env') });
 config({ path: resolve(process.cwd(), '.env.local') });
 
-// scalemaker fork: deterministic extension ID via embedded public key.
+// auto-chrome-mcp fork: deterministic extension ID via embedded public key.
 // 모든 사용자가 같은 ID (aogfhfajjknomcnmlkbjmihjbknlhbbi) 받음 → unpacked load 시에도
 // allowed_origins 가 자동으로 일치 → 사용자는 install 시 manual extension-id 입력 불요.
 // 사실상 upstream 의 Chrome Web Store ID 고정과 같은 효과.

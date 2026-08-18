@@ -571,7 +571,7 @@ function resolveFetch(): FetchFn | null {
 }
 
 /**
- * scalemaker fork v1.0.30+: bridge 의 actual listen port 들을 탐색.
+ * auto-chrome-mcp fork v1.0.30+: bridge 의 actual listen port 들을 탐색.
  *
  * 동작:
  * 1. `ps aux` 로 mcp-chrome-scalemaker-bridge process (`dist/index.js`) 의 pid 들 수집.
@@ -1082,7 +1082,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
         });
 
         // Connectivity check
-        // scalemaker fork v1.0.30+: hardcoded port 만 ping 하면 false WARN 가능 — bridge 가
+        // auto-chrome-mcp fork v1.0.30+: hardcoded port 만 ping 하면 false WARN 가능 — bridge 가
         // v1.0.19+ dynamic port 로 popup 의 사용자 입력 port 에서 listen 하므로. configured
         // port ping 실패 시 active bridge process 들의 actual listen port 도 같이 점검.
         const pingUrl = new URL('/ping', url);

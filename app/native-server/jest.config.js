@@ -1,4 +1,4 @@
-// jest config — scalemaker fork policy:
+// jest config — auto-chrome-mcp fork policy:
 // - coverageThreshold removed (upstream 의 80% global threshold 가 회귀 통합 테스트
 //   추가만으로는 못 채워서 PR 흡수 검증을 차단함). 우리는 회귀 충실성 우선,
 //   coverage 는 측정만 (CI 의 self-test.yml 에서 report 만 출력).

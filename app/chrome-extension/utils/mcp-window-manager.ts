@@ -1,5 +1,5 @@
 /**
- * MCP work-window policy + tracker (scalemaker fork).
+ * MCP work-window policy + tracker (auto-chrome-mcp fork).
  *
  * MCP 작업 탭을 "어느 창에" 만들지 결정한다. 두 가지 모드:
  *

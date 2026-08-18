@@ -1,8 +1,8 @@
 # mcp-chrome-scalemaker-bridge
 
-Node.js Native Messaging host that connects [Claude Code](https://claude.com/claude-code) (or any MCP client) to your live Chrome browser via the [mcp-chrome-scalemaker](https://github.com/cw02326/auto-chrome-mcp) extension.
+Node.js Native Messaging host that connects [Claude Code](https://claude.com/claude-code) (or any MCP client) to your live Chrome browser via the [auto-chrome-mcp](https://github.com/cw02326/auto-chrome-mcp) extension.
 
-This is the **scalemaker fork** of `mcp-chrome-bridge`, adding Force Reconnect, a Playwright CDP fallback launcher, dynamic-port negotiation, and self-healing diagnostics.
+This is the **auto-chrome-mcp fork** of `mcp-chrome-bridge`, adding Force Reconnect, a Playwright CDP fallback launcher, dynamic-port negotiation, and self-healing diagnostics.
 
 ## Install
 

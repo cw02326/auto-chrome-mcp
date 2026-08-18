@@ -45,7 +45,7 @@ export class Server {
   private nativeHost: NativeMessagingHost | null = null;
   private transportsMap: Map<string, StreamableHTTPServerTransport | SSEServerTransport> =
     new Map();
-  /** Process start timestamp (scalemaker: admin /health uptime 보고용). */
+  /** Process start timestamp (auto-chrome-mcp: admin /health uptime 보고용). */
   private readonly startedAt: number = Date.now();
 
   constructor() {
@@ -83,7 +83,7 @@ export class Server {
     // Health check (legacy /ping)
     this.setupHealthRoutes();
 
-    // Admin routes (scalemaker: /health + /admin/drain — Force Reconnect 지원)
+    // Admin routes (auto-chrome-mcp: /health + /admin/drain — Force Reconnect 지원)
     registerAdminRoutes(this.fastify, {
       onDrainRequested: () => this.gracefulDrain(),
       getTransportCount: () => this.transportsMap.size,
@@ -98,7 +98,7 @@ export class Server {
   }
 
   // ============================================================
-  // Graceful Drain (scalemaker — Force Reconnect Stage A 자살 패턴)
+  // Graceful Drain (auto-chrome-mcp — Force Reconnect Stage A 자살 패턴)
   // ============================================================
 
   /**

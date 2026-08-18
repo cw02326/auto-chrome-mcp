@@ -1,5 +1,5 @@
 /**
- * scalemaker fork: iframe(프레임) 인식 요소 탐색 공용 모듈.
+ * auto-chrome-mcp fork: iframe(프레임) 인식 요소 탐색 공용 모듈.
  *
  * 배경: content script 는 기본적으로 top frame 에만 주입되기 때문에, 결제 위젯 / 로그인 iframe /
  * 임베드 에디터처럼 대상 요소가 iframe 안에 있으면 chrome_click_element, chrome_fill_or_select,
@@ -15,16 +15,16 @@
  * 이 모듈을 전혀 거치지 않으므로 동작과 응답이 그대로 유지된다.
  */
 
-/** scalemaker fork: click/fill 셀렉터 탐색 시 조사할 최대 프레임 수 */
+/** auto-chrome-mcp fork: click/fill 셀렉터 탐색 시 조사할 최대 프레임 수 */
 export const FRAME_SEARCH_MAX_FRAMES = 20;
 
-/** scalemaker fork: read_page allFrames 수집 시 사용할 최대 프레임 수(top frame 포함) */
+/** auto-chrome-mcp fork: read_page allFrames 수집 시 사용할 최대 프레임 수(top frame 포함) */
 export const FRAME_COLLECT_MAX_FRAMES = 10;
 
-/** scalemaker fork: 프레임 하나당 probe 응답 대기 상한 */
+/** auto-chrome-mcp fork: 프레임 하나당 probe 응답 대기 상한 */
 export const FRAME_PROBE_TIMEOUT_MS = 1500;
 
-/** scalemaker fork: probe 메시지 action 이름 규칙 — `${toolName}_probe_selector` */
+/** auto-chrome-mcp fork: probe 메시지 action 이름 규칙 — `${toolName}_probe_selector` */
 export function probeActionFor(toolName: string): string {
   return `${toolName}_probe_selector`;
 }
@@ -59,7 +59,7 @@ const CONNECTION_ERROR_PATTERNS: RegExp[] = [
 ];
 
 /**
- * scalemaker fork: "요소를 못 찾음" 계열 오류인지 판별.
+ * auto-chrome-mcp fork: "요소를 못 찾음" 계열 오류인지 판별.
  * 연결/주입 실패(Receiving end does not exist 등)는 프레임 탐색 대상이 아니므로 제외한다.
  */
 export function isElementNotFoundError(message: unknown): boolean {
@@ -70,7 +70,7 @@ export function isElementNotFoundError(message: unknown): boolean {
 }
 
 /**
- * scalemaker fork: 탐색 대상이 될 수 있는 프레임 URL 인지 판별.
+ * auto-chrome-mcp fork: 탐색 대상이 될 수 있는 프레임 URL 인지 판별.
  * about:blank, 확장/브라우저 내부 페이지는 건너뛴다(about:srcdoc 는 실제 콘텐츠이므로 유지).
  */
 export function isProbeableFrameUrl(url: string | undefined | null): boolean {
@@ -84,7 +84,7 @@ export function isProbeableFrameUrl(url: string | undefined | null): boolean {
 }
 
 /**
- * scalemaker fork: 탭의 모든 프레임 열거(top frame 0 포함, frameId 오름차순).
+ * auto-chrome-mcp fork: 탭의 모든 프레임 열거(top frame 0 포함, frameId 오름차순).
  * webNavigation 권한이 없거나 실패하면 빈 배열을 돌려준다(호출부는 기존 동작으로 폴백).
  */
 export async function listAllFrames(
@@ -111,7 +111,7 @@ export async function listAllFrames(
 }
 
 /**
- * scalemaker fork: top frame(0) 을 제외한 탐색 가능한 하위 프레임만 열거.
+ * auto-chrome-mcp fork: top frame(0) 을 제외한 탐색 가능한 하위 프레임만 열거.
  */
 export async function listChildFrames(
   tabId: number,
@@ -124,7 +124,7 @@ export async function listChildFrames(
 }
 
 /**
- * scalemaker fork: 특정 frameId 의 URL 조회(응답에 frameUrl 을 실어주기 위한 용도).
+ * auto-chrome-mcp fork: 특정 frameId 의 URL 조회(응답에 frameUrl 을 실어주기 위한 용도).
  */
 export async function resolveFrameInfo(tabId: number, frameId: number): Promise<FrameInfo | null> {
   const all = await listAllFrames(tabId, Number.MAX_SAFE_INTEGER);
@@ -156,7 +156,7 @@ export interface SearchFramesParams {
 }
 
 /**
- * scalemaker fork: 하위 프레임들을 돌면서 셀렉터/ref 가 존재하는 첫 프레임을 찾는다.
+ * auto-chrome-mcp fork: 하위 프레임들을 돌면서 셀렉터/ref 가 존재하는 첫 프레임을 찾는다.
  *
  * - 프레임마다 개별적으로 helper 를 주입한다(injectContentScript 의 ping 은 frameIds[0] 만 확인하므로
  *   여러 frameId 를 한 번에 넘기면 일부 프레임에 주입이 누락될 수 있다).

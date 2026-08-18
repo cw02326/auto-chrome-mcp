@@ -3,9 +3,9 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { focusWindowIfAllowed } from '@/utils/focus-policy';
-// scalemaker fork(T2): 직전 읽기와 동일하면 본문을 다시 보내지 않기 위한 콘텐츠 해시 캐시
+// auto-chrome-mcp fork(T2): 직전 읽기와 동일하면 본문을 다시 보내지 않기 위한 콘텐츠 해시 캐시
 import { diffCheck } from '@/utils/content-cache';
-// scalemaker fork: iframe 안의 interactive elements 까지 수집하기 위한 프레임 열거 유틸
+// auto-chrome-mcp fork: iframe 안의 interactive elements 까지 수집하기 위한 프레임 열거 유틸
 import { FRAME_COLLECT_MAX_FRAMES, listChildFrames } from './frame-resolver';
 
 interface WebFetcherToolParams {
@@ -16,9 +16,9 @@ interface WebFetcherToolParams {
   tabId?: number; // target existing tab id
   background?: boolean; // do not activate/focus
   windowId?: number; // target window id to pick active tab or create tab
-  // scalemaker fork(T5): true 면 보일러플레이트 제거 없이 예전 그대로의 본문을 반환. default: false
+  // auto-chrome-mcp fork(T5): true 면 보일러플레이트 제거 없이 예전 그대로의 본문을 반환. default: false
   raw?: boolean;
-  // scalemaker fork(T2): 직전 호출과 내용이 같으면 본문 대신 unchanged 마커만 반환. default: true
+  // auto-chrome-mcp fork(T2): 직전 호출과 내용이 같으면 본문 대신 unchanged 마커만 반환. default: true
   diff?: boolean;
 }
 
@@ -37,7 +37,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     const explicitTabId = args.tabId;
     const background = args.background === true;
     const windowId = args.windowId;
-    // scalemaker fork: reader 모드가 기본. raw:true 면 예전 본문 그대로.
+    // auto-chrome-mcp fork: reader 모드가 기본. raw:true 면 예전 본문 그대로.
     const raw = args.raw === true;
     const mode: 'reader' | 'raw' = raw ? 'raw' : 'reader';
     const useDiff = args.diff !== false;
@@ -100,7 +100,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
       }
 
       // Optionally bring tab/window to foreground
-      // scalemaker fork: windows.update({focused:true}) 는 강제포커스 정책 통과 시에만 호출.
+      // auto-chrome-mcp fork: windows.update({focused:true}) 는 강제포커스 정책 통과 시에만 호출.
       if (!background) {
         await chrome.tabs.update(tab.id, { active: true });
         await focusWindowIfAllowed(tab.windowId);
@@ -135,7 +135,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         const textResponse = await this.sendMessageToTab(tab.id, {
           action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
           selector: selector,
-          // scalemaker fork(T5): helper 는 이 플래그가 있을 때만 reader 추출을 한다
+          // auto-chrome-mcp fork(T5): helper 는 이 플래그가 있을 때만 reader 추출을 한다
           // (content-indexer 등 다른 호출자는 기존 동작 유지).
           readerMode: !raw,
         });
@@ -144,7 +144,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           const finalText =
             typeof textResponse.textContent === 'string' ? textResponse.textContent : '';
 
-          // scalemaker fork(T2): 직전 호출과 본문이 같으면 본문을 통째로 다시 보내지 않는다.
+          // auto-chrome-mcp fork(T2): 직전 호출과 본문이 같으면 본문을 통째로 다시 보내지 않는다.
           if (useDiff) {
             const diffKey = `get_web_content:${tab.id}:${mode}:${selector ?? ''}`;
             const { unchanged, hash } = diffCheck(diffKey, finalText);
@@ -171,7 +171,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
           result.textContent = finalText;
 
-          // scalemaker fork(T5): 모델이 "잘려나간 게 있나?" 를 스스로 판단하고 raw:true 로
+          // auto-chrome-mcp fork(T5): 모델이 "잘려나간 게 있나?" 를 스스로 판단하고 raw:true 로
           // 재요청할 수 있도록 추출 모드와 원문/반환 길이를 함께 알려준다.
           result.mode = typeof textResponse.mode === 'string' ? textResponse.mode : mode;
           if (typeof textResponse.fullTextChars === 'number') {
@@ -235,11 +235,11 @@ interface GetInteractiveElementsToolParams {
   selector?: string; // CSS selector to filter interactive elements
   includeCoordinates?: boolean; // Include element coordinates in the response (default: true)
   types?: string[]; // Types of interactive elements to include (default: all types)
-  // scalemaker fork: true 면 top frame 외에 iframe 안의 요소도 함께 수집한다. default: false
+  // auto-chrome-mcp fork: true 면 top frame 외에 iframe 안의 요소도 함께 수집한다. default: false
   allFrames?: boolean;
 }
 
-/** scalemaker fork: allFrames 수집 시 프레임당 / 전체 요소 상한 (read-page.ts 와 동일) */
+/** auto-chrome-mcp fork: allFrames 수집 시 프레임당 / 전체 요소 상한 (read-page.ts 와 동일) */
 const FRAME_ELEMENTS_PER_FRAME = 50;
 const FRAME_ELEMENTS_TOTAL = 250;
 
@@ -247,7 +247,7 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS;
 
   /**
-   * scalemaker fork: 하위 iframe 들에서 interactive elements 를 수집한다(allFrames=true 일 때만).
+   * auto-chrome-mcp fork: 하위 iframe 들에서 interactive elements 를 수집한다(allFrames=true 일 때만).
    * 프레임마다 개별적으로 helper 주입을 보장한 뒤 동일한 메시지를 보낸다.
    * 실패한 프레임은 조용히 건너뛴다 (top frame 결과는 항상 유지).
    */
@@ -342,7 +342,7 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
       let elements: any[] = Array.isArray(result.elements) ? result.elements : [];
       let frameElementCount = 0;
 
-      // scalemaker fork: iframe 안의 요소도 필요할 때만(allFrames:true) 추가로 모은다.
+      // auto-chrome-mcp fork: iframe 안의 요소도 필요할 때만(allFrames:true) 추가로 모은다.
       if (allFrames) {
         try {
           const frameEls = await this.collectFrameInteractiveElements(tab.id, {

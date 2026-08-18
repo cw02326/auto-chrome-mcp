@@ -1,4 +1,4 @@
-# Auto Chrome MCP (구 mcp-chrome-scalemaker)
+# Auto Chrome MCP (구 auto-chrome-mcp)
 
 > [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) 의 reliability fork — 5+ 개월 머지 안 된 핵심 PR 7개 흡수 + Force Reconnect + Diagnostic UI.
 > **stdio transport 강제** (HTTP 12306 안 씀). 웹스토어 등록 안 함 — npm + GitHub Release 사이드로드.
@@ -35,7 +35,7 @@ Extension ID = `aogfhfajjknomcnmlkbjmihjbknlhbbi` (모든 사용자 동일 — `
 아래 prompt 를 복사 → 터미널의 `claude` 에 붙여넣기. Claude Code 가 `.mcp.json` 에 `chrome-mcp-stdio` 자동 등록.
 
 ```
-지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP (mcp-chrome-scalemaker) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 손대지 마.
+지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP (auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 손대지 마.
 
 규칙:
 - 이름: "chrome-mcp-stdio"
@@ -56,7 +56,7 @@ Extension ID = `aogfhfajjknomcnmlkbjmihjbknlhbbi` (모든 사용자 동일 — `
 
 ## ⚠️ 사이트 권한 자동 허용 — 알아두세요
 
-scalemaker 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 prompt 를 **자동으로 처리**합니다 (v1.0.32+). 두 갈래로 동작:
+auto-chrome-mcp 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 prompt 를 **자동으로 처리**합니다 (v1.0.32+). 두 갈래로 동작:
 
 | 권한                | 처리 시점                      | 효과                                                                                     |
 | ------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |

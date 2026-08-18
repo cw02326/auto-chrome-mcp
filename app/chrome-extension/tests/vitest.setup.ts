@@ -31,7 +31,7 @@ if (typeof globalThis.chrome === 'undefined') {
         set: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
       },
-      // scalemaker fork: work-tab-manager / mcp-window-manager persist to storage.session
+      // auto-chrome-mcp fork: work-tab-manager / mcp-window-manager persist to storage.session
       session: {
         get: vi.fn().mockResolvedValue({}),
         set: vi.fn().mockResolvedValue(undefined),
@@ -49,14 +49,14 @@ if (typeof globalThis.chrome === 'undefined') {
       onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
       onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
     },
-    // scalemaker fork: work-tab badge ("MCP") lives on chrome.action
+    // auto-chrome-mcp fork: work-tab badge ("MCP") lives on chrome.action
     action: {
       setBadgeText: vi.fn().mockResolvedValue(undefined),
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
       setTitle: vi.fn().mockResolvedValue(undefined),
       setIcon: vi.fn().mockResolvedValue(undefined),
     },
-    // scalemaker fork: dedicated MCP work window (mcp-window-manager)
+    // auto-chrome-mcp fork: dedicated MCP work window (mcp-window-manager)
     windows: {
       get: vi.fn().mockResolvedValue({ id: 1 }),
       getAll: vi.fn().mockResolvedValue([]),

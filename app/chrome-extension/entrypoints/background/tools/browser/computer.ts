@@ -76,7 +76,7 @@ interface ComputerParams {
   tabId?: number; // target existing tab id
   windowId?: number;
   background?: boolean; // avoid focusing/activating
-  // scalemaker fork: screenshot/zoom 결과 이미지의 축소(긴 변 1568px)를 건너뛴다. 화질 탈출구.
+  // auto-chrome-mcp fork: screenshot/zoom 결과 이미지의 축소(긴 변 1568px)를 건너뛴다. 화질 탈출구.
   fullResolution?: boolean;
 }
 
@@ -508,7 +508,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
             modifiers: params.modifiers,
-            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+            tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return domResult;
         }
@@ -522,7 +522,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
             modifiers: params.modifiers,
-            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+            tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return domResult;
         }
@@ -557,7 +557,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           timeout: TIMEOUTS.DEFAULT_WAIT * 5,
           button: params.action === 'right_click' ? 'right' : 'left',
           modifiers: params.modifiers,
-          tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+          tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
         });
         if (!domResult.isError) {
           return domResult; // Standardized response from click tool
@@ -941,7 +941,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               ref: params.ref,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
-              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+              tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             });
           }
           await CDPHelper.attach(tab.id);
@@ -968,7 +968,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             keys: params.text.split('').join(','),
             delay: 0,
             selector: undefined,
-            tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+            tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           });
           return res;
         }
@@ -983,7 +983,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           selectorType: params.selectorType as any,
           ref: params.ref as any,
           value: params.value as any,
-          tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+          tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
         } as any);
         return res;
       }
@@ -1005,7 +1005,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             const r = await fillTool.execute({
               ref: item.ref as any,
               value: item.value as any,
-              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+              tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             } as any);
             const ok = !r.isError;
             results.push({ ref: item.ref, ok, error: ok ? undefined : 'failed' });
@@ -1051,7 +1051,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               ref: params.ref,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
-              tabId: tab.id, // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+              tabId: tab.id, // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
             });
           }
           await CDPHelper.attach(tab.id);
@@ -1077,7 +1077,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const keysStr = tokens.join(',');
           const repeatedKeys =
             repeat === 1 ? keysStr : Array.from({ length: repeat }, () => keysStr).join(',');
-          // scalemaker fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
+          // auto-chrome-mcp fork: 해석된 대상 탭 전달 (백그라운드 탭 지원)
           const res = await keyboardTool.execute({ keys: repeatedKeys, tabId: tab.id });
           return res;
         }
@@ -1270,7 +1270,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             return createErrorResponse('Failed to capture zoom screenshot via CDP');
           }
 
-          // scalemaker fork: zoom 도 screenshot 과 동일한 토큰 낭비 버그가 있었다.
+          // auto-chrome-mcp fork: zoom 도 screenshot 과 동일한 토큰 낭비 버그가 있었다.
           // base64 를 텍스트 JSON 에 넣으면 이미지 1장에 텍스트 토큰 10만개 이상을 지불한다.
           // → 정식 MCP image 블록으로 분리하고, 긴 변 1568px(Claude 입력 최적)로 축소한다.
           const zoomImage = await prepareImageForModelInput(`data:image/png;base64,${rawBase64}`, {
@@ -1316,11 +1316,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'screenshot': {
         // Reuse existing screenshot tool; it already supports base64 save option
-        // scalemaker fork: 해석된 대상 탭을 그대로 넘긴다. 넘기지 않으면 screenshot 도구가
+        // auto-chrome-mcp fork: 해석된 대상 탭을 그대로 넘긴다. 넘기지 않으면 screenshot 도구가
         // 자기 나름대로 "활성 탭"을 다시 고르기 때문에 백그라운드 작업 탭 대신 사용자가
         // 보고 있는 탭이 찍힌다.
         //
-        // scalemaker fork: screenshot 도구는 이제 [text(메타데이터), image(base64)] 두 블록을
+        // auto-chrome-mcp fork: screenshot 도구는 이제 [text(메타데이터), image(base64)] 두 블록을
         // 돌려준다. 여기서는 JSON 파싱/재포장 없이 그대로 통과시켜야 MCP 응답에 image 블록이
         // 살아남는다(텍스트로 다시 감싸면 토큰 낭비 버그가 그대로 재발한다).
         const result = await screenshotTool.execute({

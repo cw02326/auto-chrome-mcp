@@ -1,5 +1,5 @@
 /**
- * Content diff cache (scalemaker fork, T2) — "안 변했으면 다시 안 보낸다".
+ * Content diff cache (auto-chrome-mcp fork, T2) — "안 변했으면 다시 안 보낸다".
  *
  * read_page / get_web_content 같은 대용량 읽기 도구가 직전 호출과 동일한 내용을
  * 반환하게 될 때, 전체 본문 대신 { unchanged: true, hash } 한 줄을 반환할 수 있게

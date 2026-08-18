@@ -15,7 +15,7 @@ class CDPSessionManager {
   private sessions = new Map<number, TabSessionState>();
 
   constructor() {
-    // scalemaker fork: Chrome이 강제로 detach한 경우(사용자가 infobar에서 취소를 누르는 등)
+    // auto-chrome-mcp fork: Chrome이 강제로 detach한 경우(사용자가 infobar에서 취소를 누르는 등)
     // 내부 Map에 stale 항목이 남지 않도록 정리해 다음 attach가 깨끗한 상태에서 시작되게 한다.
     chrome.debugger.onDetach.addListener((source) => {
       if (typeof source.tabId === 'number') {
@@ -32,7 +32,7 @@ class CDPSessionManager {
     this.sessions.set(tabId, state);
   }
 
-  // scalemaker fork: getTargets 조회 1회분을 담당. 다른 클라이언트가 붙어 있으면 'conflict'를 반환해
+  // auto-chrome-mcp fork: getTargets 조회 1회분을 담당. 다른 클라이언트가 붙어 있으면 'conflict'를 반환해
   // 호출부(attach)가 재시도 여부를 판단하게 한다.
   private async tryAttachOnce(
     tabId: number,
@@ -66,13 +66,13 @@ class CDPSessionManager {
     let result = await this.tryAttachOnce(tabId, owner, state);
     if (result === 'adopted') return;
     if (result === 'conflict') {
-      // scalemaker fork: DevTools를 방금 닫았거나 stale attach가 해제 중일 수 있으므로
+      // auto-chrome-mcp fork: DevTools를 방금 닫았거나 stale attach가 해제 중일 수 있으므로
       // 300ms 대기 후 1회만 재시도한다 (총 추가 지연은 최대 300ms로 제한).
       await new Promise((resolve) => setTimeout(resolve, ATTACH_CONFLICT_RETRY_DELAY_MS));
       result = await this.tryAttachOnce(tabId, owner, state);
       if (result === 'adopted') return;
       if (result === 'conflict') {
-        // scalemaker fork: 모델이 바로 다음 행동을 판단할 수 있도록 원인과 조치를 한 줄로 안내
+        // auto-chrome-mcp fork: 모델이 바로 다음 행동을 판단할 수 있도록 원인과 조치를 한 줄로 안내
         throw new Error(
           `CDP unavailable for tab ${tabId}: another debugger is attached (likely DevTools/F12 or another extension). Close DevTools for that tab and retry.`,
         );
@@ -103,7 +103,7 @@ class CDPSessionManager {
         await chrome.debugger.detach({ tabId });
       }
     } catch (e) {
-      // scalemaker fork: detach 실패(Chrome이 이미 세션을 끊은 경우 등)해도 refCount가 새는 걸 막기 위해
+      // auto-chrome-mcp fork: detach 실패(Chrome이 이미 세션을 끊은 경우 등)해도 refCount가 새는 걸 막기 위해
       // 아래 finally에서 반드시 Map 항목을 정리한다. best-effort로 무시.
     } finally {
       this.sessions.delete(tabId);

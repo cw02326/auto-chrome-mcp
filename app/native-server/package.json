@@ -34,7 +34,7 @@
     "chrome",
     "browser"
   ],
-  "author": "hangye (upstream), scalemaker-ship-it (scalemaker fork)",
+  "author": "hangye (upstream), scalemaker-ship-it (auto-chrome-mcp fork)",
   "license": "MIT",
   "repository": {
     "type": "git",

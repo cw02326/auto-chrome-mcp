@@ -23,7 +23,7 @@ const RECONNECT_MAX_FAST_ATTEMPTS = 3;
 const RECONNECT_COOLDOWN_DELAY_MS = 60_000;
 
 // ==================== Heartbeat Configuration ====================
-// scalemaker fork: onDisconnect 가 안 뜨는 "silent-dead" 연결(HTTP hang, sleep/wake
+// auto-chrome-mcp fork: onDisconnect 가 안 뜨는 "silent-dead" 연결(HTTP hang, sleep/wake
 // 좀비, half-open socket)을 능동 ping 으로 감지해 자동 복구. 건강하면 no-op.
 const HEARTBEAT_INTERVAL_MS = 15_000; // 15s 주기 ping
 const HEARTBEAT_TIMEOUT_MS = 3_000; // 각 ping 3s 안에 응답 없으면 miss
@@ -504,7 +504,7 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
         broadcastServerStatusChange(currentServerStatus);
         // Server is confirmed running - now we can reset reconnect state
         resetReconnectState();
-        // scalemaker fork: start active liveness watchdog for this live session.
+        // auto-chrome-mcp fork: start active liveness watchdog for this live session.
         heartbeat.start();
         console.log(`${SUCCESS_MESSAGES.SERVER_STARTED} on port ${port}`);
       } else if (message.type === NativeMessageType.SERVER_STOPPED) {
@@ -546,7 +546,7 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
           }
           nativePort = null;
         }
-        // scalemaker fork: conflict tears down the session — stop the watchdog.
+        // auto-chrome-mcp fork: conflict tears down the session — stop the watchdog.
         heartbeat.stop();
         void markServerStopped(`port_conflict:${reason}`);
       } else if (message.type === 'file_operation_response') {
@@ -560,7 +560,7 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
     nativePort.onDisconnect.addListener(() => {
       console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
       nativePort = null;
-      // scalemaker fork: session ended — stop the liveness watchdog.
+      // auto-chrome-mcp fork: session ended — stop the liveness watchdog.
       heartbeat.stop();
 
       // Mark server as stopped since native host disconnection means server is down
@@ -676,7 +676,7 @@ export const initNativeHostListener = () => {
       return true;
     }
 
-    // scalemaker fork: Force Reconnect Stage A step ③ — supervisor 가 popup 에서
+    // auto-chrome-mcp fork: Force Reconnect Stage A step ③ — supervisor 가 popup 에서
     // 호출. background 가 chrome.runtime.connectNative 트리거해서 Chrome 의 자동
     // respawn 을 발동. 기존 nativePort 가 있어도 force 모드로 끊고 다시 연결.
     if (msgType === 'force-reconnect-respawn') {
@@ -742,7 +742,7 @@ export const initNativeHostListener = () => {
           }
           nativePort = null;
         }
-        // scalemaker fork: user disconnected — stop the watchdog.
+        // auto-chrome-mcp fork: user disconnected — stop the watchdog.
         heartbeat.stop();
         await markServerStopped('manual_disconnect');
       })()

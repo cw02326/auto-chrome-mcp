@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 
 /**
- * scalemaker fork: 여러 도구 호출을 한 번의 MCP 왕복으로 묶어 실행한다.
+ * auto-chrome-mcp fork: 여러 도구 호출을 한 번의 MCP 왕복으로 묶어 실행한다.
  * click → fill → click → screenshot 같은 연쇄 작업에서 왕복 지연을 크게 줄인다.
  */
 
@@ -29,7 +29,7 @@ const MAX_STEPS = 20;
 const MAX_RESULT_TEXT_LENGTH = 4000;
 
 /**
- * scalemaker fork: batch 안에서 실행하면 안 되는 도구들.
+ * auto-chrome-mcp fork: batch 안에서 실행하면 안 되는 도구들.
  * - chrome_batch: 중첩 금지 (무한 재귀/폭주 방지)
  * - 나머지: 사용자 대면 상호작용이거나 세션 상태를 바꿔 batch 뒤 단계의 전제를 깨뜨림
  */
@@ -42,7 +42,7 @@ const DISALLOWED_STEP_TOOLS = new Set<string>([
 ]);
 
 /**
- * scalemaker fork: 순환 import 를 피하기 위한 invoker 주입.
+ * auto-chrome-mcp fork: 순환 import 를 피하기 위한 invoker 주입.
  * tools/index.ts 가 setBatchToolInvoker(handleCallTool) 로 배선한다.
  * (batch.ts 가 tools/index.ts 를 직접 import 하면 index → browser → batch → index 순환)
  */
@@ -57,7 +57,7 @@ export function setBatchToolInvoker(fn: ToolInvoker) {
 /**
  * 결과의 모든 text content 를 이어붙여 잘라낸다.
  * (게이트가 new_tabs_opened 같은 알림을 두 번째 text 항목으로 첨부하므로
- *  첫 항목만 취하면 팝업 감지 알림이 유실된다 — scalemaker fork)
+ *  첫 항목만 취하면 팝업 감지 알림이 유실된다 — auto-chrome-mcp fork)
  */
 function extractResultText(result: any): string | undefined {
   const content = Array.isArray(result?.content) ? result.content : null;
@@ -130,7 +130,7 @@ class BatchTool extends BaseBrowserToolExecutor {
           error: `tool "${toolName}" is not allowed inside chrome_batch`,
         };
       } else {
-        // scalemaker fork: batch 호출 자체의 세션 id 를 각 단계에 주입 —
+        // auto-chrome-mcp fork: batch 호출 자체의 세션 id 를 각 단계에 주입 —
         // 세션별 작업 탭 라우팅이 단계마다 동일하게 적용되도록.
         const stepArgs = { ...(step?.args ?? {}) } as Record<string, any>;
         if (typeof _mcpSessionId === 'string' && _mcpSessionId) {

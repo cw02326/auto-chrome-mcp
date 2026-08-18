@@ -1,7 +1,7 @@
 /**
  * Admin routes — Force Reconnect 지원.
  *
- * scalemaker fork 가 신설한 admin endpoints. Force Reconnect Stage A 의
+ * auto-chrome-mcp fork 가 신설한 admin endpoints. Force Reconnect Stage A 의
  * 자살 패턴을 안전하게 지원하기 위한 backend.
  *
  * - GET  /health        — extension 측 readiness probe 용 (process info, uptime, transports)
@@ -31,7 +31,7 @@ export function registerAdminRoutes(fastify: FastifyInstance, options: AdminRout
     const uptimeMs = Date.now() - options.startedAt;
     reply.status(HTTP_STATUS.OK).send({
       status: 'ok',
-      fork: 'mcp-chrome-scalemaker',
+      fork: 'auto-chrome-mcp',
       version: '1.0.0',
       bridge: {
         pid: process.pid,

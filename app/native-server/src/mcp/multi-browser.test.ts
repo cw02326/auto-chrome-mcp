@@ -1,7 +1,7 @@
 import { describe, expect, test, jest, beforeEach, afterEach } from '@jest/globals';
 
 /**
- * ScaleMaker fork — stdio 프록시의 세션 중 브라우저(프로필) 전환 회귀 테스트.
+ * auto-chrome-mcp fork — stdio 프록시의 세션 중 브라우저(프로필) 전환 회귀 테스트.
  *
  * Chrome profile 1개 = bridge 1개 = port 1개. 예전에는 CHROME_PORT 로 정한 url 이
  * 프로세스 수명 내내 고정이라 다른 profile 을 쓰려면 Claude Code 재시작이 필요했다.
@@ -118,7 +118,7 @@ const originalFetch = (globalThis as any).fetch;
 const originalChromePort = process.env.CHROME_PORT;
 const originalChromePorts = process.env.CHROME_PORTS;
 
-describe('mcp-server-stdio — 세션 중 브라우저 전환 (scalemaker fork, multi-profile)', () => {
+describe('mcp-server-stdio — 세션 중 브라우저 전환 (auto-chrome-mcp fork, multi-profile)', () => {
   beforeEach(() => {
     // 모듈 import 시 main() 이 돌면서 실패하면 process.exit(1) 로 러너를 죽인다 — 무력화.
     jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {

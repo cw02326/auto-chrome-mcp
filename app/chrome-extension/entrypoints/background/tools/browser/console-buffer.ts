@@ -10,7 +10,7 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 const DEFAULT_MAX_BUFFER_MESSAGES = 2000;
 const DEFAULT_MAX_BUFFER_EXCEPTIONS = 500;
 
-// scalemaker fork (upstream #215): CDP RemoteObject의 preview는 한 단계까지만 채워지므로
+// auto-chrome-mcp fork (upstream #215): CDP RemoteObject의 preview는 한 단계까지만 채워지므로
 // 중첩 객체가 "Object" / {…} 로 잘려 나오고 깊은 속성이 사라진다.
 // preview가 실제로 손실된 인자에 한해 Runtime.callFunctionOn 으로 깊은 직렬화를 시도하고,
 // 아래 상한들로 CDP 호출 폭주와 거대 페이로드를 막는다.
@@ -23,7 +23,7 @@ export const DEEP_SERIALIZE_RUN_DEADLINE_MS = 5000;
 export const DEEP_SERIALIZE_TIMEOUT_MS = 800;
 export const DEEP_SERIALIZE_TRUNCATION_MARKER = '…[truncated]';
 
-// scalemaker fork: buffer 모드는 연속 수집이라 "한 번의 실행" 개념이 없으므로
+// auto-chrome-mcp fork: buffer 모드는 연속 수집이라 "한 번의 실행" 개념이 없으므로
 // 슬라이딩 윈도우(10초당 100회)로 tab별 깊은 직렬화 예산을 제한한다.
 const DEEP_SERIALIZE_BUFFER_WINDOW_MS = 10_000;
 const DEEP_SERIALIZE_BUFFER_WINDOW_MAX = 100;
@@ -33,7 +33,7 @@ export interface BufferedConsoleMessage {
   level: string;
   text: string;
   args?: unknown[];
-  // scalemaker fork: preview가 손실된 인자를 깊게 직렬화한 결과. 실패 시 shallow 결과가 그대로 남는다.
+  // auto-chrome-mcp fork: preview가 손실된 인자를 깊게 직렬화한 결과. 실패 시 shallow 결과가 그대로 남는다.
   argsSerialized?: unknown[];
   argsDeepSerializedCount?: number;
   source?: string;
@@ -61,7 +61,7 @@ interface TabConsoleBufferState {
   exceptions: BufferedConsoleException[];
   droppedMessageCount: number;
   droppedExceptionCount: number;
-  // scalemaker fork: 깊은 직렬화 슬라이딩 윈도우 예산
+  // auto-chrome-mcp fork: 깊은 직렬화 슬라이딩 윈도우 예산
   deepWindowStart: number;
   deepWindowCount: number;
   deepSkippedCount: number;
@@ -90,7 +90,7 @@ export interface ConsoleBufferReadResult {
   messageLimitReached: boolean;
   droppedMessageCount: number;
   droppedExceptionCount: number;
-  // scalemaker fork: 예산 초과로 깊은 직렬화를 건너뛴 인자 수(0이면 손실 없음)
+  // auto-chrome-mcp fork: 예산 초과로 깊은 직렬화를 건너뛴 인자 수(0이면 손실 없음)
   deepSerializationSkipped: number;
 }
 
@@ -152,7 +152,7 @@ function extractArgPreview(arg: unknown): unknown {
 }
 
 /* ------------------------------------------------------------------------- *
- * scalemaker fork (upstream #215): RemoteObject 깊은 직렬화
+ * auto-chrome-mcp fork (upstream #215): RemoteObject 깊은 직렬화
  * ------------------------------------------------------------------------- */
 
 interface RemoteObjectPreview {
@@ -189,7 +189,7 @@ interface RemoteObjectLike {
 }
 
 /**
- * scalemaker fork: 깊은 직렬화를 시도하지 않는 subtype.
+ * auto-chrome-mcp fork: 깊은 직렬화를 시도하지 않는 subtype.
  * - node/proxy: 순회 비용이 크거나 트랩이 임의 코드를 실행할 수 있음
  * - promise/weakmap/weakset/generator/iterator: 순회해도 얻을 정보가 없음
  */
@@ -203,7 +203,7 @@ const SKIP_DEEP_SUBTYPES = new Set([
   'iterator',
 ]);
 
-/** scalemaker fork: preview의 value 문자열만으로 이미 완전한 subtype (중첩 손실 아님) */
+/** auto-chrome-mcp fork: preview의 value 문자열만으로 이미 완전한 subtype (중첩 손실 아님) */
 const SELF_DESCRIBING_SUBTYPES = new Set([
   'null',
   'date',
@@ -241,7 +241,7 @@ function isPreviewLossy(preview: RemoteObjectPreview, depth: number): boolean {
 }
 
 /**
- * scalemaker fork: shallow preview만으로는 정보가 손실되는 인자인지 판정.
+ * auto-chrome-mcp fork: shallow preview만으로는 정보가 손실되는 인자인지 판정.
  * 손실이 아니면 CDP 왕복 없이 preview 재구성(fast path)으로 충분하다.
  */
 export function isLossyRemoteObject(arg: unknown): boolean {
@@ -273,7 +273,7 @@ function previewPropertyToValue(prop: RemoteObjectPropertyPreview): unknown {
   }
 }
 
-/** scalemaker fork: 손실 없는 preview를 CDP 왕복 없이 평범한 JS 값으로 복원한다 (fast path). */
+/** auto-chrome-mcp fork: 손실 없는 preview를 CDP 왕복 없이 평범한 JS 값으로 복원한다 (fast path). */
 function previewToValue(preview: RemoteObjectPreview): unknown {
   const props = preview.properties || [];
 
@@ -311,7 +311,7 @@ function previewToValue(preview: RemoteObjectPreview): unknown {
   return out;
 }
 
-/** scalemaker fork: CDP 호출 없이 RemoteObject를 최선의 값으로 변환 (기존 fast path 유지) */
+/** auto-chrome-mcp fork: CDP 호출 없이 RemoteObject를 최선의 값으로 변환 (기존 fast path 유지) */
 export function shallowSerializeRemoteObject(arg: unknown): unknown {
   const a = arg as RemoteObjectLike | null;
   if (!a || typeof a !== 'object') return arg;
@@ -323,7 +323,7 @@ export function shallowSerializeRemoteObject(arg: unknown): unknown {
 }
 
 /**
- * scalemaker fork: 페이지 컨텍스트에서 실행되는 깊이 제한 직렬화기.
+ * auto-chrome-mcp fork: 페이지 컨텍스트에서 실행되는 깊이 제한 직렬화기.
  * 재귀 walk로 평범한 구조를 만든 뒤 JSON.stringify 하며, 순환 참조는 WeakSet으로 끊는다.
  * 상한: depth=maxDepth, 레벨당 속성 maxProps개, 최종 JSON maxChars자(초과 시 marker로 절단).
  */
@@ -489,7 +489,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * scalemaker fork: objectId를 Runtime.callFunctionOn 으로 깊게 직렬화한다.
+ * auto-chrome-mcp fork: objectId를 Runtime.callFunctionOn 으로 깊게 직렬화한다.
  * best-effort — 객체 GC, 컨텍스트 파괴, 세션 detach 등 어떤 실패도 undefined를 반환하고
  * 호출부가 기존 shallow 결과를 그대로 쓰게 한다. 절대 예외를 던지지 않는다.
  */
@@ -530,13 +530,13 @@ export async function deepSerializeRemoteObject(
   }
 }
 
-/** scalemaker fork: 깊은 직렬화 횟수 예산. take()가 false면 해당 인자는 shallow 결과로 남는다. */
+/** auto-chrome-mcp fork: 깊은 직렬화 횟수 예산. take()가 false면 해당 인자는 shallow 결과로 남는다. */
 export interface DeepSerializeBudget {
   take(): boolean;
 }
 
 /**
- * scalemaker fork: snapshot 1회 실행용 예산.
+ * auto-chrome-mcp fork: snapshot 1회 실행용 예산.
  * 총 maxCalls회 + 전체 deadline(벽시계) 두 가지로 CDP 폭주와 툴 지연을 동시에 제한한다.
  */
 export function createRunBudget(
@@ -559,7 +559,7 @@ export function createRunBudget(
 }
 
 /**
- * scalemaker fork: 콘솔 인자 배열을 직렬화한다.
+ * auto-chrome-mcp fork: 콘솔 인자 배열을 직렬화한다.
  * 모든 인자는 CDP 왕복 없는 shallow 경로로 먼저 변환하고,
  * preview가 손실된 인자만 (메시지당 최대 DEEP_SERIALIZE_MAX_ARGS_PER_MESSAGE개,
  * 예산이 허용하는 범위에서) 깊은 직렬화 결과로 덮어쓴다.
@@ -660,7 +660,7 @@ class ConsoleBuffer {
     state.droppedMessageCount = 0;
     state.droppedExceptionCount = 0;
     state.captureStartTime = Date.now();
-    // scalemaker fork: 깊은 직렬화 통계도 함께 초기화
+    // auto-chrome-mcp fork: 깊은 직렬화 통계도 함께 초기화
     state.deepSkippedCount = 0;
 
     console.log(
@@ -858,14 +858,14 @@ class ConsoleBuffer {
         stackTrace: stackTrace,
         // 只存储安全的预览数据，避免内存泄漏
         args: rawArgs.map(extractArgPreview),
-        // scalemaker fork (upstream #215): extractArgPreview는 preview 필드를 통째로 버리므로
+        // auto-chrome-mcp fork (upstream #215): extractArgPreview는 preview 필드를 통째로 버리므로
         // 손실 없는 객체까지 description("Object")만 남았다. CDP 왕복 없이 preview를 복원해
         // 즉시 채워 두고, 손실된 인자만 아래에서 비동기로 덮어쓴다.
         argsSerialized: rawArgs.map(shallowSerializeRemoteObject),
       };
       state.messages.push(message);
       this.trimMessages(state);
-      // scalemaker fork (upstream #215): objectId는 수집 시점에만 유효하고 버퍼는
+      // auto-chrome-mcp fork (upstream #215): objectId는 수집 시점에만 유효하고 버퍼는
       // 임의 시점에 읽히므로, 손실된 인자는 지금 깊이 직렬화해 메시지에 채워 넣는다.
       this.scheduleDeepSerialization(tabId, state, message, rawArgs);
       return;
@@ -890,7 +890,7 @@ class ConsoleBuffer {
   }
 
   /**
-   * scalemaker fork: tab별 슬라이딩 윈도우 예산(10초당 100회).
+   * auto-chrome-mcp fork: tab별 슬라이딩 윈도우 예산(10초당 100회).
    * 로그 폭주 페이지에서 CDP 호출이 쏟아지는 것을 막고, 윈도우가 지나면 자동 회복된다.
    */
   private takeDeepBudget(state: TabConsoleBufferState): boolean {
@@ -908,7 +908,7 @@ class ConsoleBuffer {
   }
 
   /**
-   * scalemaker fork (upstream #215): preview가 손실된 인자를 수집 시점에 깊이 직렬화한다.
+   * auto-chrome-mcp fork (upstream #215): preview가 손실된 인자를 수집 시점에 깊이 직렬화한다.
    *
    * 왜 수집 시점인가:
    *  - 버퍼는 objectId를 일부러 버리므로(extractArgPreview, 렌더러 메모리 누수 방지)

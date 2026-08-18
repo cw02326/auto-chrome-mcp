@@ -1,5 +1,5 @@
 /**
- * Spawned-tab tracker (scalemaker fork) — 팝업·새 창 인지.
+ * Spawned-tab tracker (auto-chrome-mcp fork) — 팝업·새 창 인지.
  *
  * 페이지가 window.open / target=_blank / OAuth 팝업 등으로 새 탭·창을 열면
  * 기록해 두고, 게이트(tools/index.ts)가 도구 실행 전후를 비교해
@@ -33,7 +33,7 @@ const MAX_RECORDS = 30;
 const records: SpawnedTabRecord[] = [];
 
 /**
- * scalemaker fork(F7): MCP 작업 탭이 연 팝업 창은 OS 포커스를 훔친다 —
+ * auto-chrome-mcp fork(F7): MCP 작업 탭이 연 팝업 창은 OS 포커스를 훔친다 —
  * 백그라운드 작업 모드 ON 이면 즉시 blur 해서 사용자가 쓰던 창으로 포커스를
  * 되돌린다 (팝업은 비포커스 상태로도 정상 렌더·스크립트 실행됨).
  */
@@ -97,7 +97,7 @@ async function resolveWindowType(windowId: number): Promise<string> {
 }
 
 // 리스너 등록 — background service worker 밖(테스트/popup 등)에서 import 되어도
-// 죽지 않도록 API 존재를 가드한다 (scalemaker fork)
+// 죽지 않도록 API 존재를 가드한다 (auto-chrome-mcp fork)
 try {
   chrome.tabs?.onCreated?.addListener((tab) => {
     if (typeof tab.id !== 'number') return;

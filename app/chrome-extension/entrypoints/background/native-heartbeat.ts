@@ -1,5 +1,5 @@
 /**
- * ScaleMaker fork — Native connection heartbeat watchdog.
+ * auto-chrome-mcp fork — Native connection heartbeat watchdog.
  *
  * upstream/vibemaker 는 chrome.runtime.Port 의 `onDisconnect` 이벤트에만 의존해
  * 재연결한다. 하지만 bridge 가 "조용히" 죽는 경우(HTTP server hang, half-open

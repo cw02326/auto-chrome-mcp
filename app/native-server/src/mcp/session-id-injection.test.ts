@@ -1,7 +1,7 @@
 import { describe, expect, test, jest, beforeEach } from '@jest/globals';
 
 /**
- * ScaleMaker fork — stdio 프록시의 _mcpSessionId 주입 회귀 테스트 (task C1).
+ * auto-chrome-mcp fork — stdio 프록시의 _mcpSessionId 주입 회귀 테스트 (task C1).
  *
  * mcp-server-stdio 는 이 stdio 프로세스(= Claude Code 세션 1개) 고유의
  * `stdio-<pid>-<rand6>` 세션 id 를 모든 tools/call 인자에 실어 extension 으로 보낸다.
@@ -77,7 +77,7 @@ const getCallToolHandler = async (): Promise<ToolCallHandler> => {
 const forwardedArgs = (call: number = 0): Record<string, unknown> =>
   mockCallTool.mock.calls[call][0].arguments as Record<string, unknown>;
 
-describe('mcp-server-stdio — _mcpSessionId 주입 (scalemaker fork, 세션별 작업 탭)', () => {
+describe('mcp-server-stdio — _mcpSessionId 주입 (auto-chrome-mcp fork, 세션별 작업 탭)', () => {
   beforeEach(() => {
     // 모듈 import 시 main() 이 돌면서 실패하면 process.exit(1) 로 러너를 죽인다 — 무력화.
     jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {

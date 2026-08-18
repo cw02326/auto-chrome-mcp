@@ -1,5 +1,5 @@
 /**
- * ScaleMaker fork — HeartbeatWatchdog unit tests.
+ * auto-chrome-mcp fork — HeartbeatWatchdog unit tests.
  *
  * silent-death 감지 로직(연속 무응답 → onDead) 이 정확히 동작하는지 검증.
  * tick() 을 직접 호출해 타이머 없이 결정론적으로 테스트한다.
@@ -80,9 +80,9 @@ describe('HeartbeatWatchdog', () => {
 
   it('inFlight 가드: 느린 ping 이 진행 중이면 겹친 tick 은 무시된다', async () => {
     let resolvePing!: (v: boolean) => void;
-    const ping = vi.fn<[], Promise<boolean>>().mockImplementation(
-      () => new Promise<boolean>((r) => (resolvePing = r)),
-    );
+    const ping = vi
+      .fn<[], Promise<boolean>>()
+      .mockImplementation(() => new Promise<boolean>((r) => (resolvePing = r)));
     const { wd } = makeWatchdog({ ping });
     const first = wd.tick(); // ping 시작, 미완
     await wd.tick(); // 겹침 — 즉시 반환, ping 재호출 안 함
@@ -94,7 +94,9 @@ describe('HeartbeatWatchdog', () => {
   it('start 는 주입된 타이머로 interval 을 걸고, stop 은 해제한다 (idempotent)', () => {
     const setIntervalFn = vi.fn().mockReturnValue(42);
     const clearIntervalFn = vi.fn();
-    const { wd } = makeWatchdog({ timers: { setInterval: setIntervalFn, clearInterval: clearIntervalFn } });
+    const { wd } = makeWatchdog({
+      timers: { setInterval: setIntervalFn, clearInterval: clearIntervalFn },
+    });
     wd.start();
     wd.start(); // 두 번째는 무시
     expect(setIntervalFn).toHaveBeenCalledTimes(1);

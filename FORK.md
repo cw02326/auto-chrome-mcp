@@ -1,4 +1,4 @@
-# Auto Chrome MCP (구 mcp-chrome-scalemaker)
+# Auto Chrome MCP (구 auto-chrome-mcp)
 
 > Fork of [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome) with reliability fixes + Force Reconnect + Playwright CDP fallback.
 

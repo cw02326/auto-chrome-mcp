@@ -519,13 +519,13 @@
   }
 
   /**
-   * scalemaker fork(T4): 압축 시 "이름 없는 껍데기"로 볼 수 있는 role 집합.
+   * auto-chrome-mcp fork(T4): 압축 시 "이름 없는 껍데기"로 볼 수 있는 role 집합.
    * 여기에 없는 role(link/button/heading/list/...)은 정보이므로 절대 접지 않는다.
    */
   const COMPACT_NOISE_ROLES = new Set(['generic', 'group', 'none', 'presentation']);
 
   // ==========================================================================
-  // scalemaker fork(chrome_find): 자연어 요소 검색용 "평면 후보 목록" 수집
+  // auto-chrome-mcp fork(chrome_find): 자연어 요소 검색용 "평면 후보 목록" 수집
   //
   // 설계: 트리 walker(traverse)를 하나 더 만들지 않는다. traverse 는 이미 요소마다
   // role / label / ref / 좌표 / interactive 를 계산하므로, state.findSink 가 있을 때만
@@ -647,7 +647,7 @@
     });
   }
 
-  /** scalemaker fork(T4): 라벨 비교용 정규화 */
+  /** auto-chrome-mcp fork(T4): 라벨 비교용 정규화 */
   function normLabel(s) {
     return String(s || '')
       .replace(/\s+/g, ' ')
@@ -657,7 +657,7 @@
   /**
    * Traverse DOM and build a node tree; collect ref map for interactive nodes.
    *
-   * scalemaker fork(T4): 예전에는 여기서 곧바로 출력 문자열(line)을 만들었지만,
+   * auto-chrome-mcp fork(T4): 예전에는 여기서 곧바로 출력 문자열(line)을 만들었지만,
    * 이제는 노드 객체 트리를 만든다. 문자열화 전에 "구조 단위"로 무손실 압축을
    * 적용하기 위함(정규식으로 최종 문자열을 건드리지 않는다).
    * compact=false 경로는 renderTree(list, false) 가 기존 포맷을 그대로 재현한다.
@@ -727,7 +727,7 @@
       state.included++;
       state.processed++;
 
-      // scalemaker fork(chrome_find): 같은 순회를 재사용해 평면 후보 목록도 함께 모은다.
+      // auto-chrome-mcp fork(chrome_find): 같은 순회를 재사용해 평면 후보 목록도 함께 모은다.
       // state.findSink 가 있을 때만 실행되므로 read_page 경로에는 영향이 없다.
       if (state.findSink) collectFindCandidate(el, node, state.findSink);
 
@@ -770,7 +770,7 @@
   }
 
   /**
-   * scalemaker fork(T4): 노드 한 줄 문자열화.
+   * auto-chrome-mcp fork(T4): 노드 한 줄 문자열화.
    * compact=false → 기존 포맷 그대로:  "  - role \"label\" [ref=ref_1] (x=1,y=2) id=\"..\" ... disabled"
    * compact=true  → 무손실 축약 포맷:  " - role \"label\" ref_1 @1,2 id=\"..\" ... disabled"
    *   (들여쓰기 2칸→1칸, [ref=..] 래퍼 제거하되 ref_N 토큰 자체는 그대로 유지, 좌표 표기 축약)
@@ -788,7 +788,7 @@
     return line;
   }
 
-  /** scalemaker fork(T4): 노드 트리 → 라인 배열 */
+  /** auto-chrome-mcp fork(T4): 노드 트리 → 라인 배열 */
   function renderTree(roots, compact) {
     const out = [];
     const walk = (nodes, level) => {
@@ -804,7 +804,7 @@
   }
 
   /**
-   * scalemaker fork(T4): 기본값/중복 속성 정리(무손실).
+   * auto-chrome-mcp fork(T4): 기본값/중복 속성 정리(무손실).
    * - 빈 문자열 속성 제거(정보 0)
    * - placeholder 가 이미 label 로 출력된 경우 중복 제거
    * - role=textbox 에 type="text" 는 role 이 이미 말해주는 기본값
@@ -824,7 +824,7 @@
     node.attrs = kept;
   }
 
-  /** scalemaker fork(T4): 이름·속성·상호작용성이 전혀 없는 순수 래퍼인가 */
+  /** auto-chrome-mcp fork(T4): 이름·속성·상호작용성이 전혀 없는 순수 래퍼인가 */
   function isNoiseWrapper(node) {
     return (
       !node.interactive &&
@@ -835,7 +835,7 @@
     );
   }
 
-  /** scalemaker fork(T4): 라벨 중복 시 버려도 되는 쪽인가(역할·상태 정보가 없어야 함) */
+  /** auto-chrome-mcp fork(T4): 라벨 중복 시 버려도 되는 쪽인가(역할·상태 정보가 없어야 함) */
   function canDropForDuplicateLabel(node, keptRole) {
     return (
       !node.interactive &&
@@ -846,7 +846,7 @@
   }
 
   /**
-   * scalemaker fork(T4): 무손실 압축 패스(문자열화 전, 구조 단위).
+   * auto-chrome-mcp fork(T4): 무손실 압축 패스(문자열화 전, 구조 단위).
    * 규칙:
    *  1) 이름·속성·상호작용 없는 generic/group 래퍼
    *     - 자식 0개 → 정보가 ref 뿐이므로 제거
@@ -896,7 +896,7 @@
   function __generateAccessibilityTree(filter, options) {
     try {
       const start = performance && performance.now ? performance.now() : Date.now();
-      // scalemaker fork(T4): 문자열 대신 노드 트리를 모은다.
+      // auto-chrome-mcp fork(T4): 문자열 대신 노드 트리를 모은다.
       const roots = [];
       const cfg = { filter: filter || undefined };
 
@@ -925,7 +925,7 @@
       }
 
       if (root) traverse(root, 0, cfg, roots, refMap, state);
-      // NOTE(scalemaker fork): ref 는 window.__claudeElementMap 에 페이지 수명 동안 유지되며,
+      // NOTE(auto-chrome-mcp fork): ref 는 window.__claudeElementMap 에 페이지 수명 동안 유지되며,
       // 이 스윕은 "GC 된(=DOM 에서 사라진) 요소"의 ref 만 지운다. 살아있는 요소는 매 호출마다
       // 같은 ref 를 그대로 재사용하므로, 이전 호출의 ref 는 계속 유효하다(T2 unchanged 모드 근거).
       for (const k in window.__claudeElementMap) {
@@ -938,7 +938,7 @@
         .join('\n');
       let pageContent = verbose;
       let rawChars = null;
-      // scalemaker fork(T4): compact 요청 시에만 압축 패스를 태운다(기본값은 종전 동작 유지).
+      // auto-chrome-mcp fork(T4): compact 요청 시에만 압축 패스를 태운다(기본값은 종전 동작 유지).
       if (options && options.compact) {
         pageContent = renderTree(compactNodes(roots, true), true).join('\n');
         rawChars = verbose.length; // 절감량 측정용
@@ -970,7 +970,7 @@
   }
 
   /**
-   * scalemaker fork(chrome_find): 접근성 트리와 동일한 수집 경로를 타되,
+   * auto-chrome-mcp fork(chrome_find): 접근성 트리와 동일한 수집 경로를 타되,
    * 결과를 트리 문자열이 아니라 "평면 후보 배열"로 돌려준다.
    *
    * filter 는 'all' 로 고정한다 — 화면 아래(뷰포트 밖)에 있는 버튼도 찾을 수 있어야 하기 때문.
@@ -1011,7 +1011,7 @@
 
   // Expose API on window
   window.__generateAccessibilityTree = __generateAccessibilityTree;
-  // scalemaker fork(chrome_find)
+  // auto-chrome-mcp fork(chrome_find)
   window.__collectFindCandidates = __collectFindCandidates;
 
   // ============================================================================
@@ -1361,12 +1361,12 @@
           return true;
         }
       }
-      // scalemaker fork(chrome_find): 도구 이름 기반 주입 ping (BaseBrowserToolExecutor 규칙)
+      // auto-chrome-mcp fork(chrome_find): 도구 이름 기반 주입 ping (BaseBrowserToolExecutor 규칙)
       if (request && request.action === 'chrome_find_ping') {
         sendResponse({ status: 'pong' });
         return false;
       }
-      // scalemaker fork(chrome_find): 평면 후보 목록 반환 (점수 계산은 background 에서)
+      // auto-chrome-mcp fork(chrome_find): 평면 후보 목록 반환 (점수 계산은 background 에서)
       if (request && request.action === 'chrome_find_get_candidates') {
         try {
           const result = __collectFindCandidates();
@@ -1380,7 +1380,7 @@
         const result = __generateAccessibilityTree(request.filter || null, {
           maxDepth: request.depth,
           refId: request.refId,
-          // scalemaker fork(T4): 명시적으로 true 일 때만 압축(다른 호출자 영향 없음)
+          // auto-chrome-mcp fork(T4): 명시적으로 true 일 때만 압축(다른 호출자 영향 없음)
           compact: request.compact === true,
         });
         if (result && result.error) {

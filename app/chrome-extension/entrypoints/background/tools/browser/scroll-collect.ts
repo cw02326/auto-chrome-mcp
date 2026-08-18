@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 
 /**
- * scalemaker fork: chrome_scroll_collect — 무한 스크롤/지연 로딩 페이지의 내용을
+ * auto-chrome-mcp fork: chrome_scroll_collect — 무한 스크롤/지연 로딩 페이지의 내용을
  * 한 번의 MCP 호출로 모아온다. (스크롤 → 읽기 → 스크롤 → 읽기 왕복 제거)
  *
  * 가상 스크롤(virtualized list)처럼 앞부분 DOM 이 언로드되는 페이지를 위해,
