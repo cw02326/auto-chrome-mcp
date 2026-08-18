@@ -3,7 +3,7 @@
   "description": "Chrome extension to use your own Chrome as a MCP server — auto-chrome-mcp fork with Force Reconnect + Playwright fallback",
   "author": "hangye (upstream), scalemaker-ship-it (auto-chrome-mcp fork)",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "type": "module",
   "scripts": {
     "dev": "wxt",

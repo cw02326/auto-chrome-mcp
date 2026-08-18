@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.2] — 발행 수정 (2026-08-18)
+
+### Fixed
+
+- **v1.4.0 / v1.4.1 은 npm 에서 설치할 수 없다.** 모노레포 내부 의존성
+  `auto-chrome-mcp-shared: "workspace:*"` 가 치환되지 않은 채 발행돼
+  `npm install -g` 이 `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"` 로 실패한다.
+  `npm publish` 로 올렸기 때문 — **workspace 프로토콜을 실제 버전으로 바꿔주는 것은 pnpm 뿐이다.**
+  v1.4.2 는 `pnpm publish` 로 올렸고, 발행 전 `pnpm pack` 으로 tarball 안의
+  dependencies 를 확인했다.
+- 깨진 1.4.0 / 1.4.1 은 deprecate 처리했다.
+
+### 릴리스 절차 (재발 방지)
+
+1. 버전 올리기 (4개 package.json)
+2. `pnpm --filter ... build` 로 전체 빌드
+3. **`pnpm pack` 으로 tarball 의 `dependencies` 에 `workspace:` 가 남아있지 않은지 확인**
+4. `pnpm publish` 로 발행 (`npm publish` 금지)
+
 ## [v1.4.1] — 이중 응답 수정 (2026-08-18)
 
 ### Fixed
