@@ -10,6 +10,7 @@ import {
   ensureExecutionPermissions,
   writeNodePathFile,
 } from './scripts/utils';
+import { COMMAND_NAME } from './scripts/constant';
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
 import { runDoctor } from './scripts/doctor';
 import { runReport } from './scripts/report';
@@ -115,8 +116,8 @@ program
               'yellow',
             ),
           );
-          console.log(colorText('  1. sudo mcp-chrome-bridge register', 'yellow'));
-          console.log(colorText('  2. mcp-chrome-bridge register --system', 'yellow'));
+          console.log(colorText(`  1. sudo ${COMMAND_NAME} register`, 'yellow'));
+          console.log(colorText(`  2. ${COMMAND_NAME} register --system`, 'yellow'));
           process.exit(1);
         }
       }

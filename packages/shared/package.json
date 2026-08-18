@@ -1,6 +1,6 @@
 {
   "name": "auto-chrome-mcp-shared",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "hangye (upstream), scalemaker-ship-it (auto-chrome-mcp fork)",
   "main": "dist/index.js",
   "module": "./dist/index.mjs",

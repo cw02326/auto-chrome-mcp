@@ -28,7 +28,7 @@ const SCALEMAKER_EXT_DIR = path.join(
   `mcp-chrome-scalemaker-extension-v${SCALEMAKER_VERSION}`,
 );
 const SCALEMAKER_EXT_URL =
-  'https://github.com/scalemaker-ship-it/mcp-chrome-scalemaker/releases/latest/download/chrome-mcp-scalemaker-extension.zip';
+  'https://github.com/cw02326/auto-chrome-mcp/releases/latest/download/auto-chrome-mcp-extension.zip';
 
 function runCmd(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -203,13 +203,14 @@ function printScalemakerNextSteps(extDir: string | null): void {
     '\n' + colorText('[2] Claude Code 에 줄 prompt (터미널의 `claude` 에 붙여넣기):', 'blue'),
   );
   console.log(`    ┌────────────────────────────────────────────────────────────────────┐`);
-  console.log(`    지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP`);
-  console.log(`    (auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정엔`);
-  console.log(`    손대지 마. 이름 "chrome-mcp-stdio", command "node", args ["<npm root -g>`);
-  console.log(`    /mcp-chrome-scalemaker-bridge/dist/mcp/mcp-server-stdio.js"], env`);
-  console.log(`    { "CHROME_PORT": "12320" }. 먼저 \`npm root -g\` 실행해서 경로 얻고,`);
-  console.log(`    working dir 의 .mcp.json mcpServers.chrome-mcp-stdio 만 추가/갱신.`);
-  console.log(`    기존 다른 server 항목 보존. 끝나면 /mcp 로 활성 확인 안내.`);
+  console.log(`    우리 chrome MCP (auto-chrome-mcp) 를 사용자 전역에 등록해줘.`);
+  console.log(`    먼저 \`npm root -g\` 로 설치 경로를 얻은 뒤 아래를 실행:`);
+  console.log(`      claude mcp add chrome-mcp-stdio -s user -e CHROME_PORT=12320 \\`);
+  console.log(
+    `        -- node "<npm root -g>/auto-chrome-mcp-bridge/dist/mcp/mcp-server-stdio.js"`,
+  );
+  console.log(`    반드시 전역(-s user)으로. 프로젝트마다 .mcp.json 에 따로 넣으면 경로가`);
+  console.log(`    서로 어긋나 깨지기 쉽다. 끝나면 /mcp 로 활성 확인 안내.`);
   console.log(`    └────────────────────────────────────────────────────────────────────┘`);
   console.log('\n' + colorText('[3] /mcp 명령으로 chrome-mcp-stdio 활성 확인', 'blue'));
 }

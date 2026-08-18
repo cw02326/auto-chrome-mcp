@@ -591,9 +591,11 @@ async function probeActiveBridgePorts(): Promise<{
     const psOut = execFileSync('ps', ['-eo', 'pid,command'], { encoding: 'utf8' });
     const pids: number[] = [];
     for (const line of psOut.split('\n')) {
-      // bridge native messaging host 는 `<...>/mcp-chrome-scalemaker-bridge/dist/index.js` 패턴
+      // bridge native messaging host 는 `<...>/<pkg>/dist/index.js` 패턴.
+      // 현재 패키지명과 구 이름(구버전 설치본) 둘 다 인정한다.
       if (
-        line.includes('mcp-chrome-scalemaker-bridge') &&
+        (line.includes('auto-chrome-mcp-bridge') ||
+          line.includes('mcp-chrome-scalemaker-bridge')) &&
         line.includes('/dist/index.js') &&
         !line.includes('grep')
       ) {

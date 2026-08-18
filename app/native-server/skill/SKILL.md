@@ -2,7 +2,7 @@
 name: chrome-mcp-scalemaker-doctor
 description: |
   Use whenever the user reports ANY problem with the chrome-mcp-scalemaker
-  MCP server. Diagnoses via `mcp-chrome-scalemaker-bridge doctor`, fixes with
+  MCP server. Diagnoses via `auto-chrome-mcp-bridge doctor`, fixes with
   `--fix`, exports issue report with `report --copy`, edits .mcp.json's
   CHROME_PORT for multi-profile routing, and guides the popup's 강제 포커스
   toggle.
@@ -43,7 +43,7 @@ bridge, 또는 도구 호출과 관련된 문제를 보고할 때 자동으로 �
 사용자에게 자연어로 답변하세요.** "이 명령어를 직접 쳐주세요" 라고 사용자에게
 넘기지 마세요.
 
-먼저 `mcp-chrome-scalemaker-bridge -V` 로 auto-chrome-mcp fork 인지 확인하세요.
+먼저 `auto-chrome-mcp-bridge -V` 로 auto-chrome-mcp fork 인지 확인하세요.
 명령이 없거나 다른 패키지 (`mcp-chrome-bridge` 등) 면 이 스킬은 종료하고
 사용자에게 fork 안내만 합니다.
 
@@ -93,34 +93,34 @@ popup UI                                         ← port 입력, 강제포커�
 
 ### Trigger → 1st command
 
-| 사용자 발화 패턴                                                                            | 1st command (Claude 가 Bash 로)                                                      | 후속 분기                                                                                             |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| "연결 안 돼" / "disconnected" / "popup 빨간불" / "service stopped"                          | `mcp-chrome-scalemaker-bridge doctor`                                                | (B-doctor-output) 표                                                                                  |
-| "권한 에러" / "EACCES" / "permission denied" / "run_host.sh" 언급                           | `mcp-chrome-scalemaker-bridge doctor --fix`                                          | 여전히 실패 시 `mcp-chrome-scalemaker-bridge fix-permissions` 단독                                    |
-| "manifest 못 찾음" / "native messaging error" / "Specified native messaging host not found" | `mcp-chrome-scalemaker-bridge doctor --fix`                                          | 후속 doctor 재실행해서 ✅ 확인                                                                        |
-| "두 세션이 같은 chrome 만 호출" / "다른 profile 인데" / "12315 로 설정했는데 12320 가"      | (B-doctor 대신) `.mcp.json` read 부터 — section (C) 점검 절차 1-5 따라               | port 일치 후 사용자에게 Claude Code 재시작 + `/mcp` 검증 안내                                         |
-| "Chrome 이 자꾸 앞으로 튀어나옴" / "포커스 빼앗김" / "강제 포커스 꺼"                       | (명령 없음) popup 의 "강제 포커스" 토글 OFF 안내 — section (D)                       | popup 못 열겠다면 chrome.storage.local 의 `forceFocusOnToolCall` 을 false 로 직접 set 안내            |
-| "/mcp 가 비어있음" / "/mcp 에 chrome-mcp-stdio 없어"                                        | (명령 없음) working dir 의 `.mcp.json` read                                          | 없으면 welcome 페이지의 "Claude prompt 등록" 박스를 사용자에게 안내                                   |
-| "도구 timeout" / "스크린샷 안 찍혀" / "navigate 실패" / "tab 전환 안 됨"                    | `mcp-chrome-scalemaker-bridge doctor`                                                | Connectivity ✅ 인데도 안 되면 popup 의 "강제 재연결" 5단계 안내                                      |
-| "port 충돌" / "EADDRINUSE" / "PORT_CONFLICT"                                                | `lsof -i :<port>` 로 점유 process 식별                                               | bridge 좀비면 `kill -9 <pid>` 권유. 다른 process (e.g., 다른 chrome profile bridge) 면 그쪽 port 변경 |
-| "강제 재연결 눌렀는데도 안 돼" / "5단계 다 빨간불"                                          | `mcp-chrome-scalemaker-bridge doctor` + `mcp-chrome-scalemaker-bridge report --copy` | (E) escalate — 진단 + 리포트 모두 사용자에게                                                          |
-| "이슈 등록" / "버그 신고" / "GH issue 작성"                                                 | `mcp-chrome-scalemaker-bridge report --copy`                                         | 클립보드 마크다운 + 사용자에게 issue URL 안내                                                         |
+| 사용자 발화 패턴                                                                            | 1st command (Claude 가 Bash 로)                                          | 후속 분기                                                                                             |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| "연결 안 돼" / "disconnected" / "popup 빨간불" / "service stopped"                          | `auto-chrome-mcp-bridge doctor`                                          | (B-doctor-output) 표                                                                                  |
+| "권한 에러" / "EACCES" / "permission denied" / "run_host.sh" 언급                           | `auto-chrome-mcp-bridge doctor --fix`                                    | 여전히 실패 시 `auto-chrome-mcp-bridge fix-permissions` 단독                                          |
+| "manifest 못 찾음" / "native messaging error" / "Specified native messaging host not found" | `auto-chrome-mcp-bridge doctor --fix`                                    | 후속 doctor 재실행해서 ✅ 확인                                                                        |
+| "두 세션이 같은 chrome 만 호출" / "다른 profile 인데" / "12315 로 설정했는데 12320 가"      | (B-doctor 대신) `.mcp.json` read 부터 — section (C) 점검 절차 1-5 따라   | port 일치 후 사용자에게 Claude Code 재시작 + `/mcp` 검증 안내                                         |
+| "Chrome 이 자꾸 앞으로 튀어나옴" / "포커스 빼앗김" / "강제 포커스 꺼"                       | (명령 없음) popup 의 "강제 포커스" 토글 OFF 안내 — section (D)           | popup 못 열겠다면 chrome.storage.local 의 `forceFocusOnToolCall` 을 false 로 직접 set 안내            |
+| "/mcp 가 비어있음" / "/mcp 에 chrome-mcp-stdio 없어"                                        | (명령 없음) working dir 의 `.mcp.json` read                              | 없으면 welcome 페이지의 "Claude prompt 등록" 박스를 사용자에게 안내                                   |
+| "도구 timeout" / "스크린샷 안 찍혀" / "navigate 실패" / "tab 전환 안 됨"                    | `auto-chrome-mcp-bridge doctor`                                          | Connectivity ✅ 인데도 안 되면 popup 의 "강제 재연결" 5단계 안내                                      |
+| "port 충돌" / "EADDRINUSE" / "PORT_CONFLICT"                                                | `lsof -i :<port>` 로 점유 process 식별                                   | bridge 좀비면 `kill -9 <pid>` 권유. 다른 process (e.g., 다른 chrome profile bridge) 면 그쪽 port 변경 |
+| "강제 재연결 눌렀는데도 안 돼" / "5단계 다 빨간불"                                          | `auto-chrome-mcp-bridge doctor` + `auto-chrome-mcp-bridge report --copy` | (E) escalate — 진단 + 리포트 모두 사용자에게                                                          |
+| "이슈 등록" / "버그 신고" / "GH issue 작성"                                                 | `auto-chrome-mcp-bridge report --copy`                                   | 클립보드 마크다운 + 사용자에게 issue URL 안내                                                         |
 
 ### (B-doctor-output) `doctor` 결과 해석 → 후속 명령
 
 doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
 
-| ❌ 항목                             | 의미                                                            | Claude 의 후속 action                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Installation**                    | 패키지가 PATH 에 없음                                           | `npm install -g mcp-chrome-scalemaker-bridge` 실행 권유 (사용자가 sudo 필요할 수 있어 Claude 가 직접 실행 X)                                                                                                                                                                                                                                                                                                        |
-| **Host files**                      | dist 안 파일 누락 (꼬임)                                        | 재설치 권유 — `npm uninstall -g ... && npm install -g ...`                                                                                                                                                                                                                                                                                                                                                          |
-| **Host permissions**                | `run_host.sh` 실행 권한 없음                                    | `mcp-chrome-scalemaker-bridge doctor --fix` 또는 `... fix-permissions` 직접 실행                                                                                                                                                                                                                                                                                                                                    |
-| **Node executable**                 | Node 20+ 가 wrapper script 에서 안 잡힘                         | 사용자 OS 의 node version 확인 (`node -v`) → 20 미만이면 업데이트 안내. nvm/volta/asdf/fnm 사용자면 `export CHROME_MCP_NODE_PATH=$(which node)` 후 재시도                                                                                                                                                                                                                                                           |
-| **Chrome / Chromium manifest**      | OS 별 디렉토리에 `com.chromemcpscalemaker.nativehost.json` 없음 | `mcp-chrome-scalemaker-bridge doctor --fix` 로 user-level 자동 재등록                                                                                                                                                                                                                                                                                                                                               |
-| **Windows registry** (Windows 만)   | registry 키 누락                                                | `doctor --fix` 시도 → 실패 시 관리자 PowerShell 안내                                                                                                                                                                                                                                                                                                                                                                |
-| **Port config** / **Port constant** | `stdio-config.json` 의 URL port 가 깨짐                         | `mcp-chrome-scalemaker-bridge update-port <port>` 실행                                                                                                                                                                                                                                                                                                                                                              |
-| **Connectivity**                    | bridge 가 해당 port 에서 응답 X                                 | v1.0.30+ doctor 는 active bridge process 의 actual port 도 같이 점검 → message 에 "active bridge found on port(s) X" 가 보이면 false WARN (popup 의 dynamic port 가 hardcoded 와 다를 뿐, 실제는 정상). 그 message 없이 진짜 ⚠️ 면 `ps aux \| grep mcp-chrome-scalemaker-bridge` → `lsof -aPi -p <pid> \| grep LISTEN` 로 살아있는지 확인. 죽었으면 popup "강제 재연결" 안내. 다른 process 점유면 위 port 충돌 분기 |
-| **Logs**                            | log 디렉토리 쓰기 실패 (드뭄)                                   | `chmod +w ~/Library/Logs/mcp-chrome-scalemaker-bridge/` (macOS) 등 안내                                                                                                                                                                                                                                                                                                                                             |
+| ❌ 항목                             | 의미                                                            | Claude 의 후속 action                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Installation**                    | 패키지가 PATH 에 없음                                           | `npm install -g auto-chrome-mcp-bridge` 실행 권유 (사용자가 sudo 필요할 수 있어 Claude 가 직접 실행 X)                                                                                                                                                                                                                                                                                                        |
+| **Host files**                      | dist 안 파일 누락 (꼬임)                                        | 재설치 권유 — `npm uninstall -g ... && npm install -g ...`                                                                                                                                                                                                                                                                                                                                                    |
+| **Host permissions**                | `run_host.sh` 실행 권한 없음                                    | `auto-chrome-mcp-bridge doctor --fix` 또는 `... fix-permissions` 직접 실행                                                                                                                                                                                                                                                                                                                                    |
+| **Node executable**                 | Node 20+ 가 wrapper script 에서 안 잡힘                         | 사용자 OS 의 node version 확인 (`node -v`) → 20 미만이면 업데이트 안내. nvm/volta/asdf/fnm 사용자면 `export CHROME_MCP_NODE_PATH=$(which node)` 후 재시도                                                                                                                                                                                                                                                     |
+| **Chrome / Chromium manifest**      | OS 별 디렉토리에 `com.chromemcpscalemaker.nativehost.json` 없음 | `auto-chrome-mcp-bridge doctor --fix` 로 user-level 자동 재등록                                                                                                                                                                                                                                                                                                                                               |
+| **Windows registry** (Windows 만)   | registry 키 누락                                                | `doctor --fix` 시도 → 실패 시 관리자 PowerShell 안내                                                                                                                                                                                                                                                                                                                                                          |
+| **Port config** / **Port constant** | `stdio-config.json` 의 URL port 가 깨짐                         | `auto-chrome-mcp-bridge update-port <port>` 실행                                                                                                                                                                                                                                                                                                                                                              |
+| **Connectivity**                    | bridge 가 해당 port 에서 응답 X                                 | v1.0.30+ doctor 는 active bridge process 의 actual port 도 같이 점검 → message 에 "active bridge found on port(s) X" 가 보이면 false WARN (popup 의 dynamic port 가 hardcoded 와 다를 뿐, 실제는 정상). 그 message 없이 진짜 ⚠️ 면 `ps aux \| grep auto-chrome-mcp-bridge` → `lsof -aPi -p <pid> \| grep LISTEN` 로 살아있는지 확인. 죽었으면 popup "강제 재연결" 안내. 다른 process 점유면 위 port 충돌 분기 |
+| **Logs**                            | log 디렉토리 쓰기 실패 (드뭄)                                   | `chmod +w ~/Library/Logs/mcp-chrome-bridge/` (macOS) 등 안내                                                                                                                                                                                                                                                                                                                                                  |
 
 ### 사용자 발화 → Bash 호출 예시
 
@@ -128,9 +128,9 @@ doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
 >
 > Claude:
 >
-> 1. Bash: `mcp-chrome-scalemaker-bridge doctor` → stdout 캡처
+> 1. Bash: `auto-chrome-mcp-bridge doctor` → stdout 캡처
 > 2. 결과: "Host permissions" 가 ❌
-> 3. Bash: `mcp-chrome-scalemaker-bridge doctor --fix` → stdout 캡처
+> 3. Bash: `auto-chrome-mcp-bridge doctor --fix` → stdout 캡처
 > 4. 결과: 모두 ✅
 > 5. 사용자: "permissions 이 빠져있었네. fix 적용했어. popup 다시 열어서 연결되는지 확인해줘."
 
@@ -154,7 +154,7 @@ doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
      "mcpServers": {
        "chrome-mcp-stdio": {
          "command": "node",
-         "args": ["<npm root -g>/mcp-chrome-scalemaker-bridge/dist/mcp/mcp-server-stdio.js"],
+         "args": ["<npm root -g>/auto-chrome-mcp-bridge/dist/mcp/mcp-server-stdio.js"],
          "env": { "CHROME_PORT": "12315" }
        }
      }
@@ -204,13 +204,13 @@ doctor 는 10개 항목 점검. 결과 stdout 에서 ❌ 항목별 결정:
 
 v1.1.0 부터 MCP 도구는 사용자의 브라우징을 방해하지 않는 **백그라운드 작업 모드**로 동작한다.
 
-| 토글 (popup)      | storage.local 키           | 기본값 | 의미                                                    |
-| ----------------- | -------------------------- | ------ | ------------------------------------------------------- |
-| 강제 포커스       | `forceFocusOnToolCall`     | OFF    | ON 이면 도구 호출 시 OS 윈도우 포커스 가로챔            |
-| 백그라운드 작업   | `backgroundWorkMode`       | ON     | ON 이면 탭 활성화 없이 세션별 "작업 탭"을 대상으로 동작 |
-| 전용 작업 창      | `dedicatedWorkWindow`      | ON     | ON 이면 MCP 작업 탭을 별도 비포커스 창에 모음           |
-| (popup 토글 없음) | `automationGuardEnabled`   | ON     | 도메인 속도 제한 + 동일 호출 반복 폭주 가드             |
-| (popup 토글 없음) | `errorScreenshotOnFailure` | ON     | 도구 실패 시 화면 JPEG 자동 첨부                        |
+| 토글 (popup)      | storage.local 키           | 기본값  | 의미                                                                                                                                                     |
+| ----------------- | -------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 강제 포커스       | `forceFocusOnToolCall`     | OFF     | ON 이면 도구 호출 시 OS 윈도우 포커스 가로챔                                                                                                             |
+| 백그라운드 작업   | `backgroundWorkMode`       | ON      | ON 이면 탭 활성화 없이 세션별 "작업 탭"을 대상으로 동작                                                                                                  |
+| 작업 창 모드      | `mcpWorkWindowMode`        | current | v1.4.0+: 기본은 사용자가 열어 둔 현재 창에 백그라운드 새 탭. `dedicated` 로 두면 별도 비포커스 창에 모음 (구 `dedicatedWorkWindow` boolean 은 자동 승계) |
+| (popup 토글 없음) | `automationGuardEnabled`   | ON      | 도메인 속도 제한 + 동일 호출 반복 폭주 가드                                                                                                              |
+| (popup 토글 없음) | `errorScreenshotOnFailure` | ON      | 도구 실패 시 화면 JPEG 자동 첨부                                                                                                                         |
 
 핵심 동작: 세션(stdio)마다 `_mcpSessionId` 자동 주입 → 세션별 작업 탭(최대 10, LRU, "MCP" 뱃지).
 `chrome_navigate` 가 작업 탭을 확정하므로 **세션 첫 작업은 navigate 부터**. 팝업/새 창이 열리면
@@ -240,7 +240,7 @@ v1.3.0 신규: `chrome_find`(자연어 요소 검색 — 한/영, iframe 포함)
 
 자체 해결 못 하면:
 
-1. `mcp-chrome-scalemaker-bridge report --copy` 실행 (사용자 환경 정보 + doctor
+1. `auto-chrome-mcp-bridge report --copy` 실행 (사용자 환경 정보 + doctor
    결과를 마크다운으로 클립보드에 복사. username/path/token 자동 redact)
 2. GitHub Issue 생성: https://github.com/cw02326/auto-chrome-mcp/issues/new
 3. 사용자에게 "클립보드에 진단 리포트가 있으니 issue 본문에 붙여넣기" 안내

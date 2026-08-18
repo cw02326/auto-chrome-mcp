@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.0] — 현재 창 작업 탭 (2026-08-18)
+
+### Changed — MCP 작업 탭 기본 위치
+
+- **작업 탭이 별도 창이 아니라 사용자가 열어 둔 현재 창에 열린다.** 설정이
+  `dedicatedWorkWindow`(boolean) → `mcpWorkWindowMode`(`current` | `dedicated`) 로 바뀌고
+  기본값은 `current`. 구버전 boolean 설정은 자동 승계된다.
+- `current` 모드의 탭은 항상 비활성(`active: false`)으로 생성 — 사용자가 보던 탭을
+  뺏지 않는다. 스크린샷·read_page 는 CDP 경로라 보이지 않는 탭에서도 동작한다.
+- 대상 창은 열린 창 중 type `normal` 만 후보로 삼는다 (팝업·개발자도구·앱 창, 시크릿 창,
+  이전에 만든 전용 작업 창 제외). 적격 창이 없으면 종전처럼 새 창을 만든다.
+- 전용 작업 창은 팝업 토글로 계속 쓸 수 있다 (기본 OFF).
+
+### Fixed
+
+- **사용자 탭 하이재킹**: 같은 URL 재사용 후보에서 사용자 탭을 빼는 필터가 전용 작업 창이
+  켜져 있을 때만 걸려 있었다. 토글을 끄면 MCP 가 사용자가 열어 둔 탭을 잡아 조작했다.
+  이제 백그라운드 작업 모드면 창 모드와 무관하게 항상 적용된다.
+- **doctor 가 남의 npm 패키지 설치를 안내하던 문제**: 복구 명령의 패키지명이
+  `mcp-chrome-scalemaker-bridge` 였다. 이 이름은 npm 에서 타 계정 소유다.
+  실제 패키지명 `auto-chrome-mcp-bridge` 로 정정했다.
+- **postinstall 안내의 잘못된 경로**: `<npm root -g>/mcp-chrome-scalemaker-bridge/...` 로
+  안내했으나 실제 설치 폴더는 `auto-chrome-mcp-bridge` 다. 아울러 프로젝트별 `.mcp.json`
+  대신 `claude mcp add -s user` 전역 등록을 안내하도록 바꿨다 (프로젝트마다 넣으면
+  경로가 어긋나 깨지기 쉽다).
+- doctor 의 bridge 프로세스 탐지가 구 폴더명만 찾던 것을 두 이름 모두 인정하도록 수정.
+
+### Chore
+
+- 주석·문서의 `scalemaker` 표기를 `auto-chrome-mcp` 로 정리 (95개 파일). 네이티브 호스트
+  id, npm 패키지명·bin 별칭, 워크스페이스 package.json name, doctor 스킬명, 런타임 데이터
+  폴더는 기존 설치 호환을 위해 그대로 뒀다.
+
 ## [v1.3.0] — Auto Chrome MCP (2026-08-17)
 
 ### Added — Claude-in-Chrome 격차 해소 (사용자 선택 1–3)

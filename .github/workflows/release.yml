@@ -38,7 +38,7 @@ jobs:
       - name: Package extension zip
         run: |
           cd app/chrome-extension/.output/chrome-mv3
-          zip -r "${{ github.workspace }}/chrome-mcp-scalemaker-extension.zip" .
+          zip -r "${{ github.workspace }}/auto-chrome-mcp-extension.zip" .
 
       - name: Package launcher tarball
         run: |
@@ -61,6 +61,6 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            chrome-mcp-scalemaker-extension.zip
+            auto-chrome-mcp-extension.zip
             chrome-launcher-${{ github.ref_name }}.tar.gz
             mcp-chrome-scalemaker-bridge-*.tgz
