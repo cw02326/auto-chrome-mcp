@@ -181,9 +181,30 @@ export class Server {
   // MCP Routes
   // ============================================================
 
+  /**
+   * hijack 한 응답에서 에러를 마무리한다.
+   *
+   * hijack 이후에는 Fastify 의 reply.code().send() 를 쓸 수 없고, reply.sent 도 raw 쓰기를
+   * 반영하지 않는다. 그래서 raw 소켓 상태(headersSent / writableEnded)만 보고 판단한다.
+   */
+  private endRawWithError(reply: FastifyReply, status: number, message: unknown): void {
+    try {
+      if (!reply.raw.headersSent) {
+        reply.raw.writeHead(status, { 'Content-Type': 'application/json' });
+        reply.raw.end(JSON.stringify({ error: message }));
+      } else if (!reply.raw.writableEnded) {
+        reply.raw.end();
+      }
+    } catch {
+      // 소켓이 이미 끊긴 경우 — 더 할 수 있는 게 없다.
+    }
+  }
+
   private setupMcpRoutes(): void {
     // SSE endpoint
     this.fastify.get('/sse', async (_, reply) => {
+      // transport 가 reply.raw 에 직접 쓰므로 Fastify 의 자체 응답을 먼저 끈다.
+      reply.hijack();
       try {
         reply.raw.writeHead(HTTP_STATUS.OK, {
           'Content-Type': 'text/event-stream',
@@ -204,9 +225,11 @@ export class Server {
 
         reply.raw.write(':\n\n');
       } catch (error) {
-        if (!reply.sent) {
-          reply.code(HTTP_STATUS.INTERNAL_SERVER_ERROR).send(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
-        }
+        this.endRawWithError(
+          reply,
+          HTTP_STATUS.INTERNAL_SERVER_ERROR,
+          ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
+        );
       }
     });
 
@@ -220,11 +243,14 @@ export class Server {
           return;
         }
 
+        reply.hijack();
         await transport.handlePostMessage(req.raw, reply.raw, req.body);
       } catch (error) {
-        if (!reply.sent) {
-          reply.code(HTTP_STATUS.INTERNAL_SERVER_ERROR).send(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
-        }
+        this.endRawWithError(
+          reply,
+          HTTP_STATUS.INTERNAL_SERVER_ERROR,
+          ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
+        );
       }
     });
 
@@ -261,14 +287,17 @@ export class Server {
         return;
       }
 
+      // transport 가 reply.raw 로 직접 응답을 쓴다. hijack 하지 않으면 핸들러가 끝난 뒤
+      // Fastify 가 자체 응답을 한 번 더 보내려다 ERR_HTTP_HEADERS_SENT 가 쏟아진다.
+      reply.hijack();
       try {
         await transport.handleRequest(request.raw, reply.raw, request.body);
       } catch (error) {
-        if (!reply.sent) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR });
-        }
+        this.endRawWithError(
+          reply,
+          HTTP_STATUS.INTERNAL_SERVER_ERROR,
+          ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+        );
       }
     });
 
@@ -284,6 +313,8 @@ export class Server {
         return;
       }
 
+      // 헤더를 흘려보내기 전에 hijack — 이후 Fastify 는 이 응답에 관여하지 않는다.
+      reply.hijack();
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
       reply.raw.setHeader('Connection', 'keep-alive');
@@ -291,9 +322,6 @@ export class Server {
 
       try {
         await transport.handleRequest(request.raw, reply.raw);
-        if (!reply.sent) {
-          reply.hijack();
-        }
       } catch (error) {
         if (!reply.raw.writableEnded) {
           reply.raw.end();
@@ -317,17 +345,22 @@ export class Server {
         return;
       }
 
+      reply.hijack();
       try {
         await transport.handleRequest(request.raw, reply.raw);
-        if (!reply.sent) {
-          reply.code(HTTP_STATUS.NO_CONTENT).send();
+        // transport 가 아무것도 안 썼을 때만 204 로 마무리한다.
+        if (!reply.raw.headersSent) {
+          reply.raw.writeHead(HTTP_STATUS.NO_CONTENT);
+          reply.raw.end();
+        } else if (!reply.raw.writableEnded) {
+          reply.raw.end();
         }
       } catch (error) {
-        if (!reply.sent) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_SESSION_DELETION_ERROR });
-        }
+        this.endRawWithError(
+          reply,
+          HTTP_STATUS.INTERNAL_SERVER_ERROR,
+          ERROR_MESSAGES.MCP_SESSION_DELETION_ERROR,
+        );
       }
     });
   }

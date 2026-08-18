@@ -1,6 +1,6 @@
 {
   "name": "mcp-chrome-scalemaker-monorepo",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "author": "hangye (upstream), scalemaker-ship-it (auto-chrome-mcp fork)",
   "repository": {

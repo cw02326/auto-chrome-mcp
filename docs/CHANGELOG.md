@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.1] — 이중 응답 수정 (2026-08-18)
+
+### Fixed
+
+- **`ERR_HTTP_HEADERS_SENT` 대량 발생**: MCP transport 가 `reply.raw` 에 직접 응답을 쓰는데
+  Fastify 는 그것을 모른 채 핸들러 종료 후 자체 응답을 한 번 더 보내고 있었다. 결과적으로
+  요청 한 건마다 stderr 에 스택이 쌓였다. `/mcp` POST·GET·DELETE, `/sse`, `/messages` 전부
+  transport 에 `reply.raw` 를 넘기기 **전에** `reply.hijack()` 하도록 고쳤다.
+- 기존 에러 처리의 `if (!reply.sent)` 가드는 raw 쓰기를 반영하지 않아 무력했다. hijack 이후
+  상태를 볼 수 있는 `reply.raw.headersSent` / `writableEnded` 기준으로 바꾸고 공용 헬퍼
+  `endRawWithError` 로 정리했다.
+- GET `/mcp` 는 헤더를 flush 한 뒤에야 hijack 하고 있었다. 순서를 바로잡았다.
+
+MCP 클라이언트를 둘 이상(Claude Code + Codex) 동시에 붙이면서 드러난 문제다. jest 25 통과.
+
 ## [v1.4.0] — 현재 창 작업 탭 (2026-08-18)
 
 ### Changed — MCP 작업 탭 기본 위치
