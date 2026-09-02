@@ -1,0 +1,79 @@
+name: self-test
+
+# 이 fork 의 기본 브랜치는 main 이다.
+# 예전엔 이전 브랜치와 master 만 걸려 있어서 이 워크플로가 **한 번도 돈 적이 없었다**
+# (gh run list 에 self-test 기록이 전무). 회귀 809건이 통째로 게이트 밖에 있었다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # 스크립트를 켠 채로 설치해야 한다. sharp 0.32 는 install 스크립트로 prebuilt 바이너리를
+      # 받아오는데 --ignore-scripts 로 막으면 vitest 파일 10개가 로드조차 못 한다
+      # (`Cannot find module '../build/Release/sharp-linux-x64.node'`). release.yml 은 같은
+      # 이유로 이미 스크립트를 켜 둔다.
+      # bridge 의 postinstall 은 dist/scripts/postinstall.js 가 있을 때만 도는데 이 시점엔
+      # dist 를 아직 빌드하지 않았으므로 no-op 이다 — CI 러너에 네이티브 호스트를 등록하지 않는다.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 패키지 이름은 package.json 기준. 예전 필터는 어떤 패키지와도 안 맞았다.
+      # 패키지 이름이 auto-chrome-mcp-bridge 로 바뀐 뒤 방치됐기 때문이다.
+      - name: Build shared
+        run: pnpm --filter auto-chrome-mcp-shared build
+
+      - name: Build native-server
+        run: pnpm --filter auto-chrome-mcp-bridge build
+
+      - name: Build extension
+        run: pnpm --filter auto-chrome-mcp-extension build
+
+      - name: Build launcher
+        run: pnpm --filter auto-chrome-mcp-launcher build
+
+      # chore/lint-gate: 4건(PropertyFormRenderer.vue prop 직접 변경 3건 — 기존
+      # Property*.vue 컨벤션대로 vue/no-mutating-props 를 파일 상단에서 disable,
+      # Diagnostic.vue → DiagnosticReport.vue 로 개명해 vue/multi-word-component-names
+      # 해소) 를 모두 정리했으므로 extension 패키지 lint 를 게이트로 추가한다.
+      # packages/shared, app/native-server 의 lint 는 이번 범위 밖이라 아직 게이트에
+      # 넣지 않았다(이 워크플로가 ubuntu-latest 이므로 Windows 국한 문제는 아니지만,
+      # 이번 작업은 extension 4건만 정리했으므로 나머지 두 패키지는 별도로 확인할 것).
+      - name: Lint (extension)
+        run: pnpm --filter auto-chrome-mcp-extension lint
+
+      # fork 의 주력 회귀 스위트. 예전엔 CI 에 아예 없어서 809건이 로컬에서만 돌았다.
+      - name: Vitest (extension regression suite)
+        working-directory: app/chrome-extension
+        run: npx vitest run --reporter=dot
+
+      - name: Jest (native-server regression suite)
+        working-directory: app/native-server
+        run: npx jest --colors
+
+      - name: Upload extension zip
+        if: matrix.node == '22'
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-chrome-mcp-extension
+          path: app/chrome-extension/.output/chrome-mv3/
+          retention-days: 7

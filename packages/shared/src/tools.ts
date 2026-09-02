@@ -1,0 +1,2008 @@
+import { type Tool } from '@modelcontextprotocol/sdk/types.js';
+
+export const TOOL_NAMES = {
+  BROWSER: {
+    GET_WINDOWS_AND_TABS: 'get_windows_and_tabs',
+    SEARCH_TABS_CONTENT: 'search_tabs_content',
+    NAVIGATE: 'chrome_navigate',
+    SCREENSHOT: 'chrome_screenshot',
+    CLOSE_TABS: 'chrome_close_tabs',
+    SWITCH_TAB: 'chrome_switch_tab',
+    WEB_FETCHER: 'chrome_get_web_content',
+    CLICK: 'chrome_click_element',
+    FILL: 'chrome_fill_or_select',
+    REQUEST_ELEMENT_SELECTION: 'chrome_request_element_selection',
+    GET_INTERACTIVE_ELEMENTS: 'chrome_get_interactive_elements',
+    NETWORK_CAPTURE: 'chrome_network_capture',
+    // Legacy tool names (kept for internal use, not exposed in TOOL_SCHEMAS)
+    NETWORK_CAPTURE_START: 'chrome_network_capture_start',
+    NETWORK_CAPTURE_STOP: 'chrome_network_capture_stop',
+    NETWORK_REQUEST: 'chrome_network_request',
+    NETWORK_DEBUGGER_START: 'chrome_network_debugger_start',
+    NETWORK_DEBUGGER_STOP: 'chrome_network_debugger_stop',
+    KEYBOARD: 'chrome_keyboard',
+    HISTORY: 'chrome_history',
+    BOOKMARK_SEARCH: 'chrome_bookmark_search',
+    BOOKMARK_ADD: 'chrome_bookmark_add',
+    BOOKMARK_DELETE: 'chrome_bookmark_delete',
+    INJECT_SCRIPT: 'chrome_inject_script',
+    SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
+    JAVASCRIPT: 'chrome_javascript',
+    CONSOLE: 'chrome_console',
+    FILE_UPLOAD: 'chrome_upload_file',
+    READ_PAGE: 'chrome_read_page',
+    COMPUTER: 'chrome_computer',
+    HANDLE_DIALOG: 'chrome_handle_dialog',
+    HANDLE_DOWNLOAD: 'chrome_handle_download',
+    REQUEST_USER_CONSENT: 'chrome_request_user_consent',
+    USERSCRIPT: 'chrome_userscript',
+    PERFORMANCE_START_TRACE: 'performance_start_trace',
+    PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
+    PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
+    GIF_RECORDER: 'chrome_gif_recorder',
+    BATCH: 'chrome_batch',
+    SET_WORK_TAB: 'chrome_set_work_tab',
+    WAIT_FOR: 'chrome_wait_for',
+    SCROLL_COLLECT: 'chrome_scroll_collect',
+    // auto-chrome-mcp fork(B1~B4)
+    STORAGE: 'chrome_storage',
+    SAVE_PDF: 'chrome_save_pdf',
+    EMULATE: 'chrome_emulate',
+    NETWORK_RULES: 'chrome_network_rules',
+    EXTRACT: 'chrome_extract',
+    FIND: 'chrome_find',
+    SHORTCUT: 'chrome_shortcut',
+    // stdio 프록시 전용 (extension 으로 forward 되지 않음 — mcp-server-stdio.ts 가 가로챔)
+    LIST_BROWSERS: 'chrome_list_browsers',
+    USE_BROWSER: 'chrome_use_browser',
+  },
+  RECORD_REPLAY: {
+    FLOW_RUN: 'record_replay_flow_run',
+    LIST_PUBLISHED: 'record_replay_list_published',
+  },
+};
+
+export const TOOL_SCHEMAS: Tool[] = [
+  {
+    name: TOOL_NAMES.BROWSER.BATCH,
+    description:
+      'Execute multiple browser tool steps sequentially in ONE call (cuts round-trip latency for chains like click → fill → click → screenshot). Each step targets the session work tab by default. Steps cannot include chrome_batch itself or interactive tools (switch_tab, element selection, user consent). Default stops on first error; set continueOnError to run all steps. Returns per-step results as JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: 'Steps to run in order (max 20). Each: { tool: string, args?: object }',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string', description: 'Tool name, e.g. chrome_click_element' },
+              args: { type: 'object', description: 'Arguments for the tool' },
+            },
+            required: ['tool'],
+          },
+        },
+        continueOnError: {
+          type: 'boolean',
+          description: 'Run remaining steps even when a step fails (default false)',
+        },
+      },
+      required: ['steps'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.FIND,
+    description:
+      'Find elements on the page using natural language (Korean or English), e.g. "로그인 버튼", "search input", "장바구니 아이콘". Matches element names/roles/placeholder/text via synonym + fuzzy scoring over the accessibility tree and returns ranked candidates with ref (usable directly in chrome_click_element / chrome_fill_or_select), role, name, coordinates, and frameId. Cheaper and more direct than reading the whole page when you know what you are looking for.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural language description of the element (Korean/English)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        maxResults: { type: 'number', description: 'Max candidates to return (default 5, max 20)' },
+        allFrames: {
+          type: 'boolean',
+          description: 'Also search inside iframes (default true)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SHORTCUT,
+    description:
+      'Save and run named multi-step shortcuts (macro = a chrome_batch step list stored under a name). action="save" stores {name, steps, description}; "run" executes a saved shortcut through the normal tool pipeline; "list" shows saved shortcuts; "delete" removes one. Useful for workflows you repeat across sessions (login flows, routine collection).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['save', 'run', 'list', 'delete'],
+          description: 'What to do',
+        },
+        name: { type: 'string', description: 'Shortcut name (save/run/delete)' },
+        steps: {
+          type: 'array',
+          description:
+            'For action="save": steps in chrome_batch format, max 20. Each: { tool: string, args?: object }',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string' },
+              args: { type: 'object' },
+            },
+            required: ['tool'],
+          },
+        },
+        description: { type: 'string', description: 'For action="save": what this shortcut does' },
+        continueOnError: {
+          type: 'boolean',
+          description: 'For action="run": keep running steps after a failure (default false)',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.EXTRACT,
+    description:
+      'Extract ONLY the fields you need from the page via CSS selectors — far cheaper than reading the whole page when you know what you want (e.g. price, title, links). Deterministic and precise. Prefer this over chrome_get_web_content/chrome_read_page for targeted scraping.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        fields: {
+          type: 'object',
+          description:
+            'Map of fieldName → CSS selector (string) or { selector, attr?, all? }. Default value = trimmed innerText of first match; attr returns that attribute (href/src resolve to absolute URLs); all:true returns an array over every match (max 100, 2000 chars each). Max 20 fields.',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Optional frame id to extract from a specific iframe.',
+        },
+      },
+      required: ['fields'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.WAIT_FOR,
+    description:
+      'Wait until the page is actually ready before acting — prevents "clicked/read too early" failures after navigation, clicks, or AJAX updates. Conditions (AND-combined, at least one required): selector appears/visible/hidden, text appears, document ready, or network idle. A timeout returns success:false with the observed state (not an error) so you can decide next steps.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        selector: { type: 'string', description: 'CSS selector to wait for' },
+        state: {
+          type: 'string',
+          enum: ['visible', 'attached', 'hidden'],
+          description: "Selector condition (default 'visible'). 'hidden' = absent or not visible.",
+        },
+        text: { type: 'string', description: 'Wait until this text appears in the page body' },
+        documentReady: {
+          type: 'boolean',
+          description: "Wait for document.readyState === 'complete'",
+        },
+        networkIdleMs: {
+          type: 'number',
+          description:
+            'Wait until the tab has no in-flight network requests for this many ms (e.g. 500)',
+        },
+        timeoutMs: { type: 'number', description: 'Max wait (default 15000, max 60000)' },
+        pollMs: { type: 'number', description: 'Poll interval (default 250, min 100)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SCROLL_COLLECT,
+    description:
+      'Collect content from infinite-scroll / lazy-loaded pages in ONE call: repeatedly scrolls to the bottom (window or a container element), waits for new content, and returns the accumulated text or links. Stops when the page stops growing, stopText appears, maxScrolls or maxChars is reached.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        maxScrolls: { type: 'number', description: 'Max scroll passes (default 10, max 30)' },
+        delayMs: {
+          type: 'number',
+          description: 'Wait after each scroll for content to load (default 700, 200–3000)',
+        },
+        containerSelector: {
+          type: 'string',
+          description: 'Scroll this element instead of the window (e.g. a feed container)',
+        },
+        stopText: { type: 'string', description: 'Stop early when this text appears' },
+        collect: {
+          type: 'string',
+          enum: ['text', 'links'],
+          description: "What to return (default 'text'). 'links' = deduped [{text, href}]",
+        },
+        maxChars: { type: 'number', description: 'Output cap (default 100000, max 300000)' },
+        renderMode: {
+          type: 'string',
+          enum: ['auto', 'force', 'off'],
+          description:
+            "Keep a background tab rendering so lazy loading actually fires (Chrome stops producing frames in inactive tabs, so IntersectionObserver never triggers). 'auto' (default) = enable only when the tab is not visible, 'force' = always, 'off' = never. Uses CDP, which shows a debugging infobar on that tab.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SET_WORK_TAB,
+    description:
+      "Retarget this session's default work tab WITHOUT activating/focusing anything (unlike chrome_switch_tab). Use when a tool result reports new_tabs_opened (a popup/new tab appeared, e.g. OAuth login) and you want subsequent tabId-less tool calls to target it — then call again with the original tabId to return. No args = report current work tab. clear:true = unset.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            "Tab id to make this session's work tab. Omit to just query the current one.",
+        },
+        clear: {
+          type: 'boolean',
+          description: 'Unset the session work tab (default false)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
+    description:
+      'Get all currently open browser windows and tabs. Marks MCP session work tabs (mcpWorkTabSessions), the dedicated MCP work window (isMcpWorkWindow), and tabs recently spawned by page actions such as popups (recentlySpawned with openerTabId).',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  // {
+  //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+  //   description:
+  //     'Run a recorded flow by ID with optional variables and run options. Returns a standardized run result.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       flowId: { type: 'string', description: 'ID of the flow to run' },
+  //       args: {
+  //         type: 'object',
+  //         description: 'Variable values for the flow (flat object of key/value)',
+  //       },
+  //       tabTarget: {
+  //         type: 'string',
+  //         description: "Target tab: 'current' or 'new' (default: current)",
+  //         enum: ['current', 'new'],
+  //       },
+  //       refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
+  //       captureNetwork: {
+  //         type: 'boolean',
+  //         description: 'Capture network snippets for debugging (default false)',
+  //       },
+  //       returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
+  //       timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
+  //       startUrl: { type: 'string', description: 'Optional start URL to open before running' },
+  //     },
+  //     required: ['flowId'],
+  //   },
+  // },
+  // {
+  //   name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
+  //   description: 'List published flows available as dynamic tools (for discovery).',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {},
+  //     required: [],
+  //   },
+  // },
+  {
+    name: TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
+    description:
+      'Starts a performance trace recording on the selected page. Optionally reloads the page and/or auto-stops after a short duration.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reload: {
+          type: 'boolean',
+          description:
+            'Determines if, once tracing has started, the page should be automatically reloaded (ignore cache).',
+        },
+        autoStop: {
+          type: 'boolean',
+          description: 'Determines if the trace should be automatically stopped (default false).',
+        },
+        durationMs: {
+          type: 'number',
+          description: 'Auto-stop duration in milliseconds when autoStop is true (default 5000).',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE,
+    description: 'Stops the active performance trace recording on the selected page.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        saveToDownloads: {
+          type: 'boolean',
+          description: 'Whether to save the trace as a JSON file in Downloads (default true).',
+        },
+        filenamePrefix: {
+          type: 'string',
+          description: 'Optional filename prefix for the downloaded trace JSON.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT,
+    description:
+      'Provides a lightweight summary of the last recorded trace. For deep insights (CWV, breakdowns), integrate native-side DevTools trace engine.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        insightName: {
+          type: 'string',
+          description:
+            'Optional insight name for future deep analysis (e.g., "DocumentLatency"). Currently informational only.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description:
+            'Timeout for deep analysis via native host (milliseconds). Default 60000. Increase for large traces.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.READ_PAGE,
+    description:
+      'Get an accessibility tree representation of visible elements on the page. Only returns elements that are visible in the viewport. Optionally filter for only interactive elements.\nTip: If the returned elements do not include the specific element you need, use the computer tool\'s screenshot (action="screenshot") to capture the element\'s on-screen coordinates, then operate by coordinates.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filter: {
+          type: 'string',
+          description:
+            'Filter elements: "interactive" for such as  buttons/links/inputs only (default: all visible elements)',
+        },
+        depth: {
+          type: 'number',
+          description:
+            'Maximum DOM depth to traverse (integer >= 0). Lower values reduce output size and can improve performance.',
+        },
+        refId: {
+          type: 'string',
+          description:
+            'Focus on the subtree rooted at this element refId (e.g., "ref_12"). The refId must come from a recent chrome_read_page response in the same tab (refs may expire).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        allFrames: {
+          type: 'boolean',
+          description:
+            'Also collect content from iframes (merged, annotated with frameId — pair frame-local refs with that frameId). Default: false',
+        },
+        diff: {
+          type: 'boolean',
+          description:
+            'When true (default), returns {unchanged:true} instead of the full body if the page content is identical to your previous read — reuse the earlier content. Pass false to force full re-send.',
+        },
+        compact: {
+          type: 'boolean',
+          description:
+            'Lossless output compaction (collapse empty wrappers etc., ~30-50% smaller). Default: true. Pass false for the verbose format.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.COMPUTER,
+    description:
+      "Use a mouse and keyboard to interact with a web browser, and take screenshots.\n* Whenever you intend to click on an element like an icon, you should consult a read_page to determine the ref of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try screenshot and then adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        background: {
+          type: 'boolean',
+          description:
+            'Avoid focusing/activating tab/window for certain operations (best-effort). Default: false',
+        },
+        fullResolution: {
+          type: 'boolean',
+          description:
+            'For action="screenshot"/"zoom": skip the ≤1568px downscale of the returned image (default: false)',
+        },
+        action: {
+          type: 'string',
+          description:
+            'Action to perform: left_click | right_click | double_click | triple_click | left_click_drag | scroll | scroll_to | type | key | fill | fill_form | hover | wait | resize_page | zoom | screenshot',
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Element ref from chrome_read_page. For click/scroll/scroll_to/key/type and drag end when provided; takes precedence over coordinates.',
+        },
+        coordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number', description: 'X coordinate' },
+            y: { type: 'number', description: 'Y coordinate' },
+          },
+          description:
+            'Coordinates for actions (in screenshot space if a recent screenshot was taken, otherwise viewport). Required for click/scroll and as end point for drag.',
+        },
+        startCoordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          description: 'Starting coordinates for drag action',
+        },
+        startRef: {
+          type: 'string',
+          description: 'Drag start ref from chrome_read_page (alternative to startCoordinates).',
+        },
+        scrollDirection: {
+          type: 'string',
+          description: 'Scroll direction: up | down | left | right',
+        },
+        scrollAmount: {
+          type: 'number',
+          description: 'Scroll ticks (1-10), default 3',
+        },
+        text: {
+          type: 'string',
+          description:
+            'Text to type (for action=type) or keys/chords separated by space (for action=key, e.g. "Backspace Enter" or "cmd+a")',
+        },
+        repeat: {
+          type: 'number',
+          description:
+            'For action=key: number of times to repeat the key sequence (integer 1-100, default 1).',
+        },
+        modifiers: {
+          type: 'object',
+          description:
+            'Modifier keys for click actions (left_click/right_click/double_click/triple_click).',
+          properties: {
+            altKey: { type: 'boolean' },
+            ctrlKey: { type: 'boolean' },
+            metaKey: { type: 'boolean' },
+            shiftKey: { type: 'boolean' },
+          },
+        },
+        region: {
+          type: 'object',
+          description:
+            'For action=zoom: rectangular region to capture (x0,y0)-(x1,y1) in viewport pixels (or screenshot-space if a recent screenshot context exists).',
+          properties: {
+            x0: { type: 'number' },
+            y0: { type: 'number' },
+            x1: { type: 'number' },
+            y1: { type: 'number' },
+          },
+          required: ['x0', 'y0', 'x1', 'y1'],
+        },
+        // For action=fill
+        selector: {
+          type: 'string',
+          description: 'CSS selector for fill (alternative to ref).',
+        },
+        value: {
+          oneOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }],
+          description: 'Value to set for action=fill (string | boolean | number)',
+        },
+        elements: {
+          type: 'array',
+          description: 'For action=fill_form: list of elements to fill (ref + value)',
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string', description: 'Element ref from chrome_read_page' },
+              value: { type: 'string', description: 'Value to set (stringified if non-string)' },
+            },
+            required: ['ref', 'value'],
+          },
+        },
+        width: { type: 'number', description: 'For action=resize_page: viewport width' },
+        height: { type: 'number', description: 'For action=resize_page: viewport height' },
+        appear: {
+          type: 'boolean',
+          description:
+            'For action=wait with text: whether to wait for the text to appear (true, default) or disappear (false)',
+        },
+        timeout: {
+          type: 'number',
+          description:
+            'For action=wait with text: timeout in milliseconds (default 10000, max 120000)',
+        },
+        duration: {
+          type: 'number',
+          description: 'Seconds to wait for action=wait (max 30s)',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  // {
+  //   name: TOOL_NAMES.BROWSER.USERSCRIPT,
+  //   description:
+  //     'Unified userscript tool (create/list/get/enable/disable/update/remove/send_command/export). Paste JS/CSS/Tampermonkey script and the system will auto-select the best strategy (insertCSS / persistent script in ISOLATED or MAIN world / once by CDP) with CSP-aware fallbacks.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       action: {
+  //         type: 'string',
+  //         description:
+  //           'Operation to perform',
+  //         enum: [
+  //           'create',
+  //           'list',
+  //           'get',
+  //           'enable',
+  //           'disable',
+  //           'update',
+  //           'remove',
+  //           'send_command',
+  //           'export',
+  //         ],
+  //       },
+  //       args: {
+  //         type: 'object',
+  //         description:
+  //           'Arguments for the specified action.\n- create: { script (required), name?, description?, matches?: string[], excludes?: string[], persist?: boolean (default true), runAt?: "document_start"|"document_end"|"document_idle"|"auto", world?: "auto"|"ISOLATED"|"MAIN", allFrames?: boolean (default true), mode?: "auto"|"css"|"persistent"|"once", dnrFallback?: boolean (default true), tags?: string[] }\n- list: { query?: string, status?: "enabled"|"disabled", domain?: string }\n- get: { id (required) }\n- enable/disable: { id (required) }\n- update: { id (required), script?, name?, description?, matches?, excludes?, runAt?, world?, allFrames?, persist?, dnrFallback?, tags? }\n- remove: { id (required) }\n- send_command: { id (required), payload?: string, tabId?: number }\n- export: {}\nTip: For a one-off execution that returns a value, use create with args.mode="once". The returned value is included as onceResult in the tool response.',
+  //         properties: {
+  //           // Common identifiers
+  //           id: { type: 'string', description: 'Userscript id (for get/enable/disable/update/remove/send_command)' },
+  //           // Create / Update fields
+  //           script: { type: 'string', description: 'JS/CSS/Tampermonkey script source (required for create)' },
+  //           name: { type: 'string', description: 'Userscript name (optional)' },
+  //           description: { type: 'string', description: 'Userscript description (optional)' },
+  //           matches: {
+  //             type: 'array',
+  //             items: { type: 'string' },
+  //             description: 'Match patterns for pages to apply to (e.g., https://*.example.com/*)'
+  //           },
+  //           excludes: {
+  //             type: 'array',
+  //             items: { type: 'string' },
+  //             description: 'Exclude patterns'
+  //           },
+  //           persist: { type: 'boolean', description: 'Persist userscript for matched pages (default true)' },
+  //           runAt: {
+  //             type: 'string',
+  //             description: 'Injection timing',
+  //             enum: ['document_start', 'document_end', 'document_idle', 'auto'],
+  //           },
+  //           world: {
+  //             type: 'string',
+  //             description: 'Execution world',
+  //             enum: ['auto', 'ISOLATED', 'MAIN'],
+  //           },
+  //           allFrames: { type: 'boolean', description: 'Inject into all frames (default true)' },
+  //           mode: {
+  //             type: 'string',
+  //             description:
+  //               'Injection strategy: auto | css | persistent | once. Use once to evaluate immediately (no persistence) and include the return value in onceResult.',
+  //             enum: ['auto', 'css', 'persistent', 'once'],
+  //           },
+  //           dnrFallback: { type: 'boolean', description: 'Use DNR fallback when needed (default true)' },
+  //           tags: { type: 'array', items: { type: 'string' }, description: 'Custom tags' },
+  //           // List filters
+  //           query: { type: 'string', description: 'Search by name/description (list action)' },
+  //           status: { type: 'string', enum: ['enabled', 'disabled'], description: 'Filter by status (list action)' },
+  //           domain: { type: 'string', description: 'Filter by domain (list action)' },
+  //           // Send command
+  //           payload: { type: 'string', description: 'Arbitrary payload (stringified) for send_command' },
+  //           tabId: { type: 'number', description: 'Target tab for send_command (default active tab)' },
+  //         },
+  //       },
+  //     },
+  //     required: ['action'],
+  //   },
+  // },
+  {
+    name: TOOL_NAMES.BROWSER.NAVIGATE,
+    description:
+      'Navigate to a URL, refresh the current tab, or navigate browser history (back/forward)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description:
+            'URL to navigate to. Special values: "back" or "forward" to navigate browser history in the target tab.',
+        },
+        newWindow: {
+          type: 'boolean',
+          description: 'Create a new window to navigate to the URL or not. Defaults to false',
+        },
+        waitUntil: {
+          type: 'string',
+          enum: ['none', 'domcontentloaded', 'load', 'networkidle'],
+          description:
+            'How far to wait for the page to load before returning. Default "domcontentloaded" — prevents reading/clicking an empty page right after navigating. Use "networkidle" for data-heavy SPAs, "none" to return immediately. The observed load state is reported back in the result as "load" (a timeout is reported, not an error).',
+        },
+        waitTimeoutMs: {
+          type: 'number',
+          description: 'Max time (ms) to wait for waitUntil. Default 15000, max 60000.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Target an existing tab by ID (if provided, navigate/refresh/back/forward that tab instead of the active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Target an existing window by ID (when creating a new tab in existing window, or picking active tab if tabId is not provided).',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Perform the operation without stealing focus (do not activate the tab or focus the window). Default: false',
+        },
+        newTab: {
+          type: 'boolean',
+          description:
+            'Force a brand-new tab. By default this session keeps working in ONE tab: if it already has an MCP-created work tab, that tab is navigated instead of piling up new tabs. Tabs you assigned yourself via chrome_set_work_tab are never reused this way.',
+        },
+        width: {
+          type: 'number',
+          description:
+            'Window width in pixels (default: 1280). When width or height is provided, a new window will be created.',
+        },
+        height: {
+          type: 'number',
+          description:
+            'Window height in pixels (default: 720). When width or height is provided, a new window will be created.',
+        },
+        refresh: {
+          type: 'boolean',
+          description:
+            'Refresh the current active tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SCREENSHOT,
+    description:
+      '[Prefer read_page over taking a screenshot and Prefer chrome_computer] Take a screenshot of the current page or a specific element. For new usage, use chrome_computer with action="screenshot". Use this tool if you need advanced options.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name for the screenshot, if saving as PNG' },
+        selector: { type: 'string', description: 'CSS selector for element to screenshot' },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID to capture from (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab from when tabId is not provided.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false',
+        },
+        width: { type: 'number', description: 'Width in pixels (default: 800)' },
+        height: { type: 'number', description: 'Height in pixels (default: 600)' },
+        storeBase64: {
+          type: 'boolean',
+          description:
+            'Return the screenshot as an MCP image content block (default: false). Recommended when you want to SEE the page. The image is auto-downscaled to ≤1568px long edge (metadata reports imageScale vs the CSS viewport for coordinate math); pass fullResolution:true to skip downscaling.',
+        },
+        fullResolution: {
+          type: 'boolean',
+          description: 'Skip the ≤1568px downscale for the returned image (default: false)',
+        },
+        fullPage: {
+          type: 'boolean',
+          description: 'Store screenshot of the entire page (default: true)',
+        },
+        savePng: {
+          type: 'boolean',
+          description:
+            'Save screenshot as PNG file (default: true)，if you want to see the page, recommend set this to be false, and set storeBase64 to be true',
+        },
+        saveToDownloads: {
+          type: 'boolean',
+          description:
+            'Also auto-save the captured image to Downloads/mcp-screenshots/ without any user interaction (default: false)',
+        },
+        filename: {
+          type: 'string',
+          description:
+            'Filename for saveToDownloads (sanitized, kept under mcp-screenshots/). Default: screenshot-<timestamp>.png',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.CLOSE_TABS,
+    description: 'Close one or more browser tabs',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabIds: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Array of tab IDs to close. If not provided, will close the active tab.',
+        },
+        url: {
+          type: 'string',
+          description: 'Close tabs matching this URL. Can be used instead of tabIds.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SWITCH_TAB,
+    description:
+      'Bring a tab to the front (activates it and can take OS focus). Use ONLY when the user explicitly asked to switch/show a tab. ' +
+      'To retarget automation at another tab without disturbing the user, use chrome_set_work_tab instead - this tool is exempt from the ' +
+      'no-interference gate, so it will actually change what the user is looking at.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description: 'The ID of the tab to switch to.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'The ID of the window where the tab is located.',
+        },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.WEB_FETCHER,
+    description:
+      'Read a page as text (reader view by default: nav/footer/cookie-banner noise stripped) or as cleaned HTML. Repeat reads of an unchanged tab return {unchanged:true} instead of the body. Both modes are length-capped and report fullTextChars/fullHtmlChars vs returnedChars so you can tell what was cut. For a handful of known fields prefer chrome_extract, and for clicking/typing prefer chrome_read_page (it returns element refs); use this when you want the page content itself.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL to fetch content from. If not provided, uses the current active tab',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        background: {
+          type: 'boolean',
+          description: 'Do not activate tab/focus window while fetching (default: false)',
+        },
+        htmlContent: {
+          type: 'boolean',
+          description:
+            'Return cleaned HTML (scripts/styles/SVG stripped) instead of text. Much more expensive than text — use it only when you need markup/attributes, and pair it with selector. If true, textContent is ignored (default: false)',
+        },
+        textContent: {
+          type: 'boolean',
+          description:
+            'Get the visible text content of the page with metadata. Ignored if htmlContent is true (default: true)',
+        },
+
+        selector: {
+          type: 'string',
+          description:
+            'CSS selector to get content from a specific element. If provided, only content from this element will be returned',
+        },
+        maxChars: {
+          type: 'number',
+          description:
+            'Cap on returned HTML length (default 100000). Only applies to htmlContent mode; the result reports fullHtmlChars/returnedChars and truncated:true when it was cut.',
+        },
+        raw: {
+          type: 'boolean',
+          description:
+            'Text mode returns reader-view content by default (navigation/footer/cookie-banner noise stripped, main content kept — fullTextChars vs returnedChars reported). Pass true for the unfiltered full text. Default: false',
+        },
+        diff: {
+          type: 'boolean',
+          description:
+            'When true (default), returns {unchanged:true} instead of the body if identical to your previous read of this tab (text and HTML modes are tracked separately) — reuse the earlier content. Pass false to force full re-send.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
+    description: 'Send a network request from the browser with cookies and other browser context',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL to send the request to',
+        },
+        method: {
+          type: 'string',
+          description: 'HTTP method to use (default: GET)',
+        },
+        headers: {
+          type: 'object',
+          description: 'Headers to include in the request',
+        },
+        body: {
+          type: 'string',
+          description: 'Body of the request (for POST, PUT, etc.)',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in milliseconds (default: 30000)',
+        },
+        formData: {
+          type: 'object',
+          description:
+            'Multipart/form-data descriptor. If provided, overrides body and builds FormData with optional file attachments. Shape: { fields?: Record<string,string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, filePath?: string, base64Data?: string, filename?: string, contentType?: string }> }. Also supports a compact array form: [ [name, fileSpec, filename?], ... ] where fileSpec may be url:, file:, or base64:.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional tab id whose browser context (cookies, origin) is used. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
+    description:
+      'Unified network capture tool. Use action="start" to begin capturing, action="stop" to end and retrieve results. Set needResponseBody=true to capture response bodies (uses Debugger API, may conflict with DevTools). Default mode uses webRequest API (lightweight, no debugger conflict, but no response body).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'stop'],
+          description: 'Action to perform: "start" begins capture, "stop" ends and returns results',
+        },
+        needResponseBody: {
+          type: 'boolean',
+          description:
+            'When true, captures response body using Debugger API (default: false). Only use when you need to inspect response content.',
+        },
+        url: {
+          type: 'string',
+          description:
+            'URL to capture network requests from. For action="start". If not provided, uses the current active tab.',
+        },
+        maxCaptureTime: {
+          type: 'number',
+          description: 'Maximum capture time in milliseconds (default: 180000)',
+        },
+        inactivityTimeout: {
+          type: 'number',
+          description: 'Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.',
+        },
+        includeStatic: {
+          type: 'boolean',
+          description: 'Include static resources like images/scripts/styles (default: false)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+        limit: {
+          type: 'number',
+          description:
+            'action="stop": return at most this many captured requests (default 100; paginate with offset)',
+        },
+        offset: {
+          type: 'number',
+          description: 'action="stop": skip this many captured requests (default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description:
+            'action="stop": return only counts/summary without the request array (default: false)',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+    description: 'Wait for a browser download and return details (id, filename, url, state, size)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filenameContains: { type: 'string', description: 'Filter by substring in filename or URL' },
+        timeoutMs: { type: 'number', description: 'Timeout in ms (default 60000, max 300000)' },
+        waitForComplete: { type: 'boolean', description: 'Wait until completed (default true)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.HISTORY,
+    description: 'Retrieve and search browsing history from Chrome',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description:
+            'Text to search for in history URLs and titles. Leave empty to retrieve all history entries within the time range.',
+        },
+        startTime: {
+          type: 'string',
+          description:
+            'Start time as a date string. Supports ISO format (e.g., "2023-10-01", "2023-10-01T14:30:00"), relative times (e.g., "1 day ago", "2 weeks ago", "3 months ago", "1 year ago"), and special keywords ("now", "today", "yesterday"). Default: 24 hours ago',
+        },
+        endTime: {
+          type: 'string',
+          description:
+            'End time as a date string. Supports ISO format (e.g., "2023-10-31", "2023-10-31T14:30:00"), relative times (e.g., "1 day ago", "2 weeks ago", "3 months ago", "1 year ago"), and special keywords ("now", "today", "yesterday"). Default: current time',
+        },
+        maxResults: {
+          type: 'number',
+          description:
+            'Maximum number of history entries to return. Use this to limit results for performance or to focus on the most relevant entries. (default: 100)',
+        },
+        excludeCurrentTabs: {
+          type: 'boolean',
+          description:
+            "When set to true, filters out URLs that are currently open in any browser tab. Useful for finding pages you've visited but don't have open anymore. (default: false)",
+        },
+        limit: {
+          type: 'number',
+          description: 'Return at most this many entries (default 100; pagination with offset)',
+        },
+        offset: {
+          type: 'number',
+          description: 'Skip this many entries before returning (default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description: 'Return only totalCount without the entries array (default: false)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
+    description: 'Search Chrome bookmarks by title and URL',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'Search query to match against bookmark titles and URLs. Leave empty to retrieve all bookmarks.',
+        },
+        maxResults: {
+          type: 'number',
+          description: 'Maximum number of bookmarks to return (default: 50)',
+        },
+        folderPath: {
+          type: 'string',
+          description:
+            'Optional folder path or ID to limit search to a specific bookmark folder. Can be a path string (e.g., "Work/Projects") or a folder ID.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.BOOKMARK_ADD,
+    description: 'Add a new bookmark to Chrome',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL to bookmark. If not provided, uses the current active tab URL.',
+        },
+        title: {
+          type: 'string',
+          description: 'Title for the bookmark. If not provided, uses the page title from the URL.',
+        },
+        parentId: {
+          type: 'string',
+          description:
+            'Parent folder path or ID to add the bookmark to. Can be a path string (e.g., "Work/Projects") or a folder ID. If not provided, adds to the "Bookmarks Bar" folder.',
+        },
+        createFolder: {
+          type: 'boolean',
+          description: 'Whether to create the parent folder if it does not exist (default: false)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional tab id to bookmark when url is omitted. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
+    description: 'Delete a bookmark from Chrome',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        bookmarkId: {
+          type: 'string',
+          description: 'ID of the bookmark to delete. Either bookmarkId or url must be provided.',
+        },
+        url: {
+          type: 'string',
+          description: 'URL of the bookmark to delete. Used if bookmarkId is not provided.',
+        },
+        title: {
+          type: 'string',
+          description: 'Title of the bookmark to help with matching when deleting by URL.',
+        },
+      },
+      required: [],
+    },
+  },
+  // {
+  //   name: TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT,
+  //   description:
+  //     'search for related content from the currently open tab and return the corresponding web pages.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       query: {
+  //         type: 'string',
+  //         description: 'the query to search for related content.',
+  //       },
+  //     },
+  //     required: ['query'],
+  //   },
+  // },
+  // {
+  //   name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+  //   description:
+  //     'inject the user-specified content script into the webpage. By default, inject into the currently active tab',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       url: {
+  //         type: 'string',
+  //         description:
+  //           'If a URL is specified, inject the script into the webpage corresponding to the URL.',
+  //       },
+  //       tabId: {
+  //         type: 'number',
+  //         description:
+  //           'Target an existing tab by ID to inject into. Overrides url/active tab selection when provided.',
+  //       },
+  //       windowId: {
+  //         type: 'number',
+  //         description:
+  //           'Target window ID for selecting active tab or creating new tab when url is provided and tabId is omitted.',
+  //       },
+  //       background: {
+  //         type: 'boolean',
+  //         description:
+  //           'Do not activate tab/focus window during injection when true (default: false).',
+  //       },
+  //       type: {
+  //         type: 'string',
+  //         description:
+  //           'the javaScript world for a script to execute within. must be ISOLATED or MAIN',
+  //       },
+  //       jsScript: {
+  //         type: 'string',
+  //         description: 'the content script to inject',
+  //       },
+  //     },
+  //     required: ['type', 'jsScript'],
+  //   },
+  // },
+  // {
+  //   name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
+  //   description:
+  //     'if the script injected using chrome_inject_script listens for user-defined events, this tool can be used to trigger those events',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       tabId: {
+  //         type: 'number',
+  //         description:
+  //           'the tab where you previously injected the script(if not provided,  use the currently active tab)',
+  //       },
+  //       eventName: {
+  //         type: 'string',
+  //         description: 'the eventName your injected content script listen for',
+  //       },
+  //       payload: {
+  //         type: 'string',
+  //         description: 'the payload passed to event, must be a json string',
+  //       },
+  //     },
+  //     required: ['eventName'],
+  //   },
+  // },
+  {
+    name: TOOL_NAMES.BROWSER.JAVASCRIPT,
+    description:
+      'Execute JavaScript code in a browser tab and return the result. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Execution timeout in milliseconds (default: 15000).',
+        },
+        maxOutputBytes: {
+          type: 'number',
+          description:
+            'Maximum output size in bytes after sanitization (default: 51200). Output exceeding this limit will be truncated.',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.CLICK,
+    description:
+      'Click on an element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations. Waits briefly for the element by default (waitForElementMs). When the click is blocked or the element is covered, the result carries an "obstruction" object naming the element/overlay on top of the target — read it instead of retrying the same click.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for the element to click.',
+        },
+        waitForElementMs: {
+          type: 'number',
+          description:
+            'How long (ms) to wait for the target element to appear and become visible before failing. Default 2000; set 0 to fail immediately. Removes the usual "click failed -> chrome_wait_for -> click again" round-trip on SPA/lazy-rendered pages.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        ref: {
+          type: 'string',
+          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+        },
+        coordinates: {
+          type: 'object',
+          description: 'Viewport coordinates to click at.',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: ['x', 'y'],
+        },
+        double: {
+          type: 'boolean',
+          description: 'Perform double click when true (default: false).',
+        },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          description: 'Mouse button to click (default: "left").',
+        },
+        modifiers: {
+          type: 'object',
+          description: 'Modifier keys to hold during click.',
+          properties: {
+            altKey: { type: 'boolean' },
+            ctrlKey: { type: 'boolean' },
+            metaKey: { type: 'boolean' },
+            shiftKey: { type: 'boolean' },
+          },
+        },
+        waitForNavigation: {
+          type: 'boolean',
+          description: 'Wait for navigation to complete after click (default: false).',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in milliseconds for waiting (default: 5000).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.FILL,
+    description:
+      'Fill or select a form element on a web page. Supports input, textarea, select, checkbox, radio, and contenteditable elements (the prompt boxes used by modern editors such as Google Flow, Gemini, ChatGPT and Notion). Use CSS selector, XPath, or element ref to target the element.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for the form element.',
+        },
+        waitForElementMs: {
+          type: 'number',
+          description:
+            'How long (ms) to wait for the target element to appear and become visible before failing. Default 2000; set 0 to fail immediately. Removes the usual "click failed -> chrome_wait_for -> click again" round-trip on SPA/lazy-rendered pages.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        ref: {
+          type: 'string',
+          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+        },
+        value: {
+          type: ['string', 'number', 'boolean'],
+          description:
+            'Value to fill. For text inputs: string. For checkboxes/radios: boolean. For selects: option value or text.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: ['value'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION,
+    description:
+      'Request the user to manually select one or more elements on the current page. Use this as a human-in-the-loop fallback when you cannot reliably locate the target element after approximately 3 attempts using chrome_read_page combined with chrome_click_element/chrome_fill_or_select/chrome_computer. The user will see a panel with instructions and can click on the requested elements. Returns element refs compatible with chrome_click_element/chrome_fill_or_select (including iframe frameId for cross-frame support).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requests: {
+          type: 'array',
+          description:
+            'A list of element selection requests. Each request produces exactly one picked element. The user will see these requests in a panel and select each element by clicking on the page.',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description:
+                  'Optional stable request id for correlation. If omitted, an id is auto-generated (e.g., "req_1").',
+              },
+              name: {
+                type: 'string',
+                description:
+                  'Short label shown to the user describing what element to select (e.g., "Login button", "Email input field").',
+              },
+              description: {
+                type: 'string',
+                description:
+                  'Optional longer instruction shown to the user with more context (e.g., "Click on the primary login button in the top-right corner").',
+              },
+            },
+            required: ['name'],
+          },
+        },
+        timeoutMs: {
+          type: 'number',
+          description:
+            'Timeout in milliseconds for the user to complete all selections. Default: 180000 (3 minutes). Maximum: 600000 (10 minutes).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+      },
+      required: ['requests'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.KEYBOARD,
+    description:
+      'Simulate keyboard input on a web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keys: {
+          type: 'string',
+          description:
+            'Keys or key combinations to simulate. Examples: "Enter", "Tab", "Ctrl+C", "Shift+Tab", "Hello World".',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for target element to receive keyboard events.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        delay: {
+          type: 'number',
+          description: 'Delay between keystrokes in milliseconds (default: 50).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: ['keys'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.CONSOLE,
+    description:
+      'Capture console output from a browser tab. Supports snapshot mode (default; one-time capture with ~2s wait) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description:
+            'URL to navigate to and capture console from. If not provided, uses the current active tab',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        background: {
+          type: 'boolean',
+          description: 'Do not activate tab/focus window when capturing via CDP. Default: false',
+        },
+        includeExceptions: {
+          type: 'boolean',
+          description: 'Include uncaught exceptions in the output (default: true)',
+        },
+        maxMessages: {
+          type: 'number',
+          description:
+            'Maximum number of console messages to capture in snapshot mode (default: 100). If limit is provided, it takes precedence.',
+        },
+        offset: {
+          type: 'number',
+          description: 'Skip this many messages before returning (pagination; default 0)',
+        },
+        countOnly: {
+          type: 'boolean',
+          description: 'Return only counts/summary without the message array (default: false)',
+        },
+        mode: {
+          type: 'string',
+          enum: ['snapshot', 'buffer'],
+          description:
+            'Console capture mode: snapshot (default; waits ~2s for messages) or buffer (persistent per-tab buffer; reads from memory instantly).',
+        },
+        buffer: {
+          type: 'boolean',
+          description: 'Alias for mode="buffer" (default: false).',
+        },
+        clear: {
+          type: 'boolean',
+          description:
+            'Buffer mode only: clear the buffered logs for this tab before reading (default: false). Use clearAfterRead instead to clear after reading (mcp-tools.js style).',
+        },
+        clearAfterRead: {
+          type: 'boolean',
+          description:
+            'Buffer mode only: clear the buffered logs for this tab AFTER reading, to avoid duplicate messages on subsequent calls (default: false). This matches mcp-tools.js behavior.',
+        },
+        pattern: {
+          type: 'string',
+          description:
+            'Optional regex filter applied to message/exception text. Supports /pattern/flags syntax.',
+        },
+        onlyErrors: {
+          type: 'boolean',
+          description:
+            'Only return error-level console messages (and exceptions when includeExceptions=true). Default: false.',
+        },
+        limit: {
+          type: 'number',
+          description:
+            'Limit returned console messages. In snapshot mode this is an alias for maxMessages; in buffer mode it limits returned messages from the buffer.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
+    description:
+      'Upload files to web forms with file input elements using Chrome DevTools Protocol',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector for the file input element (input[type="file"])',
+        },
+        filePath: {
+          type: 'string',
+          description: 'Local file path to upload',
+        },
+        fileUrl: {
+          type: 'string',
+          description: 'URL to download file from before uploading',
+        },
+        base64Data: {
+          type: 'string',
+          description: 'Base64 encoded file data to upload',
+        },
+        fileName: {
+          type: 'string',
+          description: 'Optional filename when using base64 or URL (default: "uploaded-file")',
+        },
+        multiple: {
+          type: 'boolean',
+          description: 'Whether the input accepts multiple files (default: false)',
+        },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
+    description: 'Handle JavaScript dialogs (alert/confirm/prompt) via CDP',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'accept | dismiss' },
+        promptText: {
+          type: 'string',
+          description: 'Optional prompt text when accepting a prompt',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Optional target tab id. Defaults to the MCP work tab (background work mode) or the active tab.',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.REQUEST_USER_CONSENT,
+    description:
+      'Request user consent BEFORE invoking sensitive site features (camera, microphone, geolocation). Returns { approved, source } JSON. If the matching popup toggle is ON, returns { approved: true, source: "toggle" } immediately and sticky-sets the current active tab origin to allow via chrome.contentSettings (camera/mic/location). If OFF, opens a small consent popup window and awaits the user response (max 60s). auto-chrome-mcp fork v1.0.32+ (geolocation moved from bulk-install to per-origin consent gate for parity with camera/mic and OS-permission consistency); design: docs/plans/2026-05-29-site-permissions-design.md.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['camera', 'microphone', 'geolocation'],
+          description: 'Which sensitive permission you intend to use.',
+        },
+        reason: {
+          type: 'string',
+          description:
+            'Human-readable explanation shown to the user in the consent window (e.g. "녹화 시작을 위해 마이크에 접근합니다").',
+        },
+      },
+      required: ['action', 'reason'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.GIF_RECORDER,
+    description:
+      'Record browser tab activity as an animated GIF.\n\nModes:\n- Fixed FPS mode (action="start"): Captures frames at regular intervals. Good for animations/videos.\n- Auto-capture mode (action="auto_start"): Captures frames automatically when chrome_computer or chrome_navigate actions succeed. Better for interaction recordings with natural pacing.\n\nUse "stop" to end recording and save the GIF.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'stop', 'status', 'auto_start', 'capture', 'clear', 'export'],
+          description:
+            'Action to perform:\n- "start": Begin fixed-FPS recording (captures frames at regular intervals)\n- "auto_start": Begin auto-capture mode (frames captured on tool actions)\n- "stop": End recording and save GIF\n- "status": Get current recording state\n- "capture": Manually trigger a frame capture in auto mode\n- "clear": Clear all recording state and cached GIF without saving\n- "export": Export the last recorded GIF (download or drag&drop upload)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Target tab ID (default: active tab). Used with "start"/"auto_start" for recording, and with "export" (download=false) for drag&drop upload target.',
+        },
+        fps: {
+          type: 'number',
+          description:
+            'Frames per second for fixed-FPS mode (1-30, default: 5). Higher values = smoother but larger file.',
+        },
+        durationMs: {
+          type: 'number',
+          description:
+            'Maximum recording duration in milliseconds (default: 5000, max: 60000). Only for fixed-FPS mode.',
+        },
+        maxFrames: {
+          type: 'number',
+          description:
+            'Maximum number of frames to capture (default: 50 for fixed-FPS, 100 for auto mode, max: 300).',
+        },
+        width: {
+          type: 'number',
+          description: 'Output GIF width in pixels (default: 800, max: 1920).',
+        },
+        height: {
+          type: 'number',
+          description: 'Output GIF height in pixels (default: 600, max: 1080).',
+        },
+        maxColors: {
+          type: 'number',
+          description:
+            'Maximum colors in palette (default: 256). Lower values = smaller file size.',
+        },
+        filename: {
+          type: 'string',
+          description: 'Output filename (without extension). Defaults to timestamped name.',
+        },
+        captureDelayMs: {
+          type: 'number',
+          description:
+            'Auto-capture mode only: Delay in ms after action before capturing frame (default: 150). Allows UI to stabilize.',
+        },
+        frameDelayCs: {
+          type: 'number',
+          description:
+            'Auto-capture mode only: Display duration per frame in centiseconds (default: 20 = 200ms per frame).',
+        },
+        annotation: {
+          type: 'string',
+          description:
+            'Auto-capture mode only (action="capture"): Optional text label to render on the captured frame.',
+        },
+        download: {
+          type: 'boolean',
+          description:
+            'Export action only: Set to true (default) to download the GIF, or false to upload via drag&drop.',
+        },
+        coordinates: {
+          type: 'object',
+          description:
+            'Export action only (when download=false): Target coordinates for drag&drop upload.',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: ['x', 'y'],
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Export action only (when download=false): Element ref from chrome_read_page for drag&drop target.',
+        },
+        selector: {
+          type: 'string',
+          description:
+            'Export action only (when download=false): CSS selector for drag&drop target element.',
+        },
+        enhancedRendering: {
+          type: 'object',
+          description:
+            'Auto-capture mode only: Configure visual overlays for recorded actions (click indicators, drag paths, labels). Pass `true` to enable all defaults.',
+          properties: {
+            clickIndicators: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable click indicators (default: true)',
+                    },
+                    color: {
+                      type: 'string',
+                      description:
+                        'CSS color for click indicator (default: "rgba(255, 87, 34, 0.8)")',
+                    },
+                    radius: { type: 'number', description: 'Initial radius in px (default: 20)' },
+                    animationDurationMs: {
+                      type: 'number',
+                      description: 'Animation duration in ms (default: 400)',
+                    },
+                    animationFrames: {
+                      type: 'number',
+                      description: 'Number of animation frames (default: 3)',
+                    },
+                    animationIntervalMs: {
+                      type: 'number',
+                      description: 'Interval between animation frames in ms (default: 80)',
+                    },
+                  },
+                },
+              ],
+              description:
+                'Click indicator overlay config (true for defaults, or object for custom).',
+            },
+            dragPaths: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable drag path rendering (default: true)',
+                    },
+                    color: {
+                      type: 'string',
+                      description: 'CSS color for drag path (default: "rgba(33, 150, 243, 0.7)")',
+                    },
+                    lineWidth: { type: 'number', description: 'Line width in px (default: 3)' },
+                    lineDash: {
+                      type: 'array',
+                      items: { type: 'number' },
+                      description: 'Dash pattern (default: [6, 4])',
+                    },
+                    arrowSize: {
+                      type: 'number',
+                      description: 'Arrow head size in px (default: 10)',
+                    },
+                  },
+                },
+              ],
+              description: 'Drag path overlay config (true for defaults, or object for custom).',
+            },
+            labels: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable action labels (default: true)',
+                    },
+                    font: {
+                      type: 'string',
+                      description: 'Font for labels (default: "bold 12px sans-serif")',
+                    },
+                    textColor: { type: 'string', description: 'Text color (default: "#fff")' },
+                    bgColor: {
+                      type: 'string',
+                      description: 'Background color (default: "rgba(0,0,0,0.7)")',
+                    },
+                    padding: { type: 'number', description: 'Padding in px (default: 4)' },
+                    borderRadius: {
+                      type: 'number',
+                      description: 'Border radius in px (default: 4)',
+                    },
+                    offset: {
+                      type: 'object',
+                      properties: { x: { type: 'number' }, y: { type: 'number' } },
+                      description: 'Offset from action position (default: {x: 10, y: -20})',
+                    },
+                  },
+                },
+              ],
+              description: 'Action label overlay config (true for defaults, or object for custom).',
+            },
+            durationMs: {
+              type: 'number',
+              description: 'How long overlays remain visible in ms (default: 1500).',
+            },
+          },
+        },
+      },
+      required: ['action'],
+    },
+  },
+  // ===== auto-chrome-mcp fork (B1~B4) =====
+  {
+    name: TOOL_NAMES.BROWSER.STORAGE,
+    description:
+      'Read or modify cookies, localStorage, or sessionStorage. Use it to save/restore a login session, test the logged-out state, pre-seed a consent cookie so the banner never appears, or inspect front-end state. Cookie/storage VALUES are hidden by default (names, domains and expiry are still returned) - pass includeValues:true only when you actually need the secrets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          enum: ['cookies', 'local', 'session'],
+          description:
+            'What to operate on: browser cookies, localStorage, or sessionStorage. Default "cookies".',
+        },
+        action: {
+          type: 'string',
+          enum: ['get', 'set', 'remove', 'clear'],
+          description: 'Default "get". "clear" requires a scope (url or domain for cookies).',
+        },
+        url: {
+          type: 'string',
+          description:
+            'Cookies: target URL. Required for set/remove. Defaults to the work tab URL.',
+        },
+        domain: { type: 'string', description: 'Cookies: filter/scope by domain (get, clear).' },
+        name: { type: 'string', description: 'Cookie name.' },
+        key: {
+          type: 'string',
+          description: 'localStorage/sessionStorage key (omit on get to list all).',
+        },
+        value: { type: 'string', description: 'Value to write (set).' },
+        path: { type: 'string', description: 'Cookie path (set).' },
+        secure: { type: 'boolean', description: 'Cookie Secure flag (set).' },
+        httpOnly: { type: 'boolean', description: 'Cookie HttpOnly flag (set).' },
+        sameSite: {
+          type: 'string',
+          enum: ['no_restriction', 'lax', 'strict'],
+          description: 'Cookie SameSite (set).',
+        },
+        expirationDate: {
+          type: 'number',
+          description: 'Cookie expiry, unix seconds (set). Omit for a session cookie.',
+        },
+        includeValues: {
+          type: 'boolean',
+          description:
+            'Return real values instead of masked placeholders. Default false - these are usually auth tokens.',
+        },
+        tabId: { type: 'number', description: 'Target tab. Defaults to the session work tab.' },
+        windowId: {
+          type: 'number',
+          description: 'Window to pick the active tab from (when tabId is omitted).',
+        },
+      },
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SAVE_PDF,
+    description:
+      'Save the page as a PDF into the Downloads folder (via Page.printToPDF). Unlike a screenshot the text stays selectable and multi-page documents are captured in full - use it to archive notices, contracts, invoices and reports. The PDF bytes are NOT returned (that would be enormous); the result carries the saved filename.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Target tab. Defaults to the session work tab.' },
+        windowId: {
+          type: 'number',
+          description: 'Window to pick the active tab from (when tabId is omitted).',
+        },
+        filename: {
+          type: 'string',
+          description: 'File name (".pdf" added automatically). Saved under Downloads/mcp-pdf/.',
+        },
+        paperFormat: {
+          type: 'string',
+          enum: ['a4', 'a3', 'letter', 'legal'],
+          description: 'Paper size (default a4).',
+        },
+        landscape: { type: 'boolean', description: 'Landscape orientation (default false).' },
+        printBackground: {
+          type: 'boolean',
+          description: 'Include background colors/images (default true).',
+        },
+        scale: { type: 'number', description: 'Render scale 0.1-2 (default 1).' },
+        pageRanges: {
+          type: 'string',
+          description: 'Pages to include, e.g. "1-3" or "2". Default all.',
+        },
+        displayHeaderFooter: {
+          type: 'boolean',
+          description: 'Print URL/page numbers in header and footer (default false).',
+        },
+        marginInches: {
+          type: 'number',
+          description: 'Margin on all sides in inches, 0-3 (default 0.4).',
+        },
+      },
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.EMULATE,
+    description:
+      'Emulate a device viewport (size, pixel density, touch, User-Agent) on a tab for responsive/mobile checking. The real window is never resized, so this works on background work tabs. Emulation persists until action="reset" - always reset when finished, since Chrome shows an automation notice on an emulated tab.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['set', 'reset', 'status'],
+          description: 'Default "set". "status" also lists available device presets.',
+        },
+        device: {
+          type: 'string',
+          description:
+            'Preset: iphone-se, iphone-15, pixel-8, galaxy-s23, ipad, desktop-1280, desktop-1080p.',
+        },
+        width: {
+          type: 'number',
+          description: 'Custom viewport width in CSS px (overrides preset).',
+        },
+        height: {
+          type: 'number',
+          description: 'Custom viewport height in CSS px (overrides preset).',
+        },
+        deviceScaleFactor: { type: 'number', description: 'Device pixel ratio, 0-5.' },
+        mobile: {
+          type: 'boolean',
+          description: 'Emulate a mobile device (affects viewport meta handling).',
+        },
+        hasTouch: { type: 'boolean', description: 'Enable touch event emulation.' },
+        userAgent: { type: 'string', description: 'Override the User-Agent string.' },
+        tabId: { type: 'number', description: 'Target tab. Defaults to the session work tab.' },
+        windowId: {
+          type: 'number',
+          description: 'Window to pick the active tab from (when tabId is omitted).',
+        },
+      },
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.NETWORK_RULES,
+    description:
+      'Block network requests with declarativeNetRequest session rules. Blocking ads/trackers or heavy images makes pages load noticeably faster and cuts the boilerplate that read_page/get_web_content would otherwise return (fewer tokens). Rules are session-scoped (gone on Chrome restart) and can be limited to one tab. Beware: some sites depend on tracker domains for login.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['block', 'unblock', 'list', 'clear'],
+          description:
+            'Default "block". "list" shows active rules with their ids, "clear" removes all of them.',
+        },
+        preset: {
+          type: 'string',
+          enum: ['ads', 'trackers', 'images', 'media', 'fonts'],
+          description:
+            'Built-in rule set. ads/trackers block known domains; images/media/fonts block those resource types entirely.',
+        },
+        patterns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Custom urlFilter patterns, e.g. ["||doubleclick.net^", "/ads/"]. Max 100.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Apply only to this tab. Omit to apply to all tabs.',
+        },
+        ruleIds: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'For action="unblock": rule ids to remove (get them from action="list").',
+        },
+      },
+    },
+  },
+];
+
+/**
+ * auto-chrome-mcp fork(P1): 병렬 작업 레인 인자를 탭 대상 도구 전부에 주입한다.
+ *
+ * 왜 필요한가 — 한 Claude Code 세션의 서브에이전트들은 **같은 stdio 프로세스**를 공유한다.
+ * 그래서 확장 입장에선 전부 같은 세션으로 보이고, 세션당 작업 탭이 하나뿐이던 v1.6.0 에서는
+ * 병렬 에이전트들이 서로의 작업 탭을 덮어쓰고 정리 로직이 형제 탭을 닫아 전원 실패했다.
+ * lane 을 주면 버킷이 갈라져 각자 자기 작업 탭을 갖는다.
+ *
+ * 스키마마다 손으로 넣지 않고 여기서 한 번에 주입한다 — 도구가 늘어도 자동으로 따라온다.
+ */
+const LANE_EXEMPT_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
+  TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT,
+  TOOL_NAMES.BROWSER.HISTORY,
+  TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
+  TOOL_NAMES.BROWSER.BOOKMARK_ADD,
+  TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
+  TOOL_NAMES.BROWSER.REQUEST_USER_CONSENT,
+]);
+
+const LANE_DESCRIPTION_SHORT =
+  'Parallel lane id. Concurrent agents share one MCP session — give each agent its own lane ' +
+  '(e.g. "agent-1") and pass it on every call so they get isolated work tabs. Omit when not parallel.';
+
+const LANE_DESCRIPTION_LONG =
+  'Parallel lane id. Sub-agents of one Claude Code session share a single MCP session, so without ' +
+  'a lane they overwrite each other’s work tab. Give each concurrent agent a distinct lane ' +
+  '(e.g. "agent-1") and pass the SAME lane on every subsequent call: the tab opened for a lane is ' +
+  'never retargeted or closed by another lane. Omit when not running agents in parallel.';
+
+for (const tool of TOOL_SCHEMAS) {
+  if (LANE_EXEMPT_TOOLS.has(tool.name)) continue;
+  const schema = tool.inputSchema as { properties?: Record<string, unknown> };
+  if (!schema || typeof schema !== 'object') continue;
+  if (!schema.properties) schema.properties = {};
+  if (schema.properties.lane !== undefined) continue;
+  schema.properties.lane = {
+    type: 'string',
+    description:
+      tool.name === TOOL_NAMES.BROWSER.NAVIGATE || tool.name === TOOL_NAMES.BROWSER.SET_WORK_TAB
+        ? LANE_DESCRIPTION_LONG
+        : LANE_DESCRIPTION_SHORT,
+  };
+}
