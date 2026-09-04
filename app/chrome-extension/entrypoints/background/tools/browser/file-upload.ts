@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { redactedArgsForLog } from '@/utils/log-redact';
 
 interface FileUploadToolParams {
   selector: string; // CSS selector for the file input element
@@ -30,7 +31,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
   async execute(args: FileUploadToolParams): Promise<ToolResult> {
     const { selector, filePath, fileUrl, base64Data, fileName, multiple = false } = args;
 
-    console.log(`Starting file upload operation with options:`, args);
+    console.log(`Starting file upload operation with options:`, redactedArgsForLog(args));
 
     // Validate input
     if (!selector) {

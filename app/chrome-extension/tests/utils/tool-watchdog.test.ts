@@ -13,7 +13,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WATCHDOG_DEFAULT_MS, runWithWatchdog, watchdogBudgetMs } from '@/utils/tool-watchdog';
+import {
+  FlowDeadlineExceededError,
+  WATCHDOG_DEFAULT_MS,
+  assertWithinFlowDeadline,
+  remainingFlowBudgetMs,
+  runWithWatchdog,
+  watchdogBudgetMs,
+} from '@/utils/tool-watchdog';
 import { withTabLock } from '@/utils/tab-lock';
 
 describe('watchdogBudgetMs', () => {
@@ -108,5 +115,143 @@ describe('runWithWatchdog', () => {
     await expect(queued).resolves.toBe('ok');
     // 워치독이 먼저 락을 풀어야 뒤 호출이 돈다.
     expect(order).toEqual(['stuck-abandoned', 'queued-ran']);
+  });
+});
+
+describe('runWithWatchdog capMs (batch 흐름 제어 deadline)', () => {
+  it('capMs 는 예산을 줄이고, 끊을 때는 FlowDeadlineExceededError 다', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = () => new Promise<string>(() => {});
+      const race = runWithWatchdog('chrome_screenshot', {}, never, () => 'timed out', {}, 1_000);
+      const settled = race.catch((error) => error);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await settled).toBeInstanceOf(FlowDeadlineExceededError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('capMs 가 0 이하면 도구를 아예 실행하지 않는다 (항목 4)', async () => {
+    // 예전에는 `capMs > 0` 검사에 걸려 0 이 "상한 없음" 으로 무시됐고, 예산이 다 된
+    // 뒤에도 도구가 최대 120초짜리 워치독으로 새로 돌기 시작했다.
+    let started = false;
+    await expect(
+      runWithWatchdog(
+        'chrome_screenshot',
+        {},
+        async () => {
+          started = true;
+          return 'ran';
+        },
+        () => 'timed out',
+        {},
+        0,
+      ),
+    ).rejects.toBeInstanceOf(FlowDeadlineExceededError);
+    expect(started).toBe(false);
+  });
+
+  it('capMs 가 없으면 기본 예산으로 돌고 워치독 문구를 그대로 쓴다', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = () => new Promise<string>(() => {});
+      const plain = runWithWatchdog('chrome_screenshot', {}, never, (message) => message);
+      await vi.advanceTimersByTimeAsync(WATCHDOG_DEFAULT_MS + 1);
+      expect(await plain).toContain('did not finish within');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * 항목 4: 절대 마감(deadlineAt)은 게이트·지연·락 대기까지 포함한 파이프라인 전 구간에
+ * 적용돼야 한다. 상대값(남은 ms)은 락 대기 동안 낡아서, 예산이 끝난 뒤에도 도구가 새로
+ * 돌기 시작했다.
+ */
+describe('절대 마감 (deadlineAt)', () => {
+  it('remainingFlowBudgetMs 는 마감이 없으면 undefined, 지났으면 0 이다', () => {
+    expect(remainingFlowBudgetMs(undefined)).toBeUndefined();
+    expect(remainingFlowBudgetMs(Number.NaN)).toBeUndefined();
+    expect(remainingFlowBudgetMs(Date.now() - 1_000)).toBe(0);
+    expect(remainingFlowBudgetMs(Date.now() + 5_000)).toBeGreaterThan(4_000);
+  });
+
+  it('마감이 지나면 assertWithinFlowDeadline 이 즉시 던진다', () => {
+    expect(() =>
+      assertWithinFlowDeadline('chrome_click_element', Date.now() - 1, 'before the gate'),
+    ).toThrow(FlowDeadlineExceededError);
+    expect(() =>
+      assertWithinFlowDeadline('chrome_click_element', Date.now() + 10_000, 'before the gate'),
+    ).not.toThrow();
+    expect(() =>
+      assertWithinFlowDeadline('chrome_click_element', undefined, 'before the gate'),
+    ).not.toThrow();
+  });
+
+  it('탭 락을 기다리는 동안 마감이 끝나면 도구를 실행하지 않는다 (핵심 회귀)', async () => {
+    vi.useFakeTimers();
+    try {
+      const deadlineAt = Date.now() + 1_000;
+      let secondToolRan = false;
+
+      // 앞 호출이 락을 2초 동안 잡는다 - 뒤 호출의 1초 예산은 대기 중에 끝난다.
+      const holder = withTabLock(42, async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+        return 'first';
+      });
+
+      // index.ts 의 실행 구조와 같은 순서: 락 획득 -> 마감 확인 -> 워치독.
+      // 예산 계산이 락 **앞**에서 일어나도(예전 구조) 절대 마감이면 결과가 같아야 한다.
+      const staleBudget = remainingFlowBudgetMs(deadlineAt);
+      expect(staleBudget).toBe(1_000);
+
+      const queued = withTabLock(42, () => {
+        assertWithinFlowDeadline(
+          'chrome_click_element',
+          deadlineAt,
+          'after acquiring the tab lock',
+        );
+        return runWithWatchdog(
+          'chrome_click_element',
+          {},
+          async () => {
+            secondToolRan = true;
+            return 'second';
+          },
+          (message) => message,
+          {},
+          remainingFlowBudgetMs(deadlineAt),
+        );
+      });
+      const settled = queued.catch((error) => error);
+
+      // 마감 확인 없이 워치독 상한만 걸어도 fail-closed 여야 한다 (예전엔 0 이 무시됐다).
+      let capOnlyRan = false;
+      const capOnly = withTabLock(42, () =>
+        runWithWatchdog(
+          'chrome_click_element',
+          {},
+          async () => {
+            capOnlyRan = true;
+            return 'third';
+          },
+          (message) => message,
+          {},
+          remainingFlowBudgetMs(deadlineAt),
+        ),
+      ).catch((error) => error);
+
+      await vi.advanceTimersByTimeAsync(2_100);
+      await holder;
+
+      expect(await settled).toBeInstanceOf(FlowDeadlineExceededError);
+      expect(secondToolRan).toBe(false);
+      expect(await capOnly).toBeInstanceOf(FlowDeadlineExceededError);
+      expect(capOnlyRan).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

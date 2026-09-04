@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
 
 const DEFAULT_NETWORK_REQUEST_TIMEOUT = 30000; // For sending a single request via content script
 
@@ -34,7 +35,7 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
       timeout = DEFAULT_NETWORK_REQUEST_TIMEOUT,
     } = args;
 
-    console.log(`NetworkRequestTool: Executing with options:`, args);
+    console.log(`NetworkRequestTool: Executing with options:`, redactedArgsForLog(args));
 
     if (!url) {
       return createErrorResponse('URL parameter is required.');
@@ -50,8 +51,9 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
       // Ensure content script is available in the target tab
       await this.injectContentScript(activeTabId, ['inject-scripts/network-helper.js']);
 
+      // 2026-09-05 Codex 재확인 1: URL 원문이 그대로 찍혔다. 헤더는 예전부터 이름만 남긴다.
       console.log(
-        `NetworkRequestTool: Sending to content script: URL=${url}, Method=${method}, Headers=${Object.keys(headers).join(',')}, BodyType=${typeof body}`,
+        `NetworkRequestTool: Sending to content script: URL=${redactUrlForLog(url)}, Method=${method}, Headers=${Object.keys(headers).join(',')}, BodyType=${typeof body}`,
       );
 
       const resultFromContentScript = await this.sendMessageToTab(activeTabId, {
@@ -64,7 +66,10 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
         timeout: timeout,
       });
 
-      console.log(`NetworkRequestTool: Response from content script:`, resultFromContentScript);
+      // 응답 본문에는 토큰·개인정보가 흔하므로 형태만 남긴다 (2026-09-05 Codex 재확인 1).
+      console.log(
+        `NetworkRequestTool: Response from content script: success=${resultFromContentScript?.success}, status=${resultFromContentScript?.status}`,
+      );
 
       return {
         content: [

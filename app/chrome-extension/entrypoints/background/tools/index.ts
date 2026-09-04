@@ -1,4 +1,5 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
+import { summarizeDownloadUrl } from '@/utils/download-url-summary';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { touchOwnedTab, describeClosedTab } from '@/utils/work-tab-manager';
@@ -12,7 +13,12 @@ import {
 } from '@/utils/work-tab-gate';
 import { withTabLock } from '@/utils/tab-lock';
 import { applyAutomationGuard } from '@/utils/automation-guard';
-import { runWithWatchdog } from '@/utils/tool-watchdog';
+import {
+  FlowDeadlineExceededError,
+  assertWithinFlowDeadline,
+  remainingFlowBudgetMs,
+  runWithWatchdog,
+} from '@/utils/tool-watchdog';
 import { describeMissingTab, rejectIfTargetTabGone } from '@/utils/target-tab-guard';
 import { getSpawnedTabsSince } from '@/utils/spawned-tab-tracker';
 import { getDownloadsSince } from '@/utils/download-tracker';
@@ -74,6 +80,15 @@ const WATCHDOG_OVERRIDES: Record<string, number> = {
 export interface ToolCallParam {
   name: string;
   args: any;
+  /**
+   * auto-chrome-mcp fork: chrome_batch·chrome_shortcut 이 흐름 제어 상한(100초)의
+   * **절대 마감 시각**(epoch ms)을 step 마다 넘긴다.
+   *
+   * 상대값(남은 ms)이 아니라 절대 시각인 이유(항목 4): 게이트 조회·automation guard 지연·
+   * 탭 락 대기가 도구 실행 앞에 있어서, 상대값은 그 대기 동안 낡는다. 절대 시각이면
+   * 파이프라인 어느 지점에서 확인해도 같은 마감을 본다. 워치독 예산은 줄이기만 한다.
+   */
+  deadlineAt?: number;
 }
 
 // 탭 단위 직렬화는 utils/tab-lock.ts 로 분리했다 (navigate 의 재사용 판정도 같은 busy 상태를 본다).
@@ -186,6 +201,9 @@ export const handleCallTool = async (param: ToolCallParam) => {
   let primaryTabId: number | null = null;
 
   try {
+    // 흐름 제어 마감은 파이프라인 전 구간에서 본다 — 게이트 조회 전이 첫 지점이다.
+    assertWithinFlowDeadline(param.name, param.deadlineAt, 'before the work-tab gate');
+
     const gate = await applyBackgroundModeGate(param.name, param.args);
     const args = gate.args;
     gatedArgs = args;
@@ -224,6 +242,9 @@ export const handleCallTool = async (param: ToolCallParam) => {
         await sleep(verdict.delayMs);
       }
     }
+
+    // 게이트 조회와 속도 제한 지연을 지나오는 동안 마감이 끝났을 수 있다.
+    assertWithinFlowDeadline(param.name, param.deadlineAt, 'after the automation guard delay');
 
     // auto-chrome-mcp fork(2026-09-04 Codex 최종 검토, 남은 항목):
     // 잠금·busy·touch 추적은 원래 args.tabId 하나만 봤다. 그런데 url 이 곧 대상 지정인
@@ -273,15 +294,19 @@ export const handleCallTool = async (param: ToolCallParam) => {
     // 병렬 작업 탭을 유휴로 오인해 닫지 않게 한다.
     touchOwnedTab(trackedTabId);
 
-    const result = (await withTabLock(lockTabId, () =>
-      runWithWatchdog<ToolResult>(
+    const result = (await withTabLock(lockTabId, () => {
+      // 락 대기가 가장 긴 구간이다 — 락을 잡은 직후 다시 확인하고, 워치독에는 그 시점의
+      // 남은 시간을 넘긴다(예전에는 step 시작 시점의 낡은 값이 들어갔다).
+      assertWithinFlowDeadline(param.name, param.deadlineAt, 'after acquiring the tab lock');
+      return runWithWatchdog<ToolResult>(
         param.name,
         args,
         () => tool.execute(args),
         (message) => createErrorResponse(message),
         WATCHDOG_OVERRIDES,
-      ),
-    )) as ToolResult;
+        remainingFlowBudgetMs(param.deadlineAt),
+      );
+    })) as ToolResult;
 
     if (openerCandidates.length > 0 && result && Array.isArray(result.content)) {
       const spawned = getSpawnedTabsSince(spawnWatchStart, openerCandidates);
@@ -328,7 +353,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
               'Download(s) started during this tool call. Use chrome_handle_download to wait for completion / get the final saved path.',
             downloads: downloads.map((d) => ({
               id: d.id,
-              url: d.url,
+              url: summarizeDownloadUrl(d.url),
               filename: d.filename,
               state: d.state,
               totalBytes: d.totalBytes,
@@ -365,6 +390,8 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
     return result;
   } catch (error) {
+    // 흐름 제어 마감 초과는 러너가 stoppedBy:"timeout" 으로 보고해야 하므로 그대로 올린다.
+    if (error instanceof FlowDeadlineExceededError) throw error;
     console.error(`Tool execution failed for ${param.name}:`, error);
     const failure = createErrorResponse(
       error instanceof Error ? error.message : ERROR_MESSAGES.TOOL_EXECUTION_FAILED,

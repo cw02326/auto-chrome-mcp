@@ -5,6 +5,7 @@ import { ExecutionWorld } from '@/common/constants';
 import { focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
 // auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 스크립트를 주입하지 않도록 세션 소유 탭으로만 조회한다.
 import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
+import { redactUrlForLog } from '@/utils/log-redact';
 
 interface InjectScriptParam {
   url?: string;
@@ -43,10 +44,10 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
         const existing = await findTabByUrlInSessionScope(url, args);
         if (existing) {
           tab = existing;
-          console.log(`Found session tab with URL: ${url}, tab ID: ${tab.id}`);
+          console.log(`Found session tab with URL: ${redactUrlForLog(url)}, tab ID: ${tab.id}`);
         } else {
           // Create new tab with the URL
-          console.log(`No session tab found with URL: ${url}, creating new tab`);
+          console.log(`No session tab found with URL: ${redactUrlForLog(url)}, creating new tab`);
           tab = await createTabForUrl(url, {
             background: background === true,
             windowId,

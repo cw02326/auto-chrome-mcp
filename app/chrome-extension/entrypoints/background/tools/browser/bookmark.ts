@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { getMessage } from '@/utils/i18n';
+import { redactedArgsForLog } from '@/utils/log-redact';
 
 /**
  * Bookmark search tool parameters interface
@@ -369,7 +370,7 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
   async execute(args: BookmarkAddToolParams): Promise<ToolResult> {
     const { url, tabId, title, parentId, createFolder = false } = args;
 
-    console.log(`BookmarkAddTool: Adding bookmark, options:`, args);
+    console.log(`BookmarkAddTool: Adding bookmark, options:`, redactedArgsForLog(args));
 
     try {
       // If no URL provided, use the requested tab (falling back to the active tab)
@@ -510,7 +511,7 @@ class BookmarkDeleteTool extends BaseBrowserToolExecutor {
   async execute(args: BookmarkDeleteToolParams): Promise<ToolResult> {
     const { bookmarkId, url, title } = args;
 
-    console.log(`BookmarkDeleteTool: Deleting bookmark, options:`, args);
+    console.log(`BookmarkDeleteTool: Deleting bookmark, options:`, redactedArgsForLog(args));
 
     if (!bookmarkId && !url) {
       return createErrorResponse('Must provide bookmark ID or URL to delete bookmark');

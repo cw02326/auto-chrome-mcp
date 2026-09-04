@@ -5,6 +5,162 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.11.0] batch 흐름 제어·속도·안정성 (2026-09-05)
+
+확장과 브리지를 함께 1.11.0 으로 올려야 새 batch 키(as, when, stopIf, repeat, params)가 보인다. 브리지 갱신 뒤 Claude Code 를 재시작해야 스키마가 반영된다.
+
+### Fixed
+
+- **스크린샷을 파일로 저장하면 응답에 이미지 전체가 한 번 더 실리던 문제.** 다운로드 시작
+  이벤트의 url 필드에 data URL 본문(base64)이 그대로 들어가 스크린샷 한 장에 40만 자가
+  붙었다. 이제 data·blob URL 은 종류와 길이만 남기고 일반 URL 도 200자에서 자른다.
+
+### Added
+
+- **`chrome_batch`·`chrome_shortcut` 이 step 사이로 값을 넘길 수 있다.** step 에 `as: "hit"` 를
+  붙이면 그 결과가 이름으로 남고, 뒤 step 의 인자에서 `{{hit.matches[0].ref}}` 로 꺼내 쓴다.
+  문자열 전체가 토큰 하나면 원래 타입(숫자·불리언·객체·배열·null)이 보존되고, 문자열 안에
+  끼우면 문자열로 들어간다. 값이 없으면 빈 문자열로 조용히 넘어가지 않고 그 step 이
+  `unresolved_reference` 로 실패한다. 참조 뿌리는 표시용으로 4,000자 잘린 `resultText` 가 아니라
+  도구 응답의 첫 text 블록 원문이라 긴 결과에서도 `matches[19]` 같은 참조가 정확히 풀린다.
+  `{{name.$ok}}`·`{{name.$text}}`·`{{name.$error}}` 메타와 직전 실행 결과 `{{prev...}}` 도 쓸 수 있다.
+  최상위 `return: ["hit"]` 를 주면 응답에 `results` 객체가 실린다(없으면 그 필드 자체가 없다).
+- **조건과 반복이 생겼다.** step 의 `when` 이 거짓이면 그 step 을 실행하지 않고 `skipped` 로
+  남기고, `stopIf` 가 참이면 그 step 에서 호출 전체가 끝나며 뒤 step 은 `skipped` 가 된다.
+  조건은 문자열 표현식이 아니라 JSON 객체(`{ "path": "hit.matches", "op": "notEmpty" }` 또는
+  `all`·`any`·`not`)라 임의 코드 실행 경로가 없다. 연산자는 `exists`·`notExists`·`empty`·
+  `notEmpty`·`eq`·`ne`·`gt`·`gte`·`lt`·`lte`·`contains` 이며, `value` 에 `{{...}}` 를 넣으면
+  평가 직전에 치환돼 두 결과값을 비교할 수 있다. `{ repeat: { max, until, delayMs }, steps: [...] }`
+  묶음은 최대 20회차를 돌고, 회차마다 안쪽 이름과 `prev` 를 비우며(`{{loop.index}}`·
+  `{{loop.count}}` 사용 가능), 응답에는 항목 하나로 `attempts: { count, stoppedBy }` 만 싣는다.
+  묶음에 `as` 를 주면 회차별 스냅샷 배열을 받는다. 묶음 중첩은 막았고, 흐름 제어가 켜진 호출은
+  도구 호출 100회(`total_runs_exceeded`)와 벽시계 100초(`timeout`)에서 멈추고 그때까지의 결과를
+  돌려준다. 새 키가 없는 기존 호출에는 이 상한이 적용되지 않는다.
+- **`chrome_shortcut` 이 실행마다 다른 값을 받는다.** 저장 시 `params` 로 이름을 선언하고
+  (`required`·`default`·`secret`·`description`, 최대 16개), 실행 시 `params` 로 값을 넘겨
+  step 안에서 `{{params.user}}` 로 쓴다. 전달값이 `default` 를 이기고, 필수 누락은
+  `missing_param`, 선언에 없는 이름은 `unknown_param`, 선언 없이 `{{params.x}}` 를 쓰면 저장
+  시점에 `undeclared_param` 이다. `secret` 은 문자열만 받고 저장소에 쓰지 않으며 응답 문자열
+  어디서든 `***` 로 가린다(8자 미만이면 오탐 가능성 경고가 붙는다). 실행 시 전달한 값은
+  저장소에 남지 않고 `runCount` 만 오른다. `list` 응답에는 선언 요약이 실린다.
+- **치환은 새 키가 있을 때만 켜진다.** `templates: true` 이거나 `as`·`return` 같은 새 흐름 키가
+  하나라도 있을 때만 동작하므로, 기존 호출은 `{{...}}` 가 있어도 예전처럼 literal 로 전달된다.
+  저장된 shortcut 도 레코드에 `templates` 표시가 있는 것만 치환한다(옛 레코드는 그대로 실행).
+- **대상 탭을 고르는 인자는 치환할 수 없다.** `tabId`·`tabIds`·`windowId`·`lane`·`_mcpSessionId`,
+  그리고 `url` 이 곧 대상 지정인 도구(`chrome_get_web_content`·`chrome_console`·
+  `chrome_network_capture` 계열·`chrome_close_tabs`)의 `url` 에 `{{...}}` 를 넣으면
+  `template_forbidden_key` 로 실행 전에 막는다. 치환으로 새로 생긴 객체 안의 같은 키도 다시
+  훑어서 잡는다. 페이지에서 온 값이 사용자 탭을 가리키게 만드는 경로를 원천 차단한다.
+  같은 이유로 새 형식(v2) shortcut 은 저장 시점에 `tabId`·`windowId`·`tabIds` 와
+  `chrome_close_tabs` 의 `url` 을 아예 담지 못한다(`stale_target_forbidden`).
+- **응답의 각 step 에 `status` 가 붙는다**(`completed | skipped | stopped | failed`). 기존 `ok` 는
+  그대로이고, 조기 종료가 있었으면 `stoppedBy: { step, reason }` 이 함께 실린다
+  (`reason` 은 `stopIf`·`total_runs_exceeded`·`timeout`).
+- `chrome_batch` 와 `chrome_shortcut` 에 복사돼 있던 step 실행 루프를 공용 실행기
+  `entrypoints/background/tools/browser/batch-runner.ts` 로 합쳤다. 20 step 상한, 4,000자
+  `resultText`, 이미지 4장 상한, `continueOnError`, 중첩 금지 도구 목록은 그대로다.
+- **`chrome_shortcut` 도 반복 묶음을 저장한다.** 예전에는 저장 검증이 모든 항목에 `tool` 을
+  요구해 `{ repeat: {...}, steps: [...] }` 묶음을 아예 저장할 수 없었다(batch 로만 쓸 수 있었다).
+  이제 묶음을 갈라내고 안쪽 step 을 재귀로 검사한다 - 중첩 금지 도구와 v2 의
+  `stale_target_forbidden` 은 묶음 안쪽에도 그대로 적용된다. `list` 의 `tools` 에는 `repeat` 와
+  안쪽 도구 이름이 함께 실린다.
+
+### Security
+
+- **치환된 인자가 prototype 을 타고 대상 탭을 바꾸는 경로를 막았다.** step 인자에
+  `{"__proto__": "{{...}}"}` 를 넣으면 치환 결과가 인자 객체의 prototype 이 되어, own 키만 보는
+  금지 키 검사에는 잡히지 않으면서 게이트에는 상속된 `tabId` 가 보였다(사용자가 보고 있는
+  탭을 지정하는 우회). 이제 `__proto__`·`constructor`·`prototype` 은 인자 이름으로 쓸 수 없고
+  (`forbidden_path_segment`), 치환은 키를 항상 own 데이터 속성으로 만들며, 도구 호출 직전에
+  인자 트리의 prototype 을 확인한다(`template_forbidden_key`). 게이트도 대상 지정 키를
+  own 속성으로만 읽는다.
+- **비밀값이 확장 콘솔에 평문으로 남지 않는다.** `chrome_fill_or_select` 의 `value`,
+  `chrome_keyboard` 의 `keys`, `chrome_network_request` 의 `body`·`headers` 처럼 `secret`
+  파라미터가 흘러가는 인자를 도구 진입점이 `console.log(..., args)` 로 통째로 찍고 있었다.
+  이제 비민감 필드만 남기는 사본(`utils/log-redact.ts`)을 찍는다. `url` 은 쿼리·해시를 떼고
+  origin 과 경로만 남긴다. 같은 방식으로 bookmark·close_tabs·file_upload·history·screenshot·
+  web_fetcher·network_capture 의 인자 로그도 함께 가렸다. 진입점 뒤에서 같은 URL 을 다시
+  원문으로 찍던 후속 로그(navigate 의 탭 조회·재사용, close_tabs 의 패턴 조회, web_fetcher·
+  inject_script 의 세션 탭 조회, network_request 의 전송 로그와 응답 덤프, network_capture 의
+  요청 로그, user_consent 의 파싱 실패)도 같은 `redactUrlForLog` 로 origin 과 경로만 남긴다.
+- **치환이 켜진 흐름 안에서 `chrome_userscript` 는 읽기 전용 `list`·`get` 만 허용한다**
+  (`flow_stateful_tool_forbidden`). 영속된 스크립트는 이후 매칭되는 모든 탭에 다시 주입되므로
+  치환된 비밀이 한 호출을 넘어 남고 퍼진다. `create`·`update`·`enable` 뿐 아니라
+  `disable`·`remove` 도 같은 저장소를 쓰고, `send_command` 는 이미 영속된 스크립트에 치환된
+  payload 를 밀어 넣으며, `export` 는 저장된 스크립트 본문을 통째로 흐름 캡처로 끌어온다.
+  새 action 이 늘 때 빠뜨리지 않도록 금지 목록이 아니라 허용 목록으로 판정한다. 단일 호출과
+  새 키가 없는 기존 batch 호출은 영향이 없다.
+- **흐름의 100초 상한이 실제 상한이 됐다.** 예전에는 step 시작 시점의 "남은 시간" 을 넘겨서
+  게이트 조회·속도 제한 지연·탭 락 대기 동안 그 값이 낡았고, 남은 시간이 0 이면 상한이 아예
+  무시돼 도구가 최대 120초짜리 워치독으로 새로 돌기 시작했다. 이제 절대 마감 시각을 넘겨
+  게이트 앞·지연 뒤·락 획득 뒤·실행 직전 네 지점에서 확인하고, 만료로 끊긴 step 은
+  `stopped` 로 닫고 `stoppedBy: { reason: "timeout" }` 으로 보고한다.
+
+### Fixed
+
+- **상한으로 멈춘 반복 묶음이 "정상 완료"로 보고됐다.** `timeout`·`total_runs_exceeded` 로
+  끊긴 묶음도 `status: "completed"`, `attempts.stoppedBy: "max"` 로 남아, 묶음 항목만 읽는 쪽은
+  20회를 다 돌고 끝난 것으로 잘못 읽었다. 이제 묶음도 `status: "stopped"` 이고
+  `attempts.stoppedBy` 에 `timeout`·`total_runs` 가 실린다(enum 에 두 값 추가).
+- **실패로 확정된 step 뒤에서 `{{prev.$ok}}` 가 `true` 였다.** 캡처를 raw 성공으로 먼저 기록한
+  뒤 `capture_too_large` 나 `stopIf` 평가 오류가 그 step 을 실패로 바꿔도 캡처의 `$ok`·`$error`
+  는 그대로였다. 최종 상태가 정해진 뒤 `prev` 와 이름 붙인 캡처를 함께 맞춘다.
+- **반복 묶음이 `stopIf` 로 멈추면 응답에 `resultText` 가 비어 있었다.** 멈춘 회차의 step 도
+  실제로 실행돼 결과가 있는데 상태가 `stopped` 라는 이유로 후보에서 빠졌다. 이제 그 결과가
+  묶음의 `resultText` 로 실린다 - 묶음이 멈춘 이유를 응답에서 바로 볼 수 있다.
+
+### Changed
+
+- **Playwright CDP 폴백 레지스트리의 죽은 stub 을 고쳤다.** `chrome_` 접두사 오기로 절대
+  매치되지 않던 키 5개(`chrome_semantic_search` → `search_tabs_content`,
+  `chrome_performance_start_trace` → `performance_start_trace`,
+  `chrome_performance_stop_trace` → `performance_stop_trace`,
+  `chrome_performance_analyze_insight` → `performance_analyze_insight`,
+  `chrome_get_windows_and_tabs` → `get_windows_and_tabs`)를 실제 도구 이름으로 바로잡았다.
+  포크가 추가한 뒤 이 레지스트리에 한 번도 반영되지 않았던 도구 12개
+  (`chrome_request_user_consent`, `chrome_batch`, `chrome_set_work_tab`, `chrome_wait_for`,
+  `chrome_scroll_collect`, `chrome_storage`, `chrome_save_pdf`, `chrome_emulate`,
+  `chrome_network_rules`, `chrome_extract`, `chrome_find`, `chrome_shortcut`)도 공통
+  "native messaging 전용" stub 으로 등록해, 폴백 모드에서 호출하면 안내 없이 무반응하는
+  대신 이유가 담긴 에러를 즉시 돌려준다. 개별 구현은 하지 않았다.
+- `docs/PLAYWRIGHT_FALLBACK.md` 의 도구 커버리지 표를 위 수정에 맞춰 다시 썼다(옛 33개
+  upstream 기준 대신 현재 48개 전달 가능 도구 기준).
+- `docs/TOOLS.md` 에 "Hidden Tools (Internal Only)" 절을 새로 만들어
+  `search_tabs_content`·`chrome_inject_script`·`chrome_send_command_to_inject_script`·
+  `chrome_userscript`·`chrome_get_interactive_elements` 를 문서화했다. 다섯 다 디스패치
+  등록과 구현 파일이 실제로 있어 삭제하지 않고 유지하되, 왜 `TOOL_SCHEMAS`(MCP 에 광고하는
+  목록)에는 없는지를 남겨 다음 정리에서 죽은 코드로 오인되지 않게 했다.
+- `packages/shared/src/tools.ts` 의 `TOOL_NAMES` 에서 위 다섯 항목 옆에 같은 취지의 주석을
+  달았다. 노출 여부(스키마)는 바꾸지 않았다.
+
+- **고정 대기 일부를 조건 대기로 바꿔 도구 응답이 빨라졌다.** `chrome_screenshot` 은 헬퍼를
+  주입한 뒤 무조건 100ms 를 쉬는 대신 ping 에 pong 이 오면 즉시 넘어간다. `chrome_wait_for` 는
+  250ms 폴링을 그대로 기다리지 않고 페이지의 DOM 변화(MutationObserver)로 깨어나 조건을 다시
+  확인하며, 변화가 없으면 예전과 같은 간격의 폴링이 폴백으로 남는다. 관찰자는 문서당 하나만
+  두고 새로 걸기 전에 이전 것을 끊으며, 기준 시계는 확장 쪽 타이머 하나뿐이라 백그라운드 탭에서
+  페이지 타이머가 스로틀돼도 전체 소요가 `timeoutMs` 를 넘지 않는다.
+  `chrome_scroll_collect` 는 스크롤 뒤 문서가 자라고, 같은 수치가 연속 3회(각 150ms) 나오고,
+  진행 중인 네트워크 요청도 없을 때만 다음 패스로 넘어간다. 셋 중 하나라도 확인하지 못하면
+  예전처럼 `delayMs` 를 다 기다리므로 지연 로딩 콘텐츠가 빠지지 않는다.
+  `chrome_console`(snapshot)의 2초 플러시 대기는 그대로 두었다. "조용해지면 반환"으로 바꿔
+  봤더니 300ms 조용해진 뒤 800ms 만에 터지는 예외를 놓쳐서, 스냅샷은 유실 방지를 우선한다.
+  작업 창 탭을 활성화한 뒤의 대기는 프레임이 그려진 것(rAF 두 번)을 확인하고도 최소 150ms 는
+  채우고, 확인할 수 없는 탭에서는 300ms 까지만 기다린다. 활성화 직후의 중간 프레임이 찍히는
+  것을 막기 위해서다.
+- **`chrome_click_element`·`chrome_fill_or_select` 가 전송 전에 멈춘 실패만 1회 자동 재시도한다.**
+  요소가 잠깐 가려졌거나(오버레이·뷰포트 밖·크기 0), 재렌더로 떨어져서 헬퍼가 이벤트를 쏘기
+  전에 되돌아온 경우가 대상이다. 최대 300ms 안정화(조건이 충족되면 즉시)를 거쳐 같은 탭·같은
+  프레임에서 한 번 더 시도하고, 결과에 `retried: true` 와 `retryReason` 을 싣는다.
+  재시도는 최초 실패 시점에 고정한 요소(ref)로만 간다. selector 를 다시 해석하지 않고 프레임을
+  다시 검색하지도 않으므로, DOM 이 재정렬돼도 다른 요소를 누르지 않는다. 요소를 고정할 수
+  없거나 상태를 확인할 수 없으면 재시도하지 않는다.
+  포트가 끊기거나 컨텍스트가 사라진 실패는 **보낸 뒤 응답만 잃은** 것일 수 있으므로 재시도하지
+  않는다. 그때는 원래 오류에 "이미 반영됐을 수 있으니 상태를 확인하라"는 안내가 붙는다.
+  셀렉터 불일치, 대기 후에도 요소 없음, 채울 수 없는 요소 같은 영구 실패도 그대로 실패한다.
+  재시도 사이에 URL 이나 문서(documentId)가 바뀌었으면 두 번 누르는 사고를 막기 위해
+  중단한다. 실패 응답의 형식은 예전 그대로이고 문구 끝에 `(retried once: ...)` 만 덧붙는다.
+  파라미터·스키마 변경은 없다.
+
 ## [v1.10.1] 무간섭 게이트·브리지 인증·토큰 절감 (2026-09-04)
 
 확장과 브리지를 **함께** 1.10.1 로 올려야 한다. 브리지만 올리면 팝업의 강제 재연결이 401 이 나고, 확장만 올리면 새 스키마가 보이지 않는다.

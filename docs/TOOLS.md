@@ -21,6 +21,7 @@ handled locally by the stdio proxy and never reach the browser.
 - [Automation](#-automation)
 - [Data Management](#-data-management)
 - [Browser State & Output](#️-browser-state--output)
+- [Hidden Tools (Internal Only)](#️-hidden-tools-internal-only)
 - [Response Format](#-response-format)
 - [Usage Examples](#-usage-examples)
 
@@ -917,12 +918,101 @@ default.
 Steps may not include `chrome_batch` itself or interactive tools (`chrome_switch_tab`,
 element selection, user consent). By default the run stops at the first failure.
 
+Once substitution is on (any flow key or `templates: true`), a step may call `chrome_userscript`
+only with the read-only actions `list` and `get`; every other action is rejected with
+`flow_stateful_tool_forbidden`. `create`, `update`, `enable`, `disable`, and `remove` all write the
+same persisted store, and a persisted script is re-injected into every later matching tab, so a
+substituted secret would outlive the call. `send_command` pushes a substituted payload into an
+already persisted script, and `export` pulls every stored script body into the flow. A plain
+`chrome_userscript` call on its own, and a v1 `chrome_batch` with no flow keys, are unaffected.
+
 **Parameters**:
 
 - `steps` (array, required, max 20): `{ tool: string, args?: object }` in order
 - `continueOnError` (boolean, optional, default `false`): run the rest even after a failure
 
-**Example**:
+**Value passing and flow control** (all optional, and all of them switch substitution on):
+
+- `as` (string, on a step): name this step result, then read it from later steps with
+  `{{name.path}}`. A whole string that is one token keeps the original type; a token inside a
+  longer string is embedded as text. A reference that resolves to nothing fails that step with
+  `unresolved_reference` instead of passing an empty string. `{{prev...}}` is the step that ran
+  last, and `{{name.$ok}}` / `{{name.$text}}` / `{{name.$error}}` are the meta fields.
+- `when` (object, on a step): run the step only if the condition holds, otherwise its status is
+  `skipped`. A condition is JSON, never an expression:
+  `{ "path": "hit.matches", "op": "notEmpty" }`, or `all` / `any` / `not` around such leaves.
+  Operators: `exists`, `notExists`, `empty`, `notEmpty`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`,
+  `contains`. A `value` may itself contain `{{...}}`, which is substituted before the comparison.
+- `stopIf` (object, on a step): after the step runs, stop the whole call when the condition
+  holds. That step reports `stopped`, the remaining steps report `skipped`.
+- `repeat` (object) with `steps` (array): a repeat group.
+  `{ "repeat": { "max": 1..20, "until": condition, "delayMs": 0..5000 }, "steps": [...] }`.
+  Groups cannot nest, count as one item against the 20 step limit, and report one entry with
+  `attempts: { count, stoppedBy }` where `stoppedBy` is `until`, `stopIf`, `max` or `failure`.
+  Each round clears the inner `as` names and `prev`; `{{loop.index}}` starts at 0 and
+  `{{loop.count}}` is the round number. Give the group an `as` to keep one snapshot per round.
+- `templates` (boolean) forces substitution on, `return` (array of `as` names) adds a `results`
+  object to the response.
+
+Target arguments (`tabId`, `tabIds`, `windowId`, `lane`, `_mcpSessionId`, and `url` on tools
+where the url picks the tab) cannot come from a template: those are rejected with
+`template_forbidden_key`. A run with flow control stops at 100 tool calls
+(`total_runs_exceeded`) or 100 seconds (`timeout`) and returns what it has so far.
+
+**Example (a)**, search then click the first hit:
+
+```json
+{
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "https://search.example.com/?q=크롬" } },
+    {
+      "tool": "chrome_find",
+      "as": "hit",
+      "args": { "query": "첫 번째 검색 결과", "maxResults": 1 }
+    },
+    {
+      "tool": "chrome_click_element",
+      "when": { "path": "hit.matches[0].ref", "op": "exists" },
+      "args": { "ref": "{{hit.matches[0].ref}}" }
+    },
+    { "tool": "chrome_screenshot" }
+  ]
+}
+```
+
+**Example (b)**, collect a list until the next button is gone:
+
+```json
+{
+  "return": ["pages"],
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "https://list.example.com/items?page=1" } },
+    {
+      "repeat": { "max": 20, "until": { "path": "next.matches", "op": "empty" }, "delayMs": 500 },
+      "as": "pages",
+      "steps": [
+        {
+          "tool": "chrome_extract",
+          "as": "page",
+          "args": { "fields": { "titles": { "selector": ".item h3", "all": true } } }
+        },
+        {
+          "tool": "chrome_find",
+          "as": "next",
+          "args": { "query": "다음 페이지 버튼", "maxResults": 1 }
+        },
+        {
+          "tool": "chrome_click_element",
+          "when": { "path": "next.matches", "op": "notEmpty" },
+          "args": { "ref": "{{next.matches[0].ref}}" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Example**, the plain v1 form is unchanged (no new key, no substitution):
 
 ```json
 {
@@ -947,11 +1037,66 @@ workflows (login flows, routine collection) survive across sessions.
 - `steps` (array, optional, max 20): for `save` — steps in `chrome_batch` format
 - `description` (string, optional): for `save` — what this shortcut does
 - `continueOnError` (boolean, optional, default `false`): for `run`
+- `params` (object, optional): for `save`, the declaration; for `run`, the values
+- `templates` (boolean, optional) / `return` (array, optional): same meaning as in `chrome_batch`
 
-**Example**:
+Saved steps take every `chrome_batch` flow key (`as`, `when`, `stopIf`, `repeat`), including a
+`{ repeat: {...}, steps: [...] }` group as a top level item. A record that
+uses any of them is a v2 record: it may not store `tabId`, `tabIds`, `windowId`, or a
+`chrome_close_tabs` url, because a stored tab id points at a different tab later
+(`stale_target_forbidden`). Records saved before this feature keep running exactly as they did,
+with no substitution at all.
+
+**Parameters of a saved shortcut** (max 16). Each declaration takes `required`, `default`,
+`secret` and `description`. `required` with a `default`, or `secret` with a `default`, is
+rejected. At run time a supplied value wins over the default, a missing required value is
+`missing_param`, a name that was never declared is `unknown_param`, and `{{params.x}}` without a
+declaration is rejected when saving (`undeclared_param`). A `secret` must be a string, is never
+written to storage, and is replaced with `***` everywhere in the response.
+
+**Example (c)**, a login shortcut that takes an account:
 
 ```json
-{ "action": "run", "name": "daily-report-login" }
+{
+  "action": "save",
+  "name": "site-login",
+  "params": {
+    "user": { "required": true, "description": "아이디" },
+    "pw": { "required": true, "secret": true },
+    "url": { "default": "https://example.com/login" }
+  },
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "{{params.url}}" } },
+    { "tool": "chrome_find", "as": "idBox", "args": { "query": "아이디 입력창", "maxResults": 1 } },
+    {
+      "tool": "chrome_fill_or_select",
+      "args": { "ref": "{{idBox.matches[0].ref}}", "value": "{{params.user}}" }
+    },
+    {
+      "tool": "chrome_find",
+      "as": "pwBox",
+      "args": { "query": "비밀번호 입력창", "maxResults": 1 }
+    },
+    {
+      "tool": "chrome_fill_or_select",
+      "args": { "ref": "{{pwBox.matches[0].ref}}", "value": "{{params.pw}}" }
+    },
+    { "tool": "chrome_keyboard", "args": { "keys": "Enter" } },
+    {
+      "tool": "chrome_find",
+      "as": "logout",
+      "args": { "query": "로그아웃 버튼", "maxResults": 1 },
+      "stopIf": { "path": "logout.matches", "op": "notEmpty" }
+    },
+    { "tool": "chrome_screenshot" }
+  ]
+}
+```
+
+**Example**, running it:
+
+```json
+{ "action": "run", "name": "site-login", "params": { "user": "me@example.com", "pw": "..." } }
 ```
 
 ## 📚 Data Management
@@ -1131,6 +1276,36 @@ for login or checkout - if a flow breaks unexpectedly, `action: "clear"` first.
 ```json
 { "action": "block", "preset": "ads", "tabId": 42 }
 ```
+
+## 🕶️ Hidden Tools (Internal Only)
+
+These tool names exist in `packages/shared/src/tools.ts` (`TOOL_NAMES`) and have a real,
+working implementation registered in the extension's dispatch map (`REGISTERED_TOOL_NAMES`),
+but their schema is not part of `TOOL_SCHEMAS` - they are not advertised over MCP `ListTools`
+and a normal agent session cannot discover or call them by name. This is deliberate (mostly to
+keep the advertised schema small - see the v1.10.1 "토큰 절감" changelog entry), not an
+oversight, so they are not being removed. This section exists so a future cleanup pass does not
+mistake them for dead code.
+
+- **`search_tabs_content`** - semantic (vector) search over previously indexed tab content.
+  Requires the local embedding model/vector DB to be initialized; hidden to keep it out of the
+  default schema surface.
+- **`chrome_inject_script`** - injects a JS/CSS script into a tab's `ISOLATED` or `MAIN` world.
+  Superseded for most agent use by `chrome_javascript` (CDP `Runtime.evaluate`) and
+  `chrome_userscript` (persistent, CSP-aware); still used internally by the record-replay
+  engine.
+- **`chrome_send_command_to_inject_script`** - sends a named event/payload to a script
+  previously injected with `chrome_inject_script`. Only useful paired with that tool.
+- **`chrome_userscript`** - Tampermonkey-style persistent script/CSS manager
+  (create/list/get/enable/disable/update/remove/send_command/export), CSP-aware with
+  automatic strategy selection. Fully implemented and exercised by tests; hidden for the same
+  schema-size reason as the tools above.
+- **`chrome_get_interactive_elements`** (deprecated) - see its own entry under
+  [Content Analysis](#-content-analysis). Replaced by `chrome_read_page`, kept only for
+  backward compatibility.
+
+If you need one of these from an MCP client, call it by its exact name anyway - the dispatcher
+still accepts it, it is just not listed for the model to discover on its own.
 
 ## 📋 Response Format
 

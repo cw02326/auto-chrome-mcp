@@ -16,6 +16,9 @@ import {
 
 const DEFAULT_MAX_MESSAGES = 100;
 
+/** snapshot 모드에서 CDP 콘솔 이벤트가 다 흘러나오기를 기다리는 고정 시간 */
+const CONSOLE_SNAPSHOT_FLUSH_MS = 2000;
+
 type ConsoleMode = 'snapshot' | 'buffer';
 
 interface ConsoleToolParams {
@@ -523,7 +526,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         await cdpSessionManager.sendCommand(tabId, 'Log.enable');
 
         // Wait for all messages to be flushed
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // auto-chrome-mcp fork: 여기는 고정 대기를 유지한다. "마지막 메시지 이후 조용해지면 반환"으로
+        // 바꿔 봤더니 300ms 조용해진 뒤 800ms 만에 터지는 예외를 통째로 놓쳤다. 스냅샷은 그 늦은
+        // 한 줄을 보려고 쓰는 도구라 빠른 반환보다 유실 방지가 우선이다.
+        await new Promise((resolve) => setTimeout(resolve, CONSOLE_SNAPSHOT_FLUSH_MS));
 
         // Process collected messages
         // auto-chrome-mcp fork (upstream #215): 예전에는 objectId가 있는 모든 인자를 매번

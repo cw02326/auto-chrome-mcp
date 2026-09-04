@@ -1,17 +1,26 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
+import {
+  MAX_STEPS,
+  collectFlowParamNames,
+  isRepeatGroup,
+  runSteps,
+  validateFlow,
+  type RunnerStep,
+  type ToolInvoker,
+} from './batch-runner';
+import { AS_NAME_PATTERN, areTemplatesActive } from '@/utils/step-template';
 
 /**
  * auto-chrome-mcp fork: chrome_shortcut — chrome_batch 의 step 목록을 이름 붙여 저장해두고
  * 나중에 이름만으로 재실행하는 "저장된 매크로". 반복되는 로그인 흐름·정기 수집 루틴처럼
  * 세션이 바뀌어도 다시 쓰고 싶은 작업을 chrome.storage.local 에 영속 저장한다.
+ *
+ * 실행 루프는 chrome_batch 와 공유한다 (./batch-runner.ts).
  */
 
-interface ShortcutStep {
-  tool: string;
-  args?: Record<string, any>;
-}
+type ShortcutStep = RunnerStep;
 
 interface ShortcutToolParams {
   action: 'save' | 'run' | 'list' | 'delete';
@@ -22,6 +31,20 @@ interface ShortcutToolParams {
   /** auto-chrome-mcp fork(P1): 레인 이름 — step 마다 그대로 전달된다. */
   lane?: string;
   _mcpSessionId?: string;
+  /** action="save": 값 전달 치환을 강제로 켠다. */
+  templates?: boolean;
+  /** action="run": 응답에 실을 `as` 이름 목록. */
+  return?: string[];
+  /** action="save": 파라미터 선언. action="run": 파라미터 값. */
+  params?: Record<string, unknown>;
+}
+
+/** `params` 선언 하나 (설계 3절). */
+interface ParamDeclaration {
+  required?: boolean;
+  default?: unknown;
+  secret?: boolean;
+  description?: string;
 }
 
 interface StoredShortcut {
@@ -30,18 +53,15 @@ interface StoredShortcut {
   createdAt: number;
   updatedAt: number;
   runCount: number;
+  /** 저장된 파라미터 선언. 실행 시 전달된 값은 절대 여기 남기지 않는다. */
+  params?: Record<string, ParamDeclaration>;
+  /**
+   * 이 레코드가 값 전달 치환을 쓰는가. 필드가 없는 legacy 레코드는 절대 치환하지 않는다
+   * (설계 1절 "활성화 규칙" — 기존 저장본의 실행 의미를 한 글자도 바꾸지 않기 위해서다).
+   */
+  templates?: boolean;
 }
 
-interface ShortcutStepResult {
-  index: number;
-  tool: string;
-  ok: boolean;
-  resultText?: string;
-  error?: string;
-}
-
-const MAX_STEPS = 20;
-const MAX_RESULT_TEXT_LENGTH = 4000;
 const MAX_SHORTCUTS = 50;
 const MAX_NAME_LENGTH = 64;
 const STORAGE_KEY = 'mcpShortcuts';
@@ -63,32 +83,19 @@ const DISALLOWED_STEP_TOOLS = new Set<string>([
 ]);
 
 /**
+ * v2 레코드가 step args 에 담을 수 없는 대상 지정 키 (설계 3절).
+ * 저장된 탭 id 는 시간이 지나면 다른 탭, 곧 사용자 탭을 가리킨다.
+ */
+const STALE_TARGET_KEYS: ReadonlySet<string> = new Set(['tabId', 'windowId', 'tabIds']);
+
+/**
  * auto-chrome-mcp fork: 순환 import 를 피하기 위한 invoker 주입 (batch.ts 와 동일 패턴).
  * tools/index.ts 가 setShortcutToolInvoker(handleCallTool) 로 배선한다.
  */
-type ToolInvoker = (param: { name: string; args: any }) => Promise<any>;
-
 let invoker: ToolInvoker | null = null;
 
 export function setShortcutToolInvoker(fn: ToolInvoker) {
   invoker = fn;
-}
-
-/**
- * 결과의 모든 text content 를 이어붙여 잘라낸다 (batch.ts extractResultText 와 동일 로직 —
- * new_tabs_opened 같은 부가 알림이 두 번째 text 항목으로 붙는 경우를 놓치지 않기 위함).
- */
-function extractResultText(result: any): string | undefined {
-  const content = Array.isArray(result?.content) ? result.content : null;
-  if (!content) return undefined;
-  const texts = content
-    .filter((item: any) => item?.type === 'text' && typeof item.text === 'string')
-    .map((item: any) => item.text);
-  if (texts.length === 0) return undefined;
-  const text: string = texts.join('\n');
-  return text.length > MAX_RESULT_TEXT_LENGTH
-    ? `${text.slice(0, MAX_RESULT_TEXT_LENGTH)}... [truncated]`
-    : text;
 }
 
 async function loadShortcuts(): Promise<Record<string, StoredShortcut>> {
@@ -117,12 +124,31 @@ function validateName(name: unknown): string | null {
   return trimmed;
 }
 
+/** 중첩 깊이와 무관하게 이 이름의 키가 있는지 본다. */
+function findKeyDeep(value: unknown, keys: ReadonlySet<string>): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const hit = findKeyDeep(item, keys);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (value === null || typeof value !== 'object') return null;
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (keys.has(key)) return key;
+    const hit = findKeyDeep((value as Record<string, unknown>)[key], keys);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 type StepsValidation = { ok: true; steps: ShortcutStep[] } | { ok: false; error: string };
 
 /**
  * batch.ts 의 step 검증과 동일한 규칙 + chrome_shortcut/chrome_batch 중첩 금지.
+ * v2 레코드는 저장 시점에 박제되는 대상 지정 키를 함께 거절한다.
  */
-function validateSteps(steps: unknown): StepsValidation {
+function validateSteps(steps: unknown, isV2: boolean): StepsValidation {
   if (!Array.isArray(steps) || steps.length === 0) {
     return { ok: false, error: 'steps must be a non-empty array' };
   }
@@ -131,24 +157,280 @@ function validateSteps(steps: unknown): StepsValidation {
   }
 
   for (const raw of steps) {
-    const toolName = typeof (raw as any)?.tool === 'string' ? (raw as any).tool.trim() : '';
-    if (!toolName) {
-      return { ok: false, error: 'each step must have a non-empty "tool" string' };
+    // auto-chrome-mcp fork(2026-09-04 Codex 최종 검토 항목 5): 반복 묶음 항목에는 `tool` 이
+    // 없다. 예전에는 모든 top-level 항목에 tool 을 요구해, 설계 7절 예시 (b) 의 묶음을
+    // shortcut 으로 저장하는 길이 아예 막혀 있었다(batch 로만 쓸 수 있었다).
+    if (isRepeatGroup(raw)) {
+      const inner = (raw as any).steps;
+      if (!Array.isArray(inner) || inner.length === 0) {
+        return {
+          ok: false,
+          error: 'repeat_invalid: a repeat group must have a non-empty "steps" array',
+        };
+      }
+      if (inner.length > MAX_STEPS) {
+        return {
+          ok: false,
+          error: `repeat_invalid: a repeat group must contain at most ${MAX_STEPS} steps`,
+        };
+      }
+      for (const child of inner) {
+        const childError = validateOneStep(child, isV2);
+        if (childError) return { ok: false, error: childError };
+      }
+      continue;
     }
-    const argsInvalid =
-      (raw as any)?.args !== undefined &&
-      (typeof (raw as any).args !== 'object' ||
-        (raw as any).args === null ||
-        Array.isArray((raw as any).args));
-    if (argsInvalid) {
-      return { ok: false, error: `step "${toolName}": args must be an object` };
-    }
-    if (DISALLOWED_STEP_TOOLS.has(toolName)) {
-      return { ok: false, error: `tool "${toolName}" is not allowed inside a chrome_shortcut` };
-    }
+    const error = validateOneStep(raw, isV2);
+    if (error) return { ok: false, error };
   }
 
   return { ok: true, steps: steps as ShortcutStep[] };
+}
+
+/** `list` 에 실을 도구 이름 - 묶음은 "repeat" 와 안쪽 도구 이름을 함께 낸다. */
+function collectStepToolNames(steps: unknown): string[] {
+  if (!Array.isArray(steps)) return [];
+  const names: string[] = [];
+  for (const step of steps) {
+    if (isRepeatGroup(step)) {
+      names.push('repeat', ...collectStepToolNames((step as any).steps));
+      continue;
+    }
+    if (typeof (step as any)?.tool === 'string') names.push((step as any).tool);
+  }
+  return names;
+}
+
+/** step 하나(묶음 안쪽 포함)의 규칙. 문제가 있으면 문구를, 없으면 null 을 돌려준다. */
+function validateOneStep(raw: unknown, isV2: boolean): string | null {
+  const toolName = typeof (raw as any)?.tool === 'string' ? (raw as any).tool.trim() : '';
+  if (!toolName) {
+    return 'each step must have a non-empty "tool" string';
+  }
+  const argsInvalid =
+    (raw as any)?.args !== undefined &&
+    (typeof (raw as any).args !== 'object' ||
+      (raw as any).args === null ||
+      Array.isArray((raw as any).args));
+  if (argsInvalid) {
+    return `step "${toolName}": args must be an object`;
+  }
+  if (DISALLOWED_STEP_TOOLS.has(toolName)) {
+    return `tool "${toolName}" is not allowed inside a chrome_shortcut`;
+  }
+  if (isV2) {
+    const stale = findKeyDeep((raw as any)?.args, STALE_TARGET_KEYS);
+    if (stale) {
+      return `stale_target_forbidden: step "${toolName}" stores "${stale}", which points at a different tab later`;
+    }
+    if (
+      toolName === TOOL_NAMES.BROWSER.CLOSE_TABS &&
+      findKeyDeep((raw as any)?.args, new Set(['url']))
+    ) {
+      return `stale_target_forbidden: step "${toolName}" stores "url", which picks tabs to close later`;
+    }
+  }
+  return null;
+}
+
+/** 한 shortcut 이 선언할 수 있는 파라미터 수 (설계 3절). */
+const MAX_PARAMS = 16;
+
+/** 선언에서 허용하는 필드. 그 밖의 필드는 param_declaration_invalid. */
+const PARAM_FIELDS: ReadonlySet<string> = new Set(['required', 'default', 'secret', 'description']);
+
+/** 8자 미만 비밀은 응답 곳곳에서 우연히 일치할 수 있어 경고를 붙인다. */
+const SHORT_SECRET_LENGTH = 8;
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+type ParamDeclarationValidation =
+  | { ok: true; declarations?: Record<string, ParamDeclaration> }
+  | { ok: false; error: string };
+
+/** action="save" 의 `params` 선언을 검증한다 (설계 3절). */
+function validateParamDeclarations(params: unknown): ParamDeclarationValidation {
+  if (params === undefined) return { ok: true };
+  if (!isPlainObject(params)) {
+    return { ok: false, error: 'param_declaration_invalid: "params" must be an object' };
+  }
+  const names = Object.keys(params);
+  if (names.length > MAX_PARAMS) {
+    return {
+      ok: false,
+      error: `param_declaration_invalid: at most ${MAX_PARAMS} params can be declared`,
+    };
+  }
+
+  const declarations: Record<string, ParamDeclaration> = {};
+  for (const name of names) {
+    if (!AS_NAME_PATTERN.test(name)) {
+      return {
+        ok: false,
+        error: `param_declaration_invalid: "${name}" must match [A-Za-z_][A-Za-z0-9_]{0,31}`,
+      };
+    }
+    const raw = params[name];
+    if (!isPlainObject(raw)) {
+      return { ok: false, error: `param_declaration_invalid: "${name}" must be an object` };
+    }
+    for (const field of Object.keys(raw)) {
+      if (!PARAM_FIELDS.has(field)) {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}" does not take "${field}"`,
+        };
+      }
+    }
+    const declaration: ParamDeclaration = {};
+    if (raw.required !== undefined) {
+      if (typeof raw.required !== 'boolean') {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}.required" must be a boolean`,
+        };
+      }
+      declaration.required = raw.required;
+    }
+    if (raw.secret !== undefined) {
+      if (typeof raw.secret !== 'boolean') {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}.secret" must be a boolean`,
+        };
+      }
+      declaration.secret = raw.secret;
+    }
+    if (raw.description !== undefined) {
+      if (typeof raw.description !== 'string') {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}.description" must be a string`,
+        };
+      }
+      declaration.description = raw.description;
+    }
+    if (hasOwn(raw, 'default')) {
+      if (declaration.required === true) {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}" cannot be both required and have a default`,
+        };
+      }
+      if (declaration.secret === true) {
+        return {
+          ok: false,
+          error: `param_declaration_invalid: "${name}" is secret and cannot have a default`,
+        };
+      }
+      declaration.default = raw.default;
+    }
+    declarations[name] = declaration;
+  }
+
+  return { ok: true, declarations };
+}
+
+type ParamResolution =
+  | { ok: true; values: Record<string, unknown>; secrets: string[]; warnings: string[] }
+  | { ok: false; error: string };
+
+/**
+ * action="run" 의 전달값을 선언과 맞춰 실행용 값으로 만든다.
+ * 전달값 > `default` 순이고, 둘 다 없는 optional 은 스코프에 넣지 않는다
+ * (참조하면 `unresolved_reference` 로 그 step 이 실패한다).
+ */
+function resolveParams(
+  declarations: Record<string, ParamDeclaration> | undefined,
+  supplied: unknown,
+): ParamResolution {
+  if (supplied !== undefined && !isPlainObject(supplied)) {
+    return { ok: false, error: 'params must be an object' };
+  }
+  const declared = declarations ?? {};
+  const given = isPlainObject(supplied) ? supplied : undefined;
+
+  if (given) {
+    for (const name of Object.keys(given)) {
+      if (!hasOwn(declared, name)) {
+        return { ok: false, error: `unknown_param: "${name}" is not declared by this shortcut` };
+      }
+    }
+  }
+
+  const values: Record<string, unknown> = {};
+  const secrets: string[] = [];
+  const warnings: string[] = [];
+
+  for (const name of Object.keys(declared)) {
+    const declaration = declared[name];
+    let value: unknown;
+    if (given && hasOwn(given, name)) {
+      // null 도 "전달됨" 으로 본다 - 오타를 조용히 무시하면 로그인이 빈 값으로 들어간다.
+      value = given[name];
+    } else if (hasOwn(declaration, 'default')) {
+      value = declaration.default;
+    } else if (declaration.required === true) {
+      return { ok: false, error: `missing_param: "${name}" is required` };
+    } else {
+      continue;
+    }
+
+    if (declaration.secret === true) {
+      if (typeof value !== 'string') {
+        return { ok: false, error: `param_type_invalid: "${name}" is secret and must be a string` };
+      }
+      if (value.length > 0) secrets.push(value);
+      if (value.length < SHORT_SECRET_LENGTH) {
+        warnings.push(
+          `secret "${name}" is shorter than ${SHORT_SECRET_LENGTH} characters, so masking may hide unrelated text in this response`,
+        );
+      }
+    }
+    values[name] = value;
+  }
+
+  return { ok: true, values, secrets, warnings };
+}
+
+/**
+ * 응답 문자열에서 비밀값을 가린다. JSON 으로 escape 된 형태까지 함께 지운다.
+ * 길이와 무관하게 항상 가리는 것이 설계 3절 규칙이다.
+ */
+function maskSecrets(text: string, secrets: string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length === 0) continue;
+    const variants = new Set<string>([secret, JSON.stringify(secret).slice(1, -1)]);
+    for (const variant of variants) {
+      if (variant.length === 0) continue;
+      out = out.split(variant).join('***');
+    }
+  }
+  return out;
+}
+
+/**
+ * `list` 에 실을 선언 요약. `secret` 은 값이 될 만한 것을 싣지 않는다
+ * (secret 은 `default` 를 가질 수 없으므로 이름·필수 여부·설명만 남는다).
+ */
+function summarizeParams(
+  declarations: Record<string, ParamDeclaration>,
+): Record<string, unknown>[] {
+  return Object.keys(declarations).map((name) => {
+    const declaration = declarations[name];
+    const summary: Record<string, unknown> = { name, required: declaration.required === true };
+    if (declaration.secret === true) summary.secret = true;
+    else if (hasOwn(declaration, 'default')) summary.default = declaration.default;
+    if (declaration.description !== undefined) summary.description = declaration.description;
+    return summary;
+  });
 }
 
 function notFoundError(name: string, available: string[]): ToolResult {
@@ -187,9 +469,31 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       );
     }
 
-    const validation = validateSteps(args?.steps);
+    const isV2 = areTemplatesActive(args);
+
+    const validation = validateSteps(args?.steps, isV2);
     if (!validation.ok) {
       return createErrorResponse(validation.error);
+    }
+
+    const declaration = validateParamDeclarations(args?.params);
+    if (!declaration.ok) {
+      return createErrorResponse(declaration.error);
+    }
+
+    if (isV2) {
+      const flowError = validateFlow(validation.steps);
+      if (flowError) {
+        return createErrorResponse(flowError);
+      }
+      // `{{params.x}}` 를 쓰면서 선언이 없으면 저장 시점에 막는다.
+      for (const referenced of collectFlowParamNames(validation.steps)) {
+        if (!declaration.declarations || !hasOwn(declaration.declarations, referenced)) {
+          return createErrorResponse(
+            `undeclared_param: "${referenced}" is used by a step but not declared in "params"`,
+          );
+        }
+      }
     }
 
     const shortcuts = await loadShortcuts();
@@ -200,7 +504,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     if (!replaced && Object.keys(shortcuts).length >= MAX_SHORTCUTS) {
       return createErrorResponse(
-        `at most ${MAX_SHORTCUTS} shortcuts can be saved — delete one before saving a new one`,
+        `at most ${MAX_SHORTCUTS} shortcuts can be saved. Delete one before saving a new one.`,
       );
     }
 
@@ -217,6 +521,9 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       updatedAt: now,
       // auto-chrome-mcp fork: 덮어쓰기는 새 정의로 취급 — 실행 횟수는 리셋한다.
       runCount: 0,
+      // 치환 활성 여부를 레코드에 함께 기록한다 (legacy 레코드는 이 필드가 없다).
+      ...(isV2 ? { templates: true } : {}),
+      ...(declaration.declarations ? { params: declaration.declarations } : {}),
     };
 
     await saveShortcuts(shortcuts);
@@ -260,99 +567,60 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     const { continueOnError, lane, _mcpSessionId } = args || ({} as ShortcutToolParams);
     const steps = Array.isArray(stored.steps) ? stored.steps : [];
 
-    const results: ShortcutStepResult[] = [];
-    let stoppedAtStep: number | undefined;
-    let success = true;
-
-    for (let index = 0; index < steps.length; index++) {
-      const step = steps[index];
-
-      // 이미 실패해서 중단된 경우: 남은 단계는 skipped 로 보고
-      if (stoppedAtStep !== undefined) {
-        results.push({
-          index,
-          tool: typeof step?.tool === 'string' ? step.tool : '',
-          ok: false,
-          error: 'skipped (shortcut stopped at earlier failing step)',
-        });
-        continue;
-      }
-
-      const toolName = typeof step?.tool === 'string' ? step.tool.trim() : '';
-
-      const argsInvalid =
-        step?.args !== undefined &&
-        (typeof step.args !== 'object' || step.args === null || Array.isArray(step.args));
-
-      let stepResult: ShortcutStepResult;
-      if (!toolName) {
-        stepResult = { index, tool: '', ok: false, error: 'step.tool must be a non-empty string' };
-      } else if (argsInvalid) {
-        stepResult = { index, tool: toolName, ok: false, error: 'step.args must be an object' };
-      } else if (DISALLOWED_STEP_TOOLS.has(toolName)) {
-        stepResult = {
-          index,
-          tool: toolName,
-          ok: false,
-          error: `tool "${toolName}" is not allowed inside chrome_shortcut`,
-        };
-      } else {
-        // auto-chrome-mcp fork: run 호출 자체의 세션 id 를 각 단계에 주입 —
-        // 세션별 작업 탭 라우팅이 단계마다 동일하게 적용되도록.
-        const stepArgs = { ...(step?.args ?? {}) } as Record<string, any>;
-        if (typeof _mcpSessionId === 'string' && _mcpSessionId) {
-          stepArgs._mcpSessionId = _mcpSessionId;
-        }
-        // auto-chrome-mcp fork(P1): 레인도 함께 물려준다.
-        if (typeof lane === 'string' && lane && stepArgs.lane === undefined) {
-          stepArgs.lane = lane;
-        }
-
-        try {
-          const raw = await invoke({ name: toolName, args: stepArgs });
-          const ok = raw?.isError !== true;
-          const text = extractResultText(raw);
-          stepResult = { index, tool: toolName, ok };
-          if (ok) {
-            if (text !== undefined) stepResult.resultText = text;
-          } else {
-            stepResult.error = text || 'tool returned an error';
-          }
-        } catch (error) {
-          stepResult = {
-            index,
-            tool: toolName,
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
-        }
-      }
-
-      results.push(stepResult);
-
-      if (!stepResult.ok) {
-        success = false;
-        if (!continueOnError) {
-          stoppedAtStep = index;
-        }
+    // legacy 레코드(templates 필드 없음)는 절대 치환하지 않는다.
+    const templatesEnabled = stored.templates === true;
+    const returnNames = args?.return;
+    if (templatesEnabled) {
+      const flowError = validateFlow(steps, returnNames);
+      if (flowError) {
+        return createErrorResponse(flowError);
       }
     }
 
-    // 실행 횟수 반영 — 재조회 없이 이미 들고 있는 맵에 반영 후 그대로 저장.
+    const resolvedParams = resolveParams(stored.params, args?.params);
+    if (!resolvedParams.ok) {
+      return createErrorResponse(resolvedParams.error);
+    }
+
+    const outcome = await runSteps({
+      steps,
+      invoke,
+      continueOnError,
+      lane,
+      mcpSessionId: _mcpSessionId,
+      disallowedTools: DISALLOWED_STEP_TOOLS,
+      containerLabel: 'chrome_shortcut',
+      skippedNote: 'skipped (shortcut stopped at earlier failing step)',
+      collectImages: false,
+      templatesEnabled,
+      returnNames: templatesEnabled && Array.isArray(returnNames) ? returnNames : undefined,
+      params: templatesEnabled ? resolvedParams.values : undefined,
+    });
+
+    // 실행 횟수만 반영한다 - 전달된 params 값은 저장소에 쓰지 않는다.
     stored.runCount = (stored.runCount || 0) + 1;
     shortcuts[name] = stored;
     await saveShortcuts(shortcuts);
+
+    const body = JSON.stringify({
+      success: outcome.success,
+      name,
+      steps: outcome.results,
+      ...(outcome.stoppedAtStep !== undefined ? { stoppedAtStep: outcome.stoppedAtStep } : {}),
+      ...(outcome.stoppedBy !== undefined ? { stoppedBy: outcome.stoppedBy } : {}),
+      ...(outcome.returned !== undefined ? { results: outcome.returned } : {}),
+      ...(outcome.resultsTruncated !== undefined
+        ? { resultsTruncated: outcome.resultsTruncated }
+        : {}),
+      ...(resolvedParams.warnings.length > 0 ? { warnings: resolvedParams.warnings } : {}),
+    });
 
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({
-            success,
-            name,
-            steps: results,
-            ...(stoppedAtStep !== undefined ? { stoppedAtStep } : {}),
-          }),
+          // 비밀값은 응답 어디에도 원문으로 남지 않는다 (길이와 무관하게 항상 가린다).
+          text: maskSecrets(body, resolvedParams.secrets),
         },
       ],
       // 단계별 실패는 본문 JSON 으로 보고한다 (chrome_shortcut 자체가 잘못된 경우만 isError:true).
@@ -363,14 +631,16 @@ class ShortcutTool extends BaseBrowserToolExecutor {
   private async handleList(): Promise<ToolResult> {
     const shortcuts = await loadShortcuts();
 
-    // 전체 step args 는 절대 덤프하지 않는다 — 목록은 가볍게 유지.
+    // 전체 step args 는 절대 덤프하지 않는다 - 목록은 가볍게 유지.
     const list = Object.entries(shortcuts).map(([name, s]) => ({
       name,
       description: s.description,
       stepCount: Array.isArray(s.steps) ? s.steps.length : 0,
-      tools: Array.from(new Set((s.steps || []).map((step) => step.tool))),
+      // 반복 묶음 항목에는 tool 이 없다 - 묶음은 "repeat" 로, 안쪽 도구도 함께 싣는다.
+      tools: Array.from(new Set(collectStepToolNames(s.steps))),
       createdAt: s.createdAt,
       runCount: s.runCount || 0,
+      ...(isPlainObject(s.params) ? { params: summarizeParams(s.params) } : {}),
     }));
 
     return {

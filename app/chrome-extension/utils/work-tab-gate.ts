@@ -30,6 +30,23 @@ const B = TOOL_NAMES.BROWSER;
 const RR = TOOL_NAMES.RECORD_REPLAY;
 
 /**
+ * 게이트가 인자를 읽는 유일한 통로 (2026-09-04 Codex 최종 검토 항목 1-c).
+ *
+ * 게이트 판정은 `tabId`·`windowId`·`tabIds`·`url`·`lane`·`_mcpSessionId`·`background` 를
+ * 읽는다. 이 값들을 `args.tabId` 로 읽으면 **prototype 으로 상속된 값**도 읽힌다 —
+ * `{"__proto__": {...}}` 로 만들어진 인자가 게이트를 통과하는 경로였다. own 속성만 본다.
+ */
+function ownArg(args: any, key: string): unknown {
+  if (args === null || typeof args !== 'object') return undefined;
+  return Object.hasOwn(args, key) ? args[key] : undefined;
+}
+
+/** sessionKeyOf 에 넘길 실행 컨텍스트 — own 속성만 추린 사본. */
+function ownSessionArgs(args: any): { _mcpSessionId?: unknown; lane?: unknown } {
+  return { _mcpSessionId: ownArg(args, '_mcpSessionId'), lane: ownArg(args, 'lane') };
+}
+
+/**
  * 백그라운드 작업 모드에서는 **아예 실행하지 않는** 도구.
  *
  * record_replay_flow_run (2026-09-04 Codex 3차 검토, 항목 3):
@@ -171,13 +188,17 @@ const NO_TAB_NEEDED: Record<string, (args: any) => boolean> = {
   // 쿠키 조작은 범위(url 또는 domain)만 있으면 대상 탭을 찾지 않는다.
   [B.STORAGE]: (args) => {
     // kind 가 'local'·'session' 이면 웹 스토리지 경로라 반드시 탭에서 실행해야 한다.
-    if (args?.kind === 'local' || args?.kind === 'session') return false;
+    const kind = ownArg(args, 'kind');
+    if (kind === 'local' || kind === 'session') return false;
     // url 을 직접 준 호출은 storage.ts resolveUrl 이 그대로 쓰고 조기 반환한다.
-    if (typeof args?.url === 'string' && args.url.trim().length > 0) return true;
+    const storageUrl = ownArg(args, 'url');
+    if (typeof storageUrl === 'string' && storageUrl.trim().length > 0) return true;
     // domain 은 get·clear 에서만 범위로 썼다(handleCookies 가 query.domain 으로 바로 조회한다).
     // set·remove 는 chrome.cookies 가 url 을 요구하므로 여전히 대상 탭을 찾으러 간다.
-    const action = typeof args?.action === 'string' ? args.action : 'get';
-    const hasDomain = typeof args?.domain === 'string' && args.domain.trim().length > 0;
+    const rawAction = ownArg(args, 'action');
+    const action = typeof rawAction === 'string' ? rawAction : 'get';
+    const domain = ownArg(args, 'domain');
+    const hasDomain = typeof domain === 'string' && domain.trim().length > 0;
     return hasDomain && (action === 'get' || action === 'clear');
   },
 };
@@ -237,7 +258,8 @@ const URL_OVERRIDES_WINDOW_TOOLS: ReadonlySet<string> = new Set<string>([
 
 /** url 인자가 "대상 탭을 고르는 값" 으로 실제로 쓰이는가 (빈 문자열은 분기를 타지 않는다). */
 function hasUrlArg(args: any): boolean {
-  return typeof args?.url === 'string' && args.url.trim().length > 0;
+  const url = ownArg(args, 'url');
+  return typeof url === 'string' && url.trim().length > 0;
 }
 
 /**
@@ -292,7 +314,7 @@ function urlSelectsTarget(name: string, args: any): boolean {
  * url 분기가 있는 도구는 url 이 함께 오면 창 지정 자체가 무시되므로 예외에서 제외한다.
  */
 function windowIdSelectsTarget(name: string, args: any): boolean {
-  if (!isExplicitWindowId(args?.windowId)) return false;
+  if (!isExplicitWindowId(ownArg(args, 'windowId'))) return false;
   if (!WINDOW_ID_AWARE_TOOLS.has(name)) return false;
   if (URL_OVERRIDES_WINDOW_TOOLS.has(name) && hasUrlArg(args)) return false;
   return true;
@@ -301,7 +323,8 @@ function windowIdSelectsTarget(name: string, args: any): boolean {
 /** tabId 를 줬는데 그 값이 탭 id 가 될 수 없는 경우 (undefined 는 "안 준 것" 으로 본다). */
 export function hasInvalidTabId(args: any): boolean {
   if (args === null || typeof args !== 'object') return false;
-  if (!('tabId' in args)) return false;
+  // 상속된 tabId 는 '준 것' 으로 보지 않는다 — own 이 아니면 아래 판정에서도 무시된다.
+  if (!Object.hasOwn(args, 'tabId')) return false;
   if (args.tabId === undefined) return false;
   return !isExplicitTabId(args.tabId);
 }
@@ -358,7 +381,7 @@ export function requiresWorkTab(name: string, args: any): boolean {
   if (GATE_EXEMPT_TOOLS.has(name)) return false;
   if (!TAB_ID_INJECT_TOOLS.has(name)) return false;
   // 양의 정수만 "명시됨" 이다. 그 밖의 값은 게이트 우회 수단이었다.
-  if (isExplicitTabId(args?.tabId)) return false;
+  if (isExplicitTabId(ownArg(args, 'tabId'))) return false;
   // url 이 곧 대상 지정인 호출은 작업 탭을 요구하지 않는다. 도구가 세션 소유 탭에서
   // URL 일치 탭을 찾고, 없으면 새 탭을 만든다(사용자 탭은 후보가 아니다).
   if (urlSelectsTarget(name, args)) return false;
@@ -424,7 +447,7 @@ export async function applyBackgroundModeGate(
     };
   }
 
-  const explicitTab = isExplicitTabId(args?.tabId);
+  const explicitTab = isExplicitTabId(ownArg(args, 'tabId'));
   // windowId 는 그 도구가 실제로 대상 해석에 쓸 때만 "대상 지정" 으로 인정한다.
   const windowSelectsTarget = windowIdSelectsTarget(name, args);
   // url 이 곧 대상 지정인 호출은 tabId 를 주입하면 안 된다 — 도구가 tabId 를 먼저 보므로
@@ -435,7 +458,7 @@ export async function applyBackgroundModeGate(
   //   handleCallTool 의 팝업 감지(opener 후보)가 쓰므로 남긴다 — 단, 호출자가 대상
   //   탭을 직접 지정했으면 그 탭이 이미 첫 후보라 조회를 생략해도 잃는 것이 없다.
   if (!(await isBackgroundModeEnabled())) {
-    const workTabId = explicitTab ? null : await getWorkTabId(sessionKeyOf(args));
+    const workTabId = explicitTab ? null : await getWorkTabId(sessionKeyOf(ownSessionArgs(args)));
     return {
       args,
       workTabId,
@@ -457,6 +480,7 @@ export async function applyBackgroundModeGate(
     };
   }
 
+  // spread 는 own 열거 속성만 복사하므로 상속으로 실려 온 대상 지정 키는 여기서 사라진다.
   const patched = { ...(args ?? {}) };
   if (patched.background === undefined) {
     patched.background = true;
@@ -473,7 +497,7 @@ export async function applyBackgroundModeGate(
     };
   }
 
-  const workTabId = await getWorkTabId(sessionKeyOf(args));
+  const workTabId = await getWorkTabId(sessionKeyOf(ownSessionArgs(args)));
 
   // windowId 로 대상을 고르는 도구는 주입도 거절도 하지 않는다 — 사용자가 창을 골랐고,
   // 도구 구현이 그 창의 활성 탭을 쓴다. 작업 탭을 끼워 넣으면 그 지정이 무시된다.

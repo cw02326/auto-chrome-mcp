@@ -9,6 +9,7 @@ import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 import { diffCheck } from '@/utils/content-cache';
 // auto-chrome-mcp fork: iframe 안의 interactive elements 까지 수집하기 위한 프레임 열거 유틸
 import { FRAME_COLLECT_MAX_FRAMES, listChildFrames } from './frame-resolver';
+import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
 
 interface WebFetcherToolParams {
   htmlContent?: boolean; // get the visible HTML content of the current page. default: false
@@ -49,7 +50,8 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     console.log(`Starting web fetcher with options:`, {
       htmlContent,
       textContent,
-      url,
+      // 2026-09-05 Codex 재확인 1: 여기서 URL 원문(쿼리 토큰 포함)이 그대로 찍혔다.
+      url: redactUrlForLog(url),
       selector,
       mode,
       diff: useDiff,
@@ -67,11 +69,11 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         const existing = await findTabByUrlInSessionScope(url, args);
         if (existing) {
           tab = existing;
-          console.log(`Found session tab with URL: ${url}, tab ID: ${tab.id}`);
+          console.log(`Found session tab with URL: ${redactUrlForLog(url)}, tab ID: ${tab.id}`);
         } else {
           // Create new tab with the URL (지정한 창에 만든다 — 예전엔 windowId 를 안 넘겨
           // 사용자가 보고 있는 창에 탭이 붙었다).
-          console.log(`No session tab found with URL: ${url}, creating new tab`);
+          console.log(`No session tab found with URL: ${redactUrlForLog(url)}, creating new tab`);
           tab = await createTabForUrl(url, {
             background,
             windowId,
@@ -359,7 +361,7 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
     const { textQuery, selector, includeCoordinates = true, types } = args;
     const allFrames = args.allFrames === true;
 
-    console.log(`Starting get interactive elements with options:`, args);
+    console.log(`Starting get interactive elements with options:`, redactedArgsForLog(args));
 
     try {
       // auto-chrome-mcp fork(2026-09-04): 주입된 tabId 를 최우선으로 소비한다.

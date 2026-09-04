@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
+import { redactedArgsForLog } from '@/utils/log-redact';
 
 interface KeyboardToolParams {
   keys: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
@@ -26,7 +27,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
   async execute(args: KeyboardToolParams): Promise<ToolResult> {
     const { keys, selector, selectorType = 'css', delay = TIMEOUTS.KEYBOARD_DELAY } = args;
 
-    console.log(`Starting keyboard operation with options:`, args);
+    console.log(`Starting keyboard operation with options:`, redactedArgsForLog(args));
 
     if (!keys) {
       return createErrorResponse(

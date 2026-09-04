@@ -15,6 +15,8 @@ import { screenshotContextManager } from '@/utils/screenshot-context';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { activateTab } from '@/utils/activation-guard';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
+import { waitForFramePaint, waitForHelperReady } from '@/utils/adaptive-wait';
+import { redactedArgsForLog } from '@/utils/log-redact';
 
 /**
  * auto-chrome-mcp fork v1.9.0: 전용 작업 창(기본 배치 minimized) 안의 비활성 탭은 캡처할 수
@@ -25,12 +27,22 @@ async function ensureActiveInWorkWindow(tab: chrome.tabs.Tab): Promise<void> {
     if (tab.active === true || typeof tab.id !== 'number') return;
     if (!(await isMcpWindow(tab.windowId))) return;
     await activateTab(tab.id, { reason: 'screenshot:work-window' });
-    // 활성화 직후 첫 프레임이 나오기까지 잠깐 여유를 준다.
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // 활성화 직후 첫 프레임이 나올 때까지 기다린다.
+    // auto-chrome-mcp fork: rAF 두 번은 "한 번 그렸다"만 보장하므로 예전 고정 대기(150ms)를
+    // 하한으로 남기고, rAF 를 확인할 수 없는 탭(최소화된 창 등)에서는 300ms 까지만 기다린다.
+    await waitForFramePaint(tab.id, {
+      minWaitMs: WORK_WINDOW_ACTIVATION_PAINT_MIN_MS,
+      maxWaitMs: WORK_WINDOW_ACTIVATION_PAINT_MAX_MS,
+    });
   } catch {
     // 실패해도 아래 캡처 경로가 자기 에러를 낸다.
   }
 }
+
+/** auto-chrome-mcp fork: 작업 창 탭 활성화 후 최소 대기(예전 고정 대기와 같은 값) */
+const WORK_WINDOW_ACTIVATION_PAINT_MIN_MS = 150;
+/** auto-chrome-mcp fork: 페인트를 확인할 수 없을 때의 상한 */
+const WORK_WINDOW_ACTIVATION_PAINT_MAX_MS = 300;
 
 // Screenshot-specific constants
 const SCREENSHOT_CONSTANTS = {
@@ -348,6 +360,23 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.SCREENSHOT;
 
   /**
+   * auto-chrome-mcp fork: 주입한 screenshot-helper 가 메시지를 받을 준비가 됐는지 확인한다.
+   * pong 이 오면 즉시, 응답이 없으면 예전 고정 대기와 같은 상한까지만 기다린다.
+   */
+  private async waitForScreenshotHelperReady(tabId: number): Promise<void> {
+    await waitForHelperReady({
+      timeoutMs: SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY,
+      ping: () =>
+        this.sendMessageToTab(
+          tabId,
+          { action: `${this.name}_ping` },
+          undefined,
+          SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY,
+        ),
+    });
+  }
+
+  /**
    * Execute screenshot operation
    */
   async execute(args: ScreenshotToolParams): Promise<ToolResult> {
@@ -363,7 +392,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       includeBase64InText = false,
     } = args;
 
-    console.log(`Starting screenshot with options:`, args);
+    console.log(`Starting screenshot with options:`, redactedArgsForLog(args));
 
     // Resolve target tab (explicit or active)
     const explicit = await this.tryGetTab(args.tabId);
@@ -430,7 +459,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       if (!finalImageDataUrl) {
         // Always inject helper when we need pageDetails
         await this.injectContentScript(tab.id!, ['inject-scripts/screenshot-helper.js']);
-        await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
+        // auto-chrome-mcp fork: 예전에는 헬퍼가 준비됐는지와 무관하게 100ms 를 쉬었다.
+        // 이제는 ping 에 pong 이 오면 즉시 진행하고, 응답이 없을 때만 상한까지 기다린다.
+        await this.waitForScreenshotHelperReady(tab.id!);
 
         // Prepare page (hide scrollbars, handle fixed elements)
         const prepareResp = await this.sendMessageToTab(tab.id!, {
@@ -750,6 +781,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     };
 
     // Small delay to ensure element is fully rendered after scrollIntoView
+    // auto-chrome-mcp fork: 여기는 "헬퍼 준비"가 아니라 **스크롤 후 실제 페인트**를 기다리는
+    // 자리라 조건화하지 않았다. 헬퍼에 새 신호(rAF 응답) 메시지를 추가해야 하는데, 잘못 앞당기면
+    // 스크롤 중간 프레임이 찍혀 스크린샷 품질이 조용히 나빠진다. 상한이 100ms 로 짧아 이득도 작다.
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
     // === Primary: CDP clip capture ===

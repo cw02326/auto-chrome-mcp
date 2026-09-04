@@ -6,6 +6,9 @@ import {
   withRenderKeepAlive,
 } from '@/utils/render-keepalive';
 import { BaseBrowserToolExecutor } from '../base-browser';
+import { waitForContentSettle, type ContentSample } from '@/utils/adaptive-wait';
+// auto-chrome-mcp fork: 지연 로딩이 끝났는지 보려면 "요청이 진행 중인가"도 알아야 한다.
+import { NetworkIdleWatcher } from './wait-for';
 
 /**
  * auto-chrome-mcp fork: chrome_scroll_collect — 무한 스크롤/지연 로딩 페이지의 내용을
@@ -45,6 +48,8 @@ interface PassResult {
   error?: string;
   scrollHeight: number;
   scrollTop: number;
+  /** auto-chrome-mcp fork: 스크롤 직후 "더 붙었는지" 판정용 기준값 (요소 수) */
+  nodeCount?: number;
   text?: string;
   links?: CollectedLink[];
 }
@@ -115,10 +120,12 @@ function collectAndScroll(containerSelector: string | null, collect: CollectMode
     doc ? doc.scrollHeight : 0,
     document.body ? document.body.scrollHeight : 0,
   );
+  const scopeForCount: Element | null = container ? container : document.body;
   const result: PassResult = {
     ok: true,
     scrollHeight: container ? container.scrollHeight : pageHeight,
     scrollTop: container ? container.scrollTop : window.scrollY,
+    nodeCount: scopeForCount ? scopeForCount.getElementsByTagName('*').length : 0,
   };
 
   if (collect === 'links') {
@@ -155,6 +162,52 @@ function collectAndScroll(containerSelector: string | null, collect: CollectMode
   }
 
   return result;
+}
+
+/**
+ * 페이지 컨텍스트에서 실행: 지금의 문서 크기만 읽는다(부수효과 없음).
+ * 스크롤 후 지연 로딩이 끝났는지 보기 위한 값이라 계산이 가벼워야 한다.
+ * 주의: 외부 스코프를 참조하면 안 된다 (executeScript 가 직렬화해 주입하므로).
+ */
+function measureContent(
+  containerSelector: string | null,
+  networkQuietMs: number,
+): { height: number; nodes: number; networkQuiet?: boolean } {
+  let container: Element | null = null;
+  if (containerSelector) {
+    try {
+      container = document.querySelector(containerSelector);
+    } catch {
+      container = null;
+    }
+  }
+  const doc = document.documentElement;
+  const pageHeight = Math.max(
+    doc ? doc.scrollHeight : 0,
+    document.body ? document.body.scrollHeight : 0,
+  );
+  const scope: Element | null = container ? container : document.body;
+
+  // 페이지가 볼 수 있는 유일한 네트워크 신호: 마지막으로 끝난 리소스가 얼마나 오래됐는가.
+  // (진행 중인 요청은 여기 안 보이므로 확장 쪽 webRequest 카운트가 있으면 그쪽이 우선이다.)
+  let networkQuiet: boolean | undefined;
+  try {
+    const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+    let latest = 0;
+    for (let i = entries.length - 1; i >= 0 && i > entries.length - 50; i--) {
+      const end = entries[i].responseEnd || entries[i].startTime || 0;
+      if (end > latest) latest = end;
+    }
+    networkQuiet = entries.length === 0 || performance.now() - latest >= networkQuietMs;
+  } catch {
+    networkQuiet = undefined;
+  }
+
+  return {
+    height: container ? (container as HTMLElement).scrollHeight : pageHeight,
+    nodes: scope ? scope.getElementsByTagName('*').length : 0,
+    networkQuiet,
+  };
 }
 
 /** 두 문자열이 앞에서부터 몇 글자까지 같은가. */
@@ -322,9 +375,8 @@ export function appendWithOverlap(accumulated: string, snapshot: string): string
   return `${accumulated}\n---\n${snapshot}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/** auto-chrome-mcp fork: 이만큼 새 요청이 없어야 "네트워크가 조용하다"고 본다 */
+const SCROLL_NETWORK_QUIET_MS = 200;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -335,6 +387,36 @@ function clamp(value: number, min: number, max: number): number {
  */
 class ScrollCollectTool extends BaseBrowserToolExecutor {
   name = 'chrome_scroll_collect';
+
+  /**
+   * auto-chrome-mcp fork: 스크롤 직후 새 콘텐츠가 붙고 멈출 때까지만 기다린다.
+   * 관측이 불가능하면(주입 실패 등) 상한(delayMs)까지 기다리므로 예전 동작과 같다.
+   */
+  private async waitForLazyContent(
+    tabId: number,
+    containerSelector: string | null,
+    baseline: ContentSample,
+    maxWaitMs: number,
+    watcher: NetworkIdleWatcher | null,
+  ): Promise<void> {
+    await waitForContentSettle({
+      baseline,
+      maxWaitMs,
+      probe: async () => {
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: measureContent,
+          args: [containerSelector, SCROLL_NETWORK_QUIET_MS],
+        });
+        const value = injection?.result as ContentSample | undefined;
+        if (!value) return null;
+        // webRequest 로 진행 중인 요청을 직접 세는 쪽이 정확하다 — 있으면 그 값을 쓴다.
+        return watcher
+          ? { ...value, networkQuiet: watcher.isIdle(SCROLL_NETWORK_QUIET_MS) }
+          : value;
+      },
+    });
+  }
 
   async execute(args: ScrollCollectParams): Promise<ToolResult> {
     const params = args || ({} as ScrollCollectParams);
@@ -396,6 +478,19 @@ class ScrollCollectTool extends BaseBrowserToolExecutor {
 
     // 핸들은 fn 이 끝난 뒤에 읽는다 — 프레임 펌프가 도중에 죽으면 assist 가 내려간다.
     let keepAlive: RenderKeepAlive | null = null;
+
+    // auto-chrome-mcp fork: 진행 중인 요청 수를 세어 "아직 불러오는 중"을 안정으로 오인하지 않는다.
+    // webRequest 를 쓸 수 없는 환경에서는 페이지의 performance 신호로 폴백한다.
+    let networkWatcher: NetworkIdleWatcher | null = null;
+    try {
+      if (typeof chrome.webRequest !== 'undefined') {
+        networkWatcher = new NetworkIdleWatcher(tabId);
+        networkWatcher.start();
+      }
+    } catch (error) {
+      console.warn('chrome_scroll_collect: network watcher unavailable', error);
+      networkWatcher = null;
+    }
 
     try {
       await withRenderKeepAlive(tabId, renderMode, async (handle) => {
@@ -492,7 +587,16 @@ class ScrollCollectTool extends BaseBrowserToolExecutor {
 
           if (pass < maxScrolls - 1) {
             // 지연은 페이지가 아니라 백그라운드에서 기다린다 (페이지 스크립트를 블로킹하지 않도록).
-            await sleep(delayMs);
+            // auto-chrome-mcp fork: 예전에는 무조건 delayMs 를 기다렸다. 이제는 문서가 자란 뒤
+            // 수치가 연속 3회 같고 진행 중인 요청도 없을 때만 다음 패스로 넘어가고, 그 밖에는
+            // 예전처럼 delayMs 까지 기다린다(지연 로딩을 놓치지 않기 위해).
+            await this.waitForLazyContent(
+              tabId,
+              containerSelector,
+              { height: result.scrollHeight, nodes: result.nodeCount ?? 0 },
+              delayMs,
+              networkWatcher,
+            );
           }
         }
       });
@@ -500,6 +604,8 @@ class ScrollCollectTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         `chrome_scroll_collect failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      networkWatcher?.stop();
     }
 
     if (outcome.failure) {

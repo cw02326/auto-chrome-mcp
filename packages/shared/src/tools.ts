@@ -3,6 +3,8 @@ import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 export const TOOL_NAMES = {
   BROWSER: {
     GET_WINDOWS_AND_TABS: 'get_windows_and_tabs',
+    // Hidden from TOOL_SCHEMAS (schema-size reduction, v1.10.1) — still dispatch-registered
+    // and fully implemented (vector-search.ts). See docs/TOOLS.md "Hidden Tools".
     SEARCH_TABS_CONTENT: 'search_tabs_content',
     NAVIGATE: 'chrome_navigate',
     SCREENSHOT: 'chrome_screenshot',
@@ -12,6 +14,9 @@ export const TOOL_NAMES = {
     CLICK: 'chrome_click_element',
     FILL: 'chrome_fill_or_select',
     REQUEST_ELEMENT_SELECTION: 'chrome_request_element_selection',
+    // Deprecated, hidden from TOOL_SCHEMAS — chrome_read_page replaces it as the primary
+    // discovery tool (and falls back to this logic internally when needed). Kept only for
+    // backward compatibility. See docs/TOOLS.md "Hidden Tools".
     GET_INTERACTIVE_ELEMENTS: 'chrome_get_interactive_elements',
     NETWORK_CAPTURE: 'chrome_network_capture',
     // Legacy tool names (kept for internal use, not exposed in TOOL_SCHEMAS)
@@ -25,6 +30,9 @@ export const TOOL_NAMES = {
     BOOKMARK_SEARCH: 'chrome_bookmark_search',
     BOOKMARK_ADD: 'chrome_bookmark_add',
     BOOKMARK_DELETE: 'chrome_bookmark_delete',
+    // Hidden from TOOL_SCHEMAS (schema-size reduction, v1.10.1) — still dispatch-registered
+    // and fully implemented (inject-script.ts); also used internally by the record-replay
+    // engine. See docs/TOOLS.md "Hidden Tools".
     INJECT_SCRIPT: 'chrome_inject_script',
     SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
     JAVASCRIPT: 'chrome_javascript',
@@ -35,6 +43,8 @@ export const TOOL_NAMES = {
     HANDLE_DIALOG: 'chrome_handle_dialog',
     HANDLE_DOWNLOAD: 'chrome_handle_download',
     REQUEST_USER_CONSENT: 'chrome_request_user_consent',
+    // Hidden from TOOL_SCHEMAS (schema-size reduction, v1.10.1) — still dispatch-registered
+    // and fully implemented (userscript.ts). See docs/TOOLS.md "Hidden Tools".
     USERSCRIPT: 'chrome_userscript',
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
@@ -77,6 +87,23 @@ const P_WAIT_FOR_ELEMENT_MS =
   'Ms to wait for the element to appear/become visible before failing (default 2000; 0 = fail now).';
 const P_BACKGROUND = 'Do not activate the tab or focus the window (default false).';
 
+/**
+ * chrome_batch / chrome_shortcut 값 전달 (설계 docs/plans/2026-09-04-batch-flow-design.md).
+ * 설명이 길어지면 모든 호출의 토큰이 늘어나므로 예시는 한 줄씩만 둔다.
+ */
+const P_STEP_AS = 'Name this step result so later steps can read it.';
+const P_TEMPLATES =
+  'Enable {{name.path}} substitution in step args, e.g. ref: "{{hit.matches[0].ref}}". Auto on when any step has "as".';
+const P_RETURN = 'Names to include in the response "results" object.';
+const P_WHEN =
+  'Run only if this condition holds, e.g. { path: "hit.matches", op: "notEmpty" }. Otherwise the step is skipped.';
+const P_STOP_IF = 'Stop the whole run after this step when the condition holds.';
+const P_REPEAT =
+  'Repeat group: { max: 1-20, until?: condition, delayMs?: 0-5000 } together with a "steps" array.';
+const P_GROUP_STEPS = 'Steps of a repeat group (no repeat inside a repeat).';
+const P_PARAMS =
+  'save: declare { user: { required: true }, pw: { secret: true } }. run: values for {{params.user}}.';
+
 const tabIdProp = { type: 'number' as const, description: P_TAB_ID };
 const windowIdProp = { type: 'number' as const, description: P_WINDOW_ID };
 const frameIdProp = { type: 'number' as const, description: P_FRAME_ID };
@@ -98,19 +125,30 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         steps: {
           type: 'array',
-          description: 'Steps in order (max 20). Each: { tool: string, args?: object }',
+          description:
+            'Steps in order (max 20). Each: { tool: string, args?: object }, or a repeat group { repeat: {...}, steps: [...] }',
           items: {
             type: 'object',
             properties: {
               tool: { type: 'string', description: 'Tool name, e.g. chrome_click_element' },
               args: { type: 'object', description: 'Arguments for the tool' },
+              as: { type: 'string', description: P_STEP_AS },
+              when: { type: 'object', description: P_WHEN },
+              stopIf: { type: 'object', description: P_STOP_IF },
+              repeat: { type: 'object', description: P_REPEAT },
+              steps: { type: 'array', description: P_GROUP_STEPS },
             },
-            required: ['tool'],
           },
         },
         continueOnError: {
           type: 'boolean',
           description: 'Keep running after a step fails (default false)',
+        },
+        templates: { type: 'boolean', description: P_TEMPLATES },
+        return: {
+          type: 'array',
+          items: { type: 'string' },
+          description: P_RETURN,
         },
       },
       required: ['steps'],
@@ -153,14 +191,18 @@ export const TOOL_SCHEMAS: Tool[] = [
         steps: {
           type: 'array',
           description:
-            'action="save": chrome_batch steps, max 20. Each: { tool: string, args?: object }',
+            'action="save": chrome_batch steps, max 20. Each: { tool: string, args?: object }, or a repeat group',
           items: {
             type: 'object',
             properties: {
               tool: { type: 'string' },
               args: { type: 'object' },
+              as: { type: 'string', description: P_STEP_AS },
+              when: { type: 'object', description: P_WHEN },
+              stopIf: { type: 'object', description: P_STOP_IF },
+              repeat: { type: 'object', description: P_REPEAT },
+              steps: { type: 'array', description: P_GROUP_STEPS },
             },
-            required: ['tool'],
           },
         },
         description: { type: 'string', description: 'action="save": what this shortcut does' },
@@ -168,6 +210,13 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description: 'action="run": keep running after a failure (default false)',
         },
+        templates: { type: 'boolean', description: P_TEMPLATES },
+        return: {
+          type: 'array',
+          items: { type: 'string' },
+          description: P_RETURN,
+        },
+        params: { type: 'object', description: P_PARAMS },
       },
       required: ['action'],
     },

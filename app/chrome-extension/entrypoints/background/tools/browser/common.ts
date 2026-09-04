@@ -35,6 +35,7 @@ import {
 } from '@/utils/mcp-window-manager';
 // auto-chrome-mcp fork(A2): navigate 후 로딩 완료 대기
 import { waitForPageLoad, watchNavigationStart, type NavigateWaitUntil } from './wait-for';
+import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -318,9 +319,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
     // lane 을 준 호출은 같은 stdio 세션 안에서도 자기만의 작업 탭을 갖는다 (병렬 에이전트 격리).
     const mcpSessionId = sessionKeyOf(args);
 
+    // 2026-09-05 Codex 재확인 1: URL 원문과 raw args 를 그대로 찍고 있었다.
     console.log(
-      `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
-      args,
+      `Attempting to ${
+        refresh ? 'refresh current tab' : `open URL: ${redactUrlForLog(url)}`
+      } with options:`,
+      redactedArgsForLog(args),
     );
 
     try {
@@ -412,7 +416,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       // 1. Check if URL is already open
       // Prefer Chrome's URL match patterns for robust matching (host/path variations)
-      console.log(`Checking if URL is already open: ${url}`);
+      console.log(`Checking if URL is already open: ${redactUrlForLog(url)}`);
 
       // Build robust match patterns from the provided URL.
       // This mirrors the approach in CloseTabsTool: ensure wildcard path and
@@ -452,7 +456,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       const urlPatterns = buildUrlPatterns(url);
       let candidateTabs = await chrome.tabs.query({ url: urlPatterns });
-      console.log(`Found ${candidateTabs.length} matching tabs with patterns:`, urlPatterns);
+      console.log(
+        `Found ${candidateTabs.length} matching tabs with patterns:`,
+        urlPatterns.map(redactUrlForLog),
+      );
 
       // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 사용자가 열어둔 탭을 재사용하지 않는다
       // — 사용자가 보던 동일 URL 탭을 MCP 가 잡아 조작하는 간섭 방지. 이 세션의 기존 작업 탭과
@@ -672,7 +679,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             await this.triggerAutoCapture(ownedTabId, url);
             await this.rememberWorkTab(ownedTabId, mcpSessionId, true);
 
-            console.log(`Reused MCP work tab ${ownedTabId} for ${url}`);
+            console.log(`Reused MCP work tab ${ownedTabId} for ${redactUrlForLog(url)}`);
             return {
               content: [
                 {
@@ -905,12 +912,12 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
   async execute(args: CloseTabsToolParams): Promise<ToolResult> {
     const { tabIds, url } = args;
     let urlPattern = url;
-    console.log(`Attempting to close tabs with options:`, args);
+    console.log(`Attempting to close tabs with options:`, redactedArgsForLog(args));
 
     try {
       // If URL is provided, close all tabs matching that URL
       if (urlPattern) {
-        console.log(`Searching for tabs with URL: ${url}`);
+        console.log(`Searching for tabs with URL: ${redactUrlForLog(url)}`);
         try {
           // Build a proper Chrome match pattern from a concrete URL.
           // If caller already provided a match pattern with '*', use as-is.
@@ -939,7 +946,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
         const tabs = await chrome.tabs.query({ url: urlPattern });
 
         if (!tabs || tabs.length === 0) {
-          console.log(`No tabs found with URL pattern: ${urlPattern}`);
+          console.log(`No tabs found with URL pattern: ${redactUrlForLog(urlPattern)}`);
           return {
             content: [
               {
@@ -955,7 +962,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
-        console.log(`Found ${tabs.length} tabs with URL pattern: ${urlPattern}`);
+        console.log(`Found ${tabs.length} tabs with URL pattern: ${redactUrlForLog(urlPattern)}`);
         const tabIdsToClose = tabs
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);

@@ -53,6 +53,8 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_TIMEOUT_MS = 60000;
 const DEFAULT_POLL_MS = 250;
 const MIN_POLL_MS = 100;
+/** auto-chrome-mcp fork: DOM 변화로 깨어난 뒤 다시 확인하기까지의 최소 간격(과열 방지) */
+const CHANGE_WAKE_MIN_MS = 50;
 const MAX_NETWORK_IDLE_MS = 30000;
 
 /**
@@ -104,6 +106,88 @@ function probePageState(selector: string | null, text: string | null): PageProbe
   }
 
   return probe;
+}
+
+/**
+ * auto-chrome-mcp fork: 폴링 간격을 그대로 기다리지 않고 **DOM 변화로 깨어나기** 위한 in-page 대기.
+ *
+ * 페이지 컨텍스트에서 MutationObserver / readystatechange / load 를 걸어 두고, 변화가 생기면
+ * 즉시(최소 간격 minMs 뒤) 반환한다. 변화가 없으면 sliceMs 까지만 기다린다 — 그래서 최악의
+ * 경우에도 예전 폴링과 같은 간격으로 다시 확인한다(폴링이 폴백).
+ *
+ * 관찰자는 **문서당 하나**다. 백그라운드 탭에서는 페이지 타이머가 스로틀돼 sliceTimer 가 제때
+ * 돌지 않는데, 그동안 확장은 자기 상한으로 먼저 돌아와 다음 루프에서 또 설치한다. 그래서 새로
+ * 걸기 전에 window 에 남아 있는 이전 것을 반드시 끊는다(안 끊으면 루프마다 쌓인다).
+ * 주의: 외부 스코프를 참조하면 안 된다 (executeScript 가 직렬화해 주입하므로).
+ */
+export function waitForDomChange(sliceMs: number, minMs: number, key: string): Promise<string> {
+  const slot = window as unknown as { __acmWaitForWake?: { key: string; cancel: () => void } };
+  try {
+    const previous = slot.__acmWaitForWake;
+    if (previous && typeof previous.cancel === 'function') previous.cancel();
+  } catch {
+    /* 이전 것이 이미 죽었을 수 있다 */
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let observer: MutationObserver | null = null;
+    let floorTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (observer) observer.disconnect();
+      } catch {
+        /* 이미 끊겼을 수 있다 */
+      }
+      try {
+        document.removeEventListener('readystatechange', onSignal);
+        window.removeEventListener('load', onSignal);
+      } catch {
+        /* 무시 */
+      }
+      clearTimeout(sliceTimer);
+      if (floorTimer !== undefined) clearTimeout(floorTimer);
+      try {
+        if (slot.__acmWaitForWake === handle) delete slot.__acmWaitForWake;
+      } catch {
+        /* 무시 */
+      }
+      resolve(reason);
+    };
+
+    const handle = { key, cancel: () => finish('cancelled') };
+
+    function onSignal(): void {
+      if (settled || floorTimer !== undefined) return;
+      // 변화가 폭주하는 페이지에서 즉시 반환을 반복하지 않도록 최소 간격을 둔다.
+      floorTimer = setTimeout(() => finish('change'), Math.max(0, minMs));
+    }
+
+    try {
+      observer = new MutationObserver(onSignal);
+      observer.observe(document.documentElement || document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    } catch {
+      observer = null;
+    }
+    try {
+      document.addEventListener('readystatechange', onSignal);
+      window.addEventListener('load', onSignal);
+    } catch {
+      /* 무시 */
+    }
+
+    slot.__acmWaitForWake = handle;
+    // finish 는 이 아래에서만(타이머·관찰자 콜백으로) 불리므로 const 로 잡아도 안전하다.
+    const sliceTimer = setTimeout(() => finish('timeout'), Math.max(0, sliceMs));
+  });
 }
 
 /**
@@ -173,6 +257,51 @@ function clamp(value: number, min: number, max: number): number {
 class WaitForTool extends BaseBrowserToolExecutor {
   name = 'chrome_wait_for';
 
+  /**
+   * auto-chrome-mcp fork: 다음 확인까지 기다린다.
+   * 페이지에 주입할 수 있으면 DOM 변화(또는 readystatechange/load)로 깨어나 즉시 돌아오고,
+   * 주입이 불가능하거나 변화가 없으면 예전과 같은 폴링 간격(sliceMs)까지 기다린다.
+   *
+   * 기준 시계는 **확장 쪽 타이머 하나뿐이다**. 페이지 타이머가 스로틀돼 in-page 대기가 늦게
+   * 돌아와도 sliceMs 를 넘기지 않으므로 전체 소요가 timeoutMs 를 넘지 않는다.
+   */
+  private async waitForNextCheck(
+    tabId: number,
+    canInject: boolean,
+    sliceMs: number,
+    conditionKey: string,
+  ): Promise<void> {
+    if (sliceMs <= 0) return;
+    if (!canInject) {
+      await sleep(sliceMs);
+      return;
+    }
+
+    let capTimer: ReturnType<typeof setTimeout> | undefined;
+    const cap = new Promise<'cap'>((resolve) => {
+      capTimer = setTimeout(() => resolve('cap'), sliceMs);
+    });
+    try {
+      const outcome = await Promise.race<'wake' | 'unavailable' | 'cap'>([
+        chrome.scripting
+          .executeScript({
+            target: { tabId },
+            func: waitForDomChange,
+            args: [sliceMs, Math.min(CHANGE_WAKE_MIN_MS, sliceMs), conditionKey],
+          })
+          .then(
+            () => 'wake' as const,
+            () => 'unavailable' as const,
+          ),
+        cap,
+      ]);
+      // 내비게이션 중에는 주입이 실패한다 — 예전처럼 폴링 간격만 채운다(상한을 넘기지 않는다).
+      if (outcome === 'unavailable') await cap;
+    } finally {
+      if (capTimer !== undefined) clearTimeout(capTimer);
+    }
+  }
+
   async execute(args: WaitForParams): Promise<ToolResult> {
     const params = args || ({} as WaitForParams);
 
@@ -231,6 +360,8 @@ class WaitForTool extends BaseBrowserToolExecutor {
 
     const watcher = wantsNetworkIdle ? new NetworkIdleWatcher(tabId) : null;
     const startedAt = Date.now();
+    // in-page 관찰자를 같은 조건끼리 하나로 묶기 위한 키(문서당 하나만 살아 있게 한다).
+    const conditionKey = `${selector ?? ''}|${text ?? ''}|${state}|${documentReady ? 1 : 0}`;
     const lastState: LastState = {};
 
     try {
@@ -334,7 +465,15 @@ class WaitForTool extends BaseBrowserToolExecutor {
           };
         }
 
-        await sleep(Math.min(pollMs, Math.max(0, timeoutMs - (Date.now() - startedAt))));
+        // 남은 시간이 0 이면 즉시 다시 확인하고(위 타임아웃 분기가 잡는다), 마지막 조각은
+        // 남은 시간만큼만 자른다 — 어떤 경로로도 timeoutMs 를 넘기지 않는다.
+        const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
+        await this.waitForNextCheck(
+          tabId,
+          needsPageProbe,
+          Math.min(pollMs, remainingMs),
+          conditionKey,
+        );
       }
     } catch (error) {
       return createErrorResponse(

@@ -4,6 +4,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { LIMITS, NETWORK_FILTERS } from '@/common/constants';
+import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
 
 // Static resource file extensions
 const STATIC_RESOURCE_EXTENSIONS = [
@@ -369,7 +370,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       const currentCount = this.requestCounters.get(details.tabId) || 0;
       if (currentCount >= NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE) {
         console.log(
-          `NetworkCaptureV2: Request limit (${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE}) reached for tab ${details.tabId}, ignoring new request: ${details.url}`,
+          `NetworkCaptureV2: Request limit (${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE}) reached for tab ${details.tabId}, ignoring new request: ${redactUrlForLog(details.url)}`,
         );
         captureInfo.limitReached = true;
         return;
@@ -395,7 +396,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         }
 
         console.log(
-          `NetworkCaptureV2: Captured request ${currentCount + 1}/${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE} for tab ${details.tabId}: ${details.method} ${details.url}`,
+          `NetworkCaptureV2: Captured request ${currentCount + 1}/${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE} for tab ${details.tabId}: ${details.method} ${redactUrlForLog(details.url)}`,
         );
       }
     };
@@ -441,7 +442,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         }
 
         console.log(
-          `NetworkCaptureV2: Filtered request by MIME type (${requestInfo.mimeType}): ${requestInfo.url}`,
+          `NetworkCaptureV2: Filtered request by MIME type (${requestInfo.mimeType}): ${redactUrlForLog(requestInfo.url)}`,
         );
         return;
       }
@@ -608,7 +609,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       this.updateLastActivityTime(tabId);
 
       console.log(
-        `NetworkCaptureV2: Started capture for tab ${tabId} (${tab.url}). Max requests: ${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE}, Max time: ${maxCaptureTime}ms, Inactivity: ${inactivityTimeout}ms.`,
+        `NetworkCaptureV2: Started capture for tab ${tabId} (${redactUrlForLog(tab.url)}). Max requests: ${NetworkCaptureStartTool.MAX_REQUESTS_PER_CAPTURE}, Max time: ${maxCaptureTime}ms, Inactivity: ${inactivityTimeout}ms.`,
       );
 
       // Set maximum capture time
@@ -800,7 +801,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       includeStatic = false, // Default: don't include static resources
     } = args;
 
-    console.log(`NetworkCaptureStartTool: Executing with args:`, args);
+    console.log(`NetworkCaptureStartTool: Executing with args:`, redactedArgsForLog(args));
 
     try {
       // Get current tab or create new tab
@@ -821,10 +822,12 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
         if (existing) {
           // Use existing tab
           tabToOperateOn = existing;
-          console.log(`NetworkCaptureV2: Found session tab with URL: ${targetUrl}`);
+          console.log(
+            `NetworkCaptureV2: Found session tab with URL: ${redactUrlForLog(targetUrl)}`,
+          );
         } else {
           // Create new tab (지정한 창, 없으면 작업 탭의 창에 만든다)
-          console.log(`NetworkCaptureV2: Creating new tab with URL: ${targetUrl}`);
+          console.log(`NetworkCaptureV2: Creating new tab with URL: ${redactUrlForLog(targetUrl)}`);
           tabToOperateOn = await createTabForUrl(targetUrl, {
             background: background === true,
             reason: 'network-capture-web-request',

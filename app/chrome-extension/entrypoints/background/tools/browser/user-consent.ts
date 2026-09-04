@@ -7,6 +7,7 @@ import {
   SENSITIVE_PERMISSIONS,
   type SensitivePermission,
 } from '@/utils/consent-storage';
+import { redactUrlForLog } from '@/utils/log-redact';
 
 /**
  * v1.0.31+: Site permissions consent gate.
@@ -199,7 +200,7 @@ async function applyOriginAllow(action: SensitivePermission): Promise<void> {
       origin = u.origin;
       protocol = u.protocol;
     } catch {
-      console.warn('[user-consent] tab.url 파싱 실패 — origin set skip:', tab.url);
+      console.warn('[user-consent] tab.url 파싱 실패 — origin set skip:', redactUrlForLog(tab.url));
       return;
     }
     if (protocol !== 'https:' && protocol !== 'http:') {

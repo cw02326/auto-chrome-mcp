@@ -12,6 +12,7 @@ import {
   isValid,
   format,
 } from 'date-fns';
+import { redactedArgsForLog } from '@/utils/log-redact';
 
 interface HistoryToolParams {
   text?: string;
@@ -121,7 +122,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
 
   async execute(args: HistoryToolParams): Promise<ToolResult> {
     try {
-      console.log('Executing HistoryTool with args:', args);
+      console.log('Executing HistoryTool with args:', redactedArgsForLog(args));
 
       const {
         text = '',
