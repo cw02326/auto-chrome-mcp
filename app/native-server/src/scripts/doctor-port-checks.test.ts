@@ -261,6 +261,7 @@ describe('buildPortChecks - 살아 있는 브리지 개수 집계', () => {
       stdioConfigPath: file,
       probe: probe.fn,
       connectivity: okConnectivity,
+      identify: async () => ({ fork: 'auto-chrome-mcp', version: '1.11.1' }),
     });
 
     const active = activeCheck(result.checks);
