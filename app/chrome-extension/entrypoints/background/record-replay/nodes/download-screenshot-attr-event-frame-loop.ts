@@ -1,6 +1,7 @@
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { Step } from '../types';
 import { locateElement } from '../selector-engine';
@@ -13,7 +14,10 @@ export const handleDownloadNode: NodeRuntime<any> = {
       timeoutMs: Math.max(1000, Math.min(Number(s.timeoutMs ?? 60000), 300000)),
       waitForComplete: s.waitForComplete !== false,
     };
-    const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD, args });
+    const res = await handleCallTool({
+      name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+      args: runToolArgs(ctx, args),
+    });
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
       const payload = text ? JSON.parse(text) : null;
@@ -33,7 +37,10 @@ export const screenshotNode: NodeRuntime<any> = {
     if (s.fullPage) args.fullPage = true;
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
       args.selector = s.selector;
-    const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.SCREENSHOT, args });
+    const res = await handleCallTool({
+      name: TOOL_NAMES.BROWSER.SCREENSHOT,
+      args: runToolArgs(ctx, args),
+    });
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
       const payload = text ? JSON.parse(text) : null;
@@ -51,10 +58,8 @@ export const triggerEventNode: NodeRuntime<any> = {
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveRunTab(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const cssSelector = !(located as any)?.ref
       ? s.target.candidates?.find((c: any) => c.type === 'css' || c.type === 'attr')?.value
@@ -106,10 +111,8 @@ export const setAttributeNode: NodeRuntime<any> = {
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveRunTab(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
     const cssSelector = !(located as any)?.ref
@@ -154,9 +157,7 @@ export const setAttributeNode: NodeRuntime<any> = {
 export const switchFrameNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = step;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
+    const tabId = await resolveRunTab(ctx);
     const frames = await chrome.webNavigation.getAllFrames({ tabId });
     if (!Array.isArray(frames) || frames.length === 0) {
       ctx.frameId = undefined;
@@ -174,7 +175,7 @@ export const switchFrameNode: NodeRuntime<any> = {
     if (!target) ctx.frameId = undefined;
     else ctx.frameId = target.frameId;
     try {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     } catch {}
     ctx.logger({
       stepId: (step as any).id,
@@ -197,9 +198,7 @@ export const loopElementsNode: NodeRuntime<any> = {
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
+    const tabId = await resolveRunTab(ctx);
     const world: any = 'MAIN';
     const selector = String(s.selector || '');
     const res = await chrome.scripting.executeScript({

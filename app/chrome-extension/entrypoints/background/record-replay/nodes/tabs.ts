@@ -7,6 +7,7 @@ import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 // v1.9.0: 창 생성·탭 활성화는 mcp-window-manager / activation-guard 를 통해서만 한다.
 import { createTab as createTabGuarded, isForceFocusEnabled } from '@/utils/activation-guard';
 import { createManagedWindow } from '@/utils/mcp-window-manager';
+import { runToolArgs } from '../engine/tab-context';
 
 export const openTabNode: NodeRuntime<StepOpenTab> = {
   run: async (ctx, step) => {
@@ -30,6 +31,9 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     let targetTabId: number | undefined = s.tabId;
     if (!targetTabId) {
+      // tab-scan-ok: switchTab matches by url/title, so it has to look at every
+      // open tab. It only selects the tab the step names, and the run is then
+      // re-pinned to that tab explicitly.
       const tabs = await chrome.tabs.query({});
       const hit = tabs.find(
         (t) =>
@@ -40,8 +44,10 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
     }
     if (!targetTabId) throw new Error('switchTab: no matching tab');
     const res = await handleCallTool({
+      // switchTab deliberately addresses another tab: runToolArgs keeps the
+      // explicit id and only adds the session/lane of the run.
       name: TOOL_NAMES.BROWSER.SWITCH_TAB,
-      args: { tabId: targetTabId },
+      args: runToolArgs(ctx, { tabId: targetTabId }),
     });
     if ((res as any).isError) throw new Error('switchTab failed');
     return {} as ExecResult;
@@ -54,7 +60,10 @@ export const closeTabNode: NodeRuntime<StepCloseTab> = {
     const args: any = {};
     if (Array.isArray(s.tabIds) && s.tabIds.length) args.tabIds = s.tabIds;
     if (s.url) args.url = s.url;
-    const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.CLOSE_TABS, args });
+    const res = await handleCallTool({
+      name: TOOL_NAMES.BROWSER.CLOSE_TABS,
+      args: runToolArgs(ctx, args),
+    });
     if ((res as any).isError) throw new Error('closeTab failed');
     return {} as ExecResult;
   },

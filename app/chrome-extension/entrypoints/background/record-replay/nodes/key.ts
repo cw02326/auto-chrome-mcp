@@ -3,6 +3,7 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepKey } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { runToolArgs } from '../engine/tab-context';
 
 export const keyNode: NodeRuntime<StepKey> = {
   run: async (ctx, step: StepKey) => {
@@ -23,7 +24,7 @@ export const keyNode: NodeRuntime<StepKey> = {
 
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.KEYBOARD,
-      args,
+      args: runToolArgs(ctx, args),
     });
     if ((res as any).isError) throw new Error('key failed');
     return {} as ExecResult;

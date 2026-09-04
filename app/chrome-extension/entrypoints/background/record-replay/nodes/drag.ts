@@ -3,21 +3,19 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepDrag } from '../types';
 import { locateElement } from '../selector-engine';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 
 export const dragNode: NodeRuntime<StepDrag> = {
-  run: async (_ctx, step: StepDrag) => {
+  run: async (ctx: ExecCtx, step: StepDrag) => {
     const s = step as StepDrag;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
+    const tabId = await resolveRunTab(ctx);
     let startRef: string | undefined;
     let endRef: string | undefined;
     try {
-      if (typeof tabId === 'number') {
-        const locatedStart = await locateElement(tabId, (s as any).start);
-        const locatedEnd = await locateElement(tabId, (s as any).end);
-        startRef = (locatedStart as any)?.ref || (s as any).start.ref;
-        endRef = (locatedEnd as any)?.ref || (s as any).end.ref;
-      }
+      const locatedStart = await locateElement(tabId, (s as any).start);
+      const locatedEnd = await locateElement(tabId, (s as any).end);
+      startRef = (locatedStart as any)?.ref || (s as any).start.ref;
+      endRef = (locatedEnd as any)?.ref || (s as any).end.ref;
     } catch {}
     let startCoordinates: { x: number; y: number } | undefined;
     let endCoordinates: { x: number; y: number } | undefined;
@@ -28,13 +26,13 @@ export const dragNode: NodeRuntime<StepDrag> = {
     }
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.COMPUTER,
-      args: {
+      args: runToolArgs(ctx, {
         action: 'left_click_drag',
         startRef,
         ref: endRef,
         startCoordinates,
         coordinates: endCoordinates,
-      },
+      }),
     });
     if ((res as any).isError) throw new Error('drag failed');
     return {} as ExecResult;

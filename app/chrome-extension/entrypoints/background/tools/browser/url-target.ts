@@ -26,12 +26,49 @@ import {
   sessionKeyOf,
 } from '@/utils/work-tab-manager';
 
-/** 비교용 URL 정규화 — 예전 구현과 같이 끝의 슬래시만 무시한다. */
+/**
+ * 비교용 URL 정규화.
+ *
+ * 2026-09-05 Codex 4차 검토(항목 5): 예전에는 앞뒤 공백과 끝 슬래시만 무시했다. 그래서
+ * `HTTPS://Example.com/a` 와 `https://example.com/a` 가 다른 URL 로 보였다. 스킴과 host 는
+ * 대소문자를 가리지 않으므로 URL 파서가 만든 정규형(href)으로 비교한다. 파싱이 안 되는
+ * 입력(예전 fallback 경로)은 종전대로 trim + 끝 슬래시 제거만 한다.
+ */
 export function normalizeUrlForMatch(url?: string | null): string | null {
   if (typeof url !== 'string') return null;
   const trimmed = url.trim();
   if (!trimmed) return null;
-  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+  let canonical = trimmed;
+  try {
+    canonical = new URL(trimmed).href;
+  } catch {
+    // 완전한 URL 이 아니면 원문 그대로 비교한다.
+  }
+  // `file:///` · `https://` 처럼 스킴 구분자로 끝나는 형태는 더 깎지 않는다.
+  if (canonical.length > 1 && canonical.endsWith('/') && !canonical.endsWith('://')) {
+    canonical = canonical.slice(0, -1);
+  }
+  return canonical;
+}
+
+/**
+ * URL 문자열이 `file:` 스킴인지 판별한다.
+ *
+ * 2026-09-05 Codex 4차 검토(항목 3): 예전 검사는 `url.startsWith('file:')` 이었다.
+ * 대문자 스킴(`FILE:///C:/x`)과 앞 공백(` file:///C:/x`)이 검사를 통과해 파일 접근 가드를
+ * 그냥 지나쳤다. 크롬은 두 형태 모두 file: 문서로 이동시킨다. URL 파서로 판별한다.
+ *
+ * 파싱에 실패하면 file: 이 아닌 것으로 본다 — 이동 자체는 기존 오류 경로가 처리한다.
+ */
+export function isFileSchemeUrl(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  try {
+    return new URL(trimmed).protocol === 'file:';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -51,8 +88,12 @@ export async function isFileSchemeAccessAllowed(): Promise<boolean> {
   if (typeof api !== 'function') return true;
   try {
     return (await api()) === true;
-  } catch {
-    return true;
+  } catch (error) {
+    // 2026-09-05 Codex 4차 검토(항목 3): 예전에는 여기서 true 를 돌려줬다. API 가 있는데
+    // 호출이 실패했다는 것은 권한 상태를 모른다는 뜻이므로, 모르는 상태에서 파일 접근을
+    // 허용하지 않는다(fail-closed). API 자체가 없는 환경은 위에서 이미 통과시켰다.
+    console.warn('[url-target] isAllowedFileSchemeAccess 호출 실패 — 접근을 막는다:', error);
+    return false;
   }
 }
 
@@ -68,13 +109,38 @@ export function fileSchemeAccessErrorText(toolName: string): string {
 }
 
 /**
+ * 이동한 문서가 file: 인데 권한이 없을 때 결과에 싣는 경고 문구(항목 6).
+ * 오류가 아니다 — 이동은 이미 일어났고, 읽기만 실패할 수 있다는 안내다.
+ */
+export const FILE_SCHEME_ACCESS_WARNING =
+  "이 문서는 file: 주소인데 확장의 '파일 URL에 대한 액세스 허용' 이 꺼져 있습니다. 페이지 내용을 읽지 못할 수 있으니 chrome://extensions 에서 켜세요.";
+
+/**
+ * file: 대상인데 확장에 파일 URL 접근 권한이 없으면 구조화 오류를 던진다.
+ *
+ * 2026-09-05 Codex 4차 검토(항목 2): 예전에는 **새 탭을 만들 때만** 확인했다. 그래서 권한을
+ * 끈 뒤에도 이미 열려 있던 세션 소유 file: 탭을 재사용하면 가드를 그대로 지나쳤다. 재사용
+ * 탐색(URL 조회) 전에 부르면 두 경로가 같은 판정을 쓴다.
+ */
+export async function assertFileSchemeAccessAllowed(url: string, toolName: string): Promise<void> {
+  if (!isFileSchemeUrl(url)) return;
+  if (await isFileSchemeAccessAllowed()) return;
+  throw new Error(fileSchemeAccessErrorText(toolName));
+}
+
+/**
  * `url` 과 일치하는 탭을 찾는다. 백그라운드 작업 모드에서는 이 세션이 소유한 탭만 본다.
  * 못 찾으면 null (호출자가 새 탭을 만든다).
  */
 export async function findTabByUrlInSessionScope(
   url: string,
   args: any,
+  toolName: string = 'url-target',
 ): Promise<chrome.tabs.Tab | null> {
+  // 항목 2: 재사용 탐색 전에 파일 접근 권한을 확인한다 — 권한을 끈 뒤 남아 있는 세션 소유
+  // file: 탭을 재사용하는 경로가 가드를 건너뛰지 않게 한다.
+  await assertFileSchemeAccessAllowed(url, toolName);
+
   const target = normalizeUrlForMatch(url);
   if (target === null) return null;
 
@@ -132,9 +198,7 @@ export async function createTabForUrl(
   url: string,
   options: { background: boolean; windowId?: number; reason: string; args: any },
 ): Promise<chrome.tabs.Tab> {
-  if (url.startsWith('file:') && !(await isFileSchemeAccessAllowed())) {
-    throw new Error(fileSchemeAccessErrorText(options.reason));
-  }
+  await assertFileSchemeAccessAllowed(url, options.reason);
   const createInfo: chrome.tabs.CreateProperties = {
     url,
     active: options.background ? false : true,
@@ -179,7 +243,7 @@ export async function resolveUrlTargetTabId(
   const url = typeof args?.url === 'string' ? args.url.trim() : '';
   if (!url) return undefined;
   try {
-    const tab = await findTabByUrlInSessionScope(url, args);
+    const tab = await findTabByUrlInSessionScope(url, args, toolName);
     return typeof tab?.id === 'number' ? tab.id : undefined;
   } catch {
     // 조회 실패는 잠금을 포기할 사유일 뿐, 호출을 막을 사유는 아니다(예전 동작 유지).

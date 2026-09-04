@@ -79,9 +79,9 @@ export class LegacyStepExecutor implements StepExecutorInterface {
     step: Step,
     _options: StepExecutionOptions,
   ): Promise<StepExecutionResult> {
-    // Note: tabId from options is not used here because legacy executeStep
-    // queries the active tab internally. In hybrid/actions mode, tabId is
-    // passed through to ActionRegistry handlers.
+    // options.tabId is redundant here: legacy nodes read the pinned tab off
+    // ctx (ExecCtx extends RunTabContext) and resolve it with resolveRunTab.
+    // Neither path may look up the tab the user is viewing.
     const result = await legacyExecuteStep(ctx, step);
     return {
       result: result || {},

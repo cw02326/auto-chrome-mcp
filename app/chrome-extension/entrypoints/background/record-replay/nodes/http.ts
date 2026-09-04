@@ -3,19 +3,20 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepHttp } from '../types';
 import { applyAssign, expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { runToolArgs } from '../engine/tab-context';
 
 export const httpNode: NodeRuntime<StepHttp> = {
   run: async (ctx: ExecCtx, step: StepHttp) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
-      args: {
+      args: runToolArgs(ctx, {
         url: s.url,
         method: s.method || 'GET',
         headers: s.headers || {},
         body: s.body,
         formData: s.formData,
-      },
+      }),
     });
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {

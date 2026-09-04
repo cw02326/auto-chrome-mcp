@@ -391,13 +391,18 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
 
       expect(result.executor).toBe('actions');
-      // When skipNavWait=false, handler reads beforeUrl and does nav-wait
+      // When skipNavWait=false, handler reads beforeUrl and does nav-wait.
+      // The wait is scoped to the tab the action ran on (RunTabContext), so the
+      // engine cannot wait on, or read, the tab the user is viewing.
       expect(mocks.tabsGet).toHaveBeenCalled();
       expect(mocks.waitForNavigationDone).toHaveBeenCalledWith(
+        expect.objectContaining({ tabId: TAB_ID }),
         'https://before.example/',
         expect.any(Number),
       );
-      expect(mocks.ensureReadPageIfWeb).toHaveBeenCalled();
+      expect(mocks.ensureReadPageIfWeb).toHaveBeenCalledWith(
+        expect.objectContaining({ tabId: TAB_ID }),
+      );
 
       expect(mocks.handleCallTool).toHaveBeenCalledWith(
         expect.objectContaining({

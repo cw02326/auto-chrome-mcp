@@ -1,4 +1,5 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { getRunTabInfo } from '../engine/tab-context';
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -14,7 +15,18 @@ export const executeFlowNode: NodeRuntime<any> = {
     const inline = s.inline !== false; // default inline
     if (!inline) {
       const { runFlow } = await import('../flow-runner');
-      await runFlow(flow, { args: s.args || {}, returnLogs: false });
+      // The sub-run inherits this run's pinned tab; it never resolves its own.
+      await runFlow(
+        flow,
+        {
+          tabId: ctx.tabId,
+          windowId: ctx.windowId,
+          source: 'explicit',
+          mcpSessionId: ctx.mcpSessionId,
+          lane: ctx.lane,
+        },
+        { args: s.args || {}, returnLogs: false },
+      );
       return {} as ExecResult;
     }
     const { defaultEdgesOnly, topoOrder, mapDagNodeToStep, waitForNetworkIdle, waitForNavigation } =
@@ -50,18 +62,21 @@ export const executeFlowNode: NodeRuntime<any> = {
       while (true) {
         try {
           const beforeInfo = await (async () => {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            const tab = tabs[0];
-            return { url: tab?.url || '', status: (tab as any)?.status || '' };
+            try {
+              const info = await getRunTabInfo(ctx);
+              return { url: info.url, status: info.status };
+            } catch {
+              return { url: '', status: '' };
+            }
           })();
           const { executeStep } = await import('../nodes');
           const result = await executeStep(ctx as any, st as any);
           if ((st.type === 'click' || st.type === 'dblclick') && (st as any).after) {
             const after = (st as any).after as any;
             if (after.waitForNavigation)
-              await waitForNavigation((st as any).timeoutMs, beforeInfo.url);
+              await waitForNavigation(ctx, (st as any).timeoutMs, beforeInfo.url);
             else if (after.waitForNetworkIdle)
-              await waitForNetworkIdle(Math.min((st as any).timeoutMs || 5000, 120000), 1200);
+              await waitForNetworkIdle(ctx, Math.min((st as any).timeoutMs || 5000, 120000), 1200);
           }
           if (!result?.alreadyLogged)
             ctx.logger({ stepId: st.id, status: 'success', tookMs: Date.now() - t0 } as any);

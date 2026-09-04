@@ -19,6 +19,7 @@ export const LOG_STEP_IDS = {
   PLUGIN_RUN_START: 'plugin-runStart',
   VARIABLE_COLLECT: 'variable-collect',
   BINDING_CHECK: 'binding-check',
+  RUN_TAB: 'run-tab',
   NETWORK_CAPTURE: 'network-capture',
   DAG_REQUIRED: 'dag-required',
   DAG_CYCLE: 'dag-cycle',

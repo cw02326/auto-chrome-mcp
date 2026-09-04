@@ -4,6 +4,7 @@ import type { Step } from '../types';
 import { locateElement } from '../selector-engine';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 
 export const clickNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -11,11 +12,8 @@ export const clickNode: NodeRuntime<any> = {
     return ok ? { ok } : { ok, errors: ['缺少目标选择器候选'] };
   },
   run: async (ctx: ExecCtx, step: Step) => {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const firstTab = tabs && tabs[0];
-    const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-    if (!tabId) throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveRunTab(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
@@ -33,7 +31,7 @@ export const clickNode: NodeRuntime<any> = {
     }
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.CLICK,
-      args: {
+      args: runToolArgs(ctx, {
         ref: (located as any)?.ref || (step as any).target?.ref,
         selector: !(located as any)?.ref
           ? s.target?.candidates?.find((c: any) => c.type === 'css' || c.type === 'attr')?.value
@@ -41,7 +39,7 @@ export const clickNode: NodeRuntime<any> = {
         waitForNavigation: false,
         timeout: Math.max(1000, Math.min(s.timeoutMs || 10000, 30000)),
         frameId,
-      },
+      }),
     });
     if ((res as any).isError) throw new Error('click failed');
     if (fallbackUsed)
@@ -60,11 +58,8 @@ export const clickNode: NodeRuntime<any> = {
 export const dblclickNode: NodeRuntime<any> = {
   validate: clickNode.validate,
   run: async (ctx: ExecCtx, step: Step) => {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const firstTab = tabs && tabs[0];
-    const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-    if (!tabId) throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveRunTab(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
@@ -82,7 +77,7 @@ export const dblclickNode: NodeRuntime<any> = {
     }
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.CLICK,
-      args: {
+      args: runToolArgs(ctx, {
         ref: (located as any)?.ref || (step as any).target?.ref,
         selector: !(located as any)?.ref
           ? s.target?.candidates?.find((c: any) => c.type === 'css' || c.type === 'attr')?.value
@@ -91,7 +86,7 @@ export const dblclickNode: NodeRuntime<any> = {
         timeout: Math.max(1000, Math.min(s.timeoutMs || 10000, 30000)),
         frameId,
         double: true,
-      },
+      }),
     });
     if ((res as any).isError) throw new Error('dblclick failed');
     if (fallbackUsed)

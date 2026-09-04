@@ -332,24 +332,62 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: [],
     },
   },
-  // record_replay 두 도구는 **의도적으로 MCP 에 노출하지 않는다** (2026-09-04 Codex 3차 검토, 항목 3).
-  //
-  // replay 엔진은 대상 탭을 스스로 고른다 — rr-utils 의 ensureTab() 이 tabTarget 미지정·'current'
-  // 에서 사용자의 활성 탭을 잡고, legacy step executor 와 대부분의 노드(click·fill·extract·
-  // assert·script·wait·drag 등)가 ctx.tabId 를 무시하고 같은 조회를 다시 한다(엔진·노드 전체
-  // 28곳/16파일). 그래서 백그라운드 작업 게이트가 작업 탭 id 를 주입해도 소비하는 지점이 없고,
-  // flow_run 호출이 사용자가 보고 있는 탭을 조작한다. 엔진이 ctx.tabId 를 존중하도록 고치기 전에는
-  // 노출하지 않으며, 확장의 게이트도 백그라운드 모드에서 flow_run 을 거절한다
-  // (utils/work-tab-gate.ts 의 BACKGROUND_MODE_UNSUPPORTED_TOOLS).
-  //
-  // {
-  //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
-  //   ...
-  // },
-  // {
-  //   name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
-  //   ...
-  // },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+    description:
+      'Run a published record-replay flow (recorded in the extension side panel) on this session work tab. Requires a work tab: call chrome_navigate first, otherwise the call is refused with no_work_tab. Cannot be nested inside chrome_batch. Returns a summary: success, step counts, first failed step, flow outputs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow id, from record_replay_list_published.',
+        },
+        args: {
+          type: 'object',
+          description: 'Values for the flow variables, keyed by variable name.',
+        },
+        tabTarget: {
+          type: 'string',
+          enum: ['current', 'new'],
+          description:
+            "'current' (default) runs in the work tab. 'new' opens a background tab in the work tab window, runs there and leaves it open. Pass a specific tab as tabId, not here.",
+        },
+        startUrl: {
+          type: 'string',
+          description: 'Open this URL in the run tab before the first step.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Reload the run tab before the first step (default false).',
+        },
+        captureNetwork: {
+          type: 'boolean',
+          description: 'Record network requests during the run (default false).',
+        },
+        returnLogs: {
+          type: 'boolean',
+          description: 'Include the step log, capped at 4000 chars (default false).',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Abort the whole run after this many ms.',
+        },
+        tabId: tabIdProp,
+      },
+      required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
+    description:
+      'List the published record-replay flows (id, slug, name, version, description) that record_replay_flow_run can run.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
     description:
@@ -1694,12 +1732,9 @@ const LANE_EXEMPT_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.BOOKMARK_ADD,
   TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
   TOOL_NAMES.BROWSER.REQUEST_USER_CONSENT,
-  // record_replay 두 도구는 레인 대상이 아니다: flow_run 은 대상 탭을 엔진이 스스로 잡아
-  // 레인→작업탭 주입 경로를 타지 않고, list_published 는 순수 조회다. 지금은 두 스키마가
-  // 위에서 주석 처리돼 TOOL_SCHEMAS 에 없으므로 이 항목은 실질적으로 무효지만, 다시 노출할 때
-  // 판단을 되풀이하지 않도록 남겨 둔다.
-  TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
-  TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
+  // record_replay 두 도구는 여기 넣지 않는다. flow_run 은 레인별 작업 탭을 그대로 받아야
+  // 하고(게이트의 TAB_ID_INJECT_TOOLS), list_published 도 같은 레인 인자를 달고 다니는 편이
+  // 호출 형태가 일관된다.
 ]);
 
 const LANE_DESCRIPTION_SHORT = 'Parallel-agent lane id (same value every call). Omit if solo.';

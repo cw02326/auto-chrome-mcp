@@ -48,12 +48,30 @@ interface Harness {
 }
 
 /**
- * chrome.tabs.query 의 url match pattern 검증을 실제 크롬과 같은 모양으로 흉내낸다:
- * http/https 스킴인데 host 부분이 비어 있으면(`https:///*`) 그 자리에서 throw 한다.
- * 수정 전 buildUrlPatterns 가 file: 입력에서 만들어내던 바로 그 패턴이다.
+ * chrome.tabs.query 의 url match pattern 검증을 실제 크롬 규칙에 가깝게 흉내낸다
+ * (2026-09-05 Codex 4차 검토, 항목 5 — 예전 목은 `https:///*` 하나만 걸렀다):
+ *   - `<all_urls>` 는 통과.
+ *   - `scheme://host/path` 형태가 아니면 거부 (`view-source:https://…`, 경로 없는
+ *     `chrome://settings`, 슬래시 없는 확장 origin 이 여기서 걸린다).
+ *   - 크롬이 아는 스킴(http·https·file·ftp·chrome-extension·chrome)과 `*` 만 통과.
+ *   - http(s) 인데 host 가 비어 있으면(`https:///*`) 거부.
  */
+const ALLOWED_PATTERN_SCHEMES = ['http', 'https', 'file', 'ftp', 'chrome-extension', 'chrome'];
+
 function validateMatchPattern(pattern: string): void {
-  if (/^https?:\/\/\//.test(pattern)) {
+  if (pattern === '<all_urls>') return;
+  const parsed = /^([a-zA-Z][a-zA-Z0-9+.-]*|\*):\/\/(.*)$/.exec(pattern);
+  if (!parsed) throw new Error(`Invalid url pattern '${pattern}'`);
+  const scheme = parsed[1].toLowerCase();
+  const rest = parsed[2];
+  if (scheme !== '*' && !ALLOWED_PATTERN_SCHEMES.includes(scheme)) {
+    throw new Error(`Invalid url pattern '${pattern}'`);
+  }
+  const slash = rest.indexOf('/');
+  // 크롬 match pattern 은 경로가 필수다.
+  if (slash < 0) throw new Error(`Invalid url pattern '${pattern}'`);
+  const host = rest.slice(0, slash);
+  if ((scheme === 'http' || scheme === 'https') && host === '') {
     throw new Error(`Invalid url pattern '${pattern}'`);
   }
 }
@@ -221,24 +239,42 @@ describe('buildUrlPatterns — 스킴별 match pattern 생성', () => {
     );
   });
 
-  it('file: 은 변형 없이 정확한 URL 하나만 돌려준다 (경로 끝 와일드카드 없음)', async () => {
+  // 2026-09-05 Codex 4차 검토(항목 5): 비 http(s) 는 이제 패턴을 만들지 않는다.
+  // 예전에는 입력 URL 을 그대로 패턴으로 넘겼는데, 크롬 match pattern 문법이 아닌 값이
+  // 섞여 조회가 throw 했다. 호출부는 빈 배열을 보고 정규화 문자열 비교로 넘어간다.
+  it('file: 은 패턴을 만들지 않는다 (빈 배열 → 문자열 비교 경로)', async () => {
     const { buildUrlPatterns } = await loadNavigateModule();
-    const input = 'file:///C:/PROJECTS/auto-chrome-mcp/README.md';
-    const patterns = buildUrlPatterns(input);
-    expect(patterns).toEqual([input]);
+    const patterns = buildUrlPatterns('file:///C:/PROJECTS/auto-chrome-mcp/README.md');
+    expect(patterns).toEqual([]);
   });
 
-  it('chrome-extension: 도 변형 없이 정확한 URL 하나만 돌려준다', async () => {
+  it('chrome-extension: 도 패턴을 만들지 않는다', async () => {
     const { buildUrlPatterns } = await loadNavigateModule();
-    const input = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/page.html';
-    const patterns = buildUrlPatterns(input);
-    expect(patterns).toEqual([input]);
+    const patterns = buildUrlPatterns(
+      'chrome-extension://abcdefghijklmnopabcdefghijklmnop/page.html',
+    );
+    expect(patterns).toEqual([]);
+  });
+
+  it('view-source: 처럼 패턴 문법에 맞지 않는 스킴도 빈 배열이다', async () => {
+    const { buildUrlPatterns } = await loadNavigateModule();
+    expect(buildUrlPatterns('view-source:https://example.com/page')).toEqual([]);
   });
 
   it('data: 처럼 chrome.tabs.query 가 거부하는 스킴은 패턴을 만들지 않는다 (빈 배열)', async () => {
     const { buildUrlPatterns } = await loadNavigateModule();
     const patterns = buildUrlPatterns('data:text/html,<h1>hi</h1>');
     expect(patterns).toEqual([]);
+  });
+
+  it('isPatternQueryableUrl 은 http(s)·와일드카드만 참이다', async () => {
+    const { isPatternQueryableUrl } = await loadNavigateModule();
+    expect(isPatternQueryableUrl('https://example.com/a')).toBe(true);
+    expect(isPatternQueryableUrl('http://example.com/a')).toBe(true);
+    expect(isPatternQueryableUrl('https://*.example.com/*')).toBe(true);
+    expect(isPatternQueryableUrl('file:///C:/x.md')).toBe(false);
+    expect(isPatternQueryableUrl('chrome://settings')).toBe(false);
+    expect(isPatternQueryableUrl('view-source:https://example.com/')).toBe(false);
   });
 
   it('버그 재현 방지: file: 입력에서 예전처럼 https:///* 패턴이 나오지 않는다', async () => {
@@ -251,7 +287,7 @@ describe('buildUrlPatterns — 스킴별 match pattern 생성', () => {
 });
 
 describe('chrome_navigate file:// 회귀', () => {
-  it('file:// 이동은 tabs.query 에서 throw 하지 않고 새 탭을 만든다', async () => {
+  it('file:// 이동은 무효 패턴 조회 없이 새 탭을 만든다', async () => {
     (chrome as unknown as { extension: unknown }).extension = {
       isAllowedFileSchemeAccess: vi.fn().mockResolvedValue(true),
     };
@@ -263,7 +299,11 @@ describe('chrome_navigate file:// 회귀', () => {
     } as never);
 
     expect(result.isError).toBe(false);
-    expect(h.tabsQuery).toHaveBeenCalled();
+    // 항목 5: file: 은 url 필터 조회를 아예 하지 않는다.
+    const urlFilteredQueries = h.tabsQuery.mock.calls.filter(
+      (call) => !!call[0] && 'url' in (call[0] as Record<string, unknown>),
+    );
+    expect(urlFilteredQueries).toHaveLength(0);
     expect(h.tabsCreate).toHaveBeenCalledTimes(1);
     const created = h.tabsCreate.mock.calls[0][0] as Record<string, unknown>;
     expect(created.url).toBe('file:///C:/PROJECTS/auto-chrome-mcp/README.md');
@@ -301,5 +341,101 @@ describe('chrome_navigate file:// 회귀', () => {
     // 권한이 꺼져 있으면 tabs.query/tabs.create 자체를 시도하지 않는다.
     expect(h.tabsQuery).not.toHaveBeenCalled();
     expect(h.tabsCreate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-09-05 Codex 4차 검토(항목 3): 예전 가드는 `url.startsWith('file:')` 이었다.
+ * 대문자 스킴과 앞 공백이 그대로 통과했고, 권한 API 가 throw 하면 허용으로 넘어갔다.
+ */
+describe('항목 3 — file: 판별과 권한 확인의 우회 경로', () => {
+  function denyFileAccess(): void {
+    (chrome as unknown as { extension: unknown }).extension = {
+      isAllowedFileSchemeAccess: vi.fn().mockResolvedValue(false),
+    };
+  }
+
+  async function expectBlocked(url: string): Promise<void> {
+    const { navigateTool } = await loadNavigateModule();
+    const result = await navigateTool.execute({ url, waitUntil: 'none' } as never);
+    expect(result.isError).toBe(true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    expect(body.error).toBe('file_scheme_access_disabled');
+    expect(h.tabsCreate).not.toHaveBeenCalled();
+  }
+
+  it('회귀(핵심): 대문자 스킴 FILE:/// 도 막는다', async () => {
+    denyFileAccess();
+    await expectBlocked('FILE:///C:/PROJECTS/auto-chrome-mcp/README.md');
+  });
+
+  it('회귀(핵심): 앞에 공백이 붙은 file: 도 막는다', async () => {
+    denyFileAccess();
+    await expectBlocked('  file:///C:/PROJECTS/auto-chrome-mcp/README.md');
+  });
+
+  it('회귀(핵심): 권한 API 가 throw 하면 허용이 아니라 거부다 (fail-closed)', async () => {
+    (chrome as unknown as { extension: unknown }).extension = {
+      isAllowedFileSchemeAccess: vi.fn().mockRejectedValue(new Error('api boom')),
+    };
+    await expectBlocked('file:///C:/PROJECTS/auto-chrome-mcp/README.md');
+  });
+
+  it('URL 로 파싱되지 않는 입력은 file: 로 보지 않는다 (이동 경로는 그대로)', async () => {
+    denyFileAccess();
+    const { navigateTool } = await loadNavigateModule();
+    const result = await navigateTool.execute({
+      url: 'not a url at all',
+      waitUntil: 'none',
+    } as never);
+    // 파일 가드가 아니라 기존 이동 경로가 처리한다 — 구조화 파일 오류가 아니어야 한다.
+    if (result.isError === true) {
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).not.toContain('file_scheme_access_disabled');
+    }
+  });
+});
+
+/**
+ * 2026-09-05 Codex 4차 검토(항목 6): 요청 URL 은 file: 이 아니었는데 리다이렉트로 file:
+ * 문서에 도달했고 권한이 없으면, 이동은 이미 끝났으므로 오류가 아니라 경고만 싣는다.
+ */
+describe('항목 6 — 리다이렉트로 도달한 file: 문서 경고', () => {
+  async function navigateEndingAtFileUrl(): Promise<Record<string, unknown>> {
+    h.tabsCreate.mockImplementationOnce(async (props: Record<string, unknown>) => {
+      const tab: TabRecord = {
+        id: 777,
+        windowId: USER_WINDOW_ID,
+        url: 'file:///C:/redirected.md',
+        active: props.active === true,
+        status: 'complete',
+      };
+      h.tabs.push(tab);
+      return tab;
+    });
+    const { navigateTool } = await loadNavigateModule();
+    const result = await navigateTool.execute({
+      url: 'https://redirect.test/start',
+      waitUntil: 'domcontentloaded',
+      waitTimeoutMs: 1000,
+    } as never);
+    return JSON.parse((result.content[0] as { text: string }).text);
+  }
+
+  it('회귀(핵심): 권한이 없으면 결과에 경고 필드를 싣는다 (오류는 아니다)', async () => {
+    (chrome as unknown as { extension: unknown }).extension = {
+      isAllowedFileSchemeAccess: vi.fn().mockResolvedValue(false),
+    };
+    const payload = await navigateEndingAtFileUrl();
+    expect(payload.url).toBe('file:///C:/redirected.md');
+    expect(String(payload.fileSchemeAccessWarning)).toContain('파일 URL에 대한 액세스 허용');
+  });
+
+  it('권한이 있으면 경고를 싣지 않는다', async () => {
+    (chrome as unknown as { extension: unknown }).extension = {
+      isAllowedFileSchemeAccess: vi.fn().mockResolvedValue(true),
+    };
+    const payload = await navigateEndingAtFileUrl();
+    expect(payload.fileSchemeAccessWarning).toBeUndefined();
   });
 });

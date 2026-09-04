@@ -5,6 +5,7 @@ import { recordingSession as session } from './session-manager';
 import { createInitialFlow, addNavigationStep } from './flow-builder';
 import { initBrowserEventListeners } from './browser-event-listener';
 import { initContentMessageHandler } from './content-message-handler';
+import { queryEntryPointTab, tryGetRunTabInfo } from '../engine/tab-context';
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -139,9 +140,17 @@ class RecorderManagerImpl {
   async start(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
     if (session.getStatus() !== 'idle')
       return { success: false, error: 'Recording already active' };
-    // Resolve active tab
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!active?.id) return { success: false, error: 'Active tab not found' };
+    // Recording starts from a user gesture in the side panel, so resolving the
+    // tab the user is looking at is legitimate here. It goes through the single
+    // sanctioned entry-point helper and is pinned for the whole session.
+    let active: { id: number; url?: string };
+    try {
+      const entry = await queryEntryPointTab('sidepanel');
+      const info = await tryGetRunTabInfo(entry);
+      active = { id: entry.tabId, url: info?.url };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
 
     // Initialize flow & session
     const flow: Flow = createInitialFlow(meta);

@@ -22,6 +22,7 @@ import { AfterScriptQueue } from './after-script-queue';
 import { PluginManager } from '../plugins/manager';
 import type { HookControl } from '../plugins/types';
 import type { StepExecutorInterface } from './step-executor';
+import { getRunTabInfo as readRunTabInfo, resolveRunTab } from '../tab-context';
 
 // Narrow error-like value used for overlay reporting
 interface ErrorLike {
@@ -64,10 +65,18 @@ export interface StepRunEnv {
 export class StepRunner {
   constructor(private env: StepRunEnv) {}
 
-  private async getActiveTabInfo(): Promise<{ url: string; status: string | '' }> {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
-    return { url: tab?.url || '', status: (tab?.status as string) || '' };
+  /**
+   * Snapshot the run's pinned tab before a step, so navigation waits can tell
+   * whether the URL changed. Reads that tab directly instead of asking which
+   * tab is active.
+   */
+  private async getRunTabInfo(ctx: ExecCtx): Promise<{ url: string; status: string | '' }> {
+    try {
+      const info = await readRunTabInfo(ctx);
+      return { url: info.url, status: info.status };
+    } catch {
+      return { url: '', status: '' };
+    }
   }
 
   async run(
@@ -100,20 +109,15 @@ export class StepRunner {
     }
     if (ctrlStart?.pause) return { status: 'paused' };
 
-    const beforeInfo = await this.getActiveTabInfo();
+    const beforeInfo = await this.getRunTabInfo(ctx);
     try {
       await withRetry(
         async () => {
-          // Execute step via injected executor (legacy, actions, or hybrid)
-          // tabId is expected to be set by Scheduler in ctx; fallback to active tab if missing
-          let tabId = ctx.tabId;
-          if (typeof tabId !== 'number') {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            tabId = tabs?.[0]?.id;
-          }
-          if (typeof tabId !== 'number') {
-            throw new Error('No active tab found for step execution');
-          }
+          // Execute step via injected executor (legacy, actions, or hybrid).
+          // The tab comes from the run context and is verified to still exist.
+          // There is no active-tab fallback: a run without a live work tab
+          // fails with run_tab_missing rather than touching the user's tab.
+          const tabId = await resolveRunTab(ctx);
 
           const execResult = await this.env.stepExecutor.execute(ctx, step, {
             tabId,
@@ -127,6 +131,7 @@ export class StepRunner {
             const after = step.after ?? ({} as NonNullable<StepClick['after']>);
             if (after.waitForNavigation)
               await waitForNavigationDone(
+                ctx,
                 beforeInfo.url,
                 Math.min(step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS, remainingBudget),
               );
@@ -136,24 +141,26 @@ export class StepRunner {
                 remainingBudget,
               );
               const idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
-              await waitForNetworkIdle(totalMs, idleMs);
+              await waitForNetworkIdle(ctx, totalMs, idleMs);
             } else
               await maybeQuickWaitForNav(
+                ctx,
                 beforeInfo.url,
                 Math.min(step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS, remainingBudget),
               );
           }
           if (step.type === STEP_TYPES.NAVIGATE || step.type === STEP_TYPES.OPEN_TAB) {
             await waitForNavigationDone(
+              ctx,
               beforeInfo.url,
               Math.min(
                 step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS,
                 this.env.getRemainingBudgetMs(),
               ),
             );
-            await ensureReadPageIfWeb();
+            await ensureReadPageIfWeb(ctx);
           } else if (step.type === STEP_TYPES.SWITCH_TAB) {
-            await ensureReadPageIfWeb();
+            await ensureReadPageIfWeb(ctx);
           }
           if (!result?.alreadyLogged)
             this.env.logger.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });

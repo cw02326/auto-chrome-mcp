@@ -14,6 +14,7 @@ import { ensureReadPageIfWeb, waitForNavigationDone } from '../../engine/policie
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
 import { clampInt, readTabUrl, resolveString } from './common';
+import { runTabFromId } from '../../engine/tab-context';
 
 export const navigateHandler: ActionHandler<'navigate'> = {
   type: 'navigate',
@@ -65,8 +66,9 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
       // Skip nav-wait if StepRunner handles it
       if (!skipNavWait) {
-        await waitForNavigationDone(beforeUrl, waitMs);
-        await ensureReadPageIfWeb();
+        const runTab = runTabFromId(tabId, 'explicit', undefined, ctx);
+        await waitForNavigationDone(runTab, beforeUrl, waitMs);
+        await ensureReadPageIfWeb(runTab);
       }
       return { status: 'success' };
     }
@@ -95,8 +97,9 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
     // Skip nav-wait if StepRunner handles it
     if (!skipNavWait) {
-      await waitForNavigationDone(beforeUrl, waitMs);
-      await ensureReadPageIfWeb();
+      const runTab = runTabFromId(tabId, 'explicit', undefined, ctx);
+      await waitForNavigationDone(runTab, beforeUrl, waitMs);
+      await ensureReadPageIfWeb(runTab);
     }
 
     return { status: 'success' };

@@ -4,26 +4,37 @@
 import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { waitForNavigation as rrWaitForNavigation, waitForNetworkIdle } from '../../rr-utils';
+import { resolveRunTab, runToolArgs, type RunTabContext } from '../tab-context';
 
-export async function waitForNavigationDone(prevUrl: string, timeoutMs?: number) {
-  await rrWaitForNavigation(timeoutMs, prevUrl);
+// Every wait below is scoped to the run's pinned tab. None of them may consult
+// the tab the user is currently viewing.
+
+export async function waitForNavigationDone(
+  tab: RunTabContext,
+  prevUrl: string,
+  timeoutMs?: number,
+) {
+  await rrWaitForNavigation(tab, timeoutMs, prevUrl);
 }
 
-export async function ensureReadPageIfWeb() {
+export async function ensureReadPageIfWeb(tab: RunTabContext) {
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const url = tabs?.[0]?.url || '';
+    const tabId = await resolveRunTab(tab);
+    const runTab = await chrome.tabs.get(tabId);
+    const url = runTab?.url || '';
     if (/^(https?:|file:)/i.test(url)) {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(tab, {}) });
     }
   } catch {}
 }
 
-export async function maybeQuickWaitForNav(prevUrl: string, timeoutMs?: number) {
+export async function maybeQuickWaitForNav(
+  tab: RunTabContext,
+  prevUrl: string,
+  timeoutMs?: number,
+) {
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') return;
+    const tabId = await resolveRunTab(tab);
     const sniffMs = 350;
     const startedAt = Date.now();
     let seen = false;
@@ -55,6 +66,7 @@ export async function maybeQuickWaitForNav(prevUrl: string, timeoutMs?: number) 
         if (seen) {
           try {
             await rrWaitForNavigation(
+              tab,
               prevUrl ? Math.min(timeoutMs || 15000, 30000) : undefined,
               prevUrl,
             );

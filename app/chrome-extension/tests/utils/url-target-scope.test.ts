@@ -260,3 +260,101 @@ describe('web-fetcher · inject-script 의 url 분기가 사용자 탭을 잡지
     expect(h.created[0]).toMatchObject({ url: TARGET_URL, windowId: 42 });
   });
 });
+
+/**
+ * 2026-09-05 Codex 4차 검토(항목 2): 파일 접근 가드가 **새 탭 생성 시에만** 걸려 있었다.
+ * 권한을 끈 뒤에도 이미 열려 있던 세션 소유 file: 탭을 재사용하면 가드를 그냥 지나쳤다.
+ * 이제 URL 조회(재사용 탐색) 전에 확인한다.
+ */
+describe('항목 2 — 재사용 탐색도 파일 접근 권한을 확인한다', () => {
+  const FILE_URL = 'file:///C:/PROJECTS/auto-chrome-mcp/README.md';
+
+  function installWithOwnedFileTab(allowed: boolean | 'throws') {
+    installChrome({ backgroundMode: true, ownedTabs: [99] });
+    const chromeApi = (globalThis as any).chrome;
+    chromeApi.tabs.get = vi.fn(async (id: number) => {
+      if (id === 99) return { id: 99, windowId: 2, url: FILE_URL, status: 'complete' };
+      throw new Error(`No tab with id: ${id}`);
+    });
+    chromeApi.extension = {
+      isAllowedFileSchemeAccess:
+        allowed === 'throws'
+          ? vi.fn(async () => {
+              throw new Error('api boom');
+            })
+          : vi.fn(async () => allowed),
+    };
+  }
+
+  it('회귀(핵심): 권한이 꺼져 있으면 소유한 file: 탭이 있어도 거부한다', async () => {
+    installWithOwnedFileTab(false);
+    const { findTabByUrlInSessionScope } = await loadTarget();
+
+    await expect(
+      findTabByUrlInSessionScope(FILE_URL, { _mcpSessionId: SESSION }, 'chrome_get_web_content'),
+    ).rejects.toThrow(/file_scheme_access_disabled/);
+  });
+
+  it('회귀(핵심): 권한 API 가 throw 하면 거부한다 (fail-closed, 항목 3)', async () => {
+    installWithOwnedFileTab('throws');
+    const { findTabByUrlInSessionScope } = await loadTarget();
+
+    await expect(findTabByUrlInSessionScope(FILE_URL, { _mcpSessionId: SESSION })).rejects.toThrow(
+      /file_scheme_access_disabled/,
+    );
+  });
+
+  it('권한이 켜져 있으면 예전대로 소유 탭을 재사용한다', async () => {
+    installWithOwnedFileTab(true);
+    const { findTabByUrlInSessionScope } = await loadTarget();
+
+    const tab = await findTabByUrlInSessionScope(FILE_URL, { _mcpSessionId: SESSION });
+    expect(tab?.id).toBe(99);
+  });
+
+  it('createTabForUrl 도 같은 가드를 쓴다 (대문자 스킴 우회 차단, 항목 3)', async () => {
+    installWithOwnedFileTab(false);
+    const { createTabForUrl } = await loadTarget();
+
+    await expect(
+      createTabForUrl('FILE:///C:/x.md', {
+        background: true,
+        reason: 'test',
+        args: { _mcpSessionId: SESSION },
+      }),
+    ).rejects.toThrow(/file_scheme_access_disabled/);
+  });
+});
+
+/** 항목 3·5 — 순수 함수 계약. */
+describe('isFileSchemeUrl · normalizeUrlForMatch', () => {
+  beforeEach(() => {
+    installChrome({ backgroundMode: true });
+  });
+
+  it('isFileSchemeUrl 은 대소문자와 앞뒤 공백에 속지 않는다', async () => {
+    const { isFileSchemeUrl } = await loadTarget();
+    expect(isFileSchemeUrl('file:///C:/x.md')).toBe(true);
+    expect(isFileSchemeUrl('FILE:///C:/x.md')).toBe(true);
+    expect(isFileSchemeUrl('  file:///C:/x.md  ')).toBe(true);
+    expect(isFileSchemeUrl('https://example.com/file:')).toBe(false);
+    expect(isFileSchemeUrl('not a url')).toBe(false);
+    expect(isFileSchemeUrl(undefined)).toBe(false);
+  });
+
+  it('normalizeUrlForMatch 는 스킴·host 대소문자와 끝 슬래시를 무시한다', async () => {
+    const { normalizeUrlForMatch } = await loadTarget();
+    expect(normalizeUrlForMatch('HTTPS://Example.COM/a')).toBe(
+      normalizeUrlForMatch('https://example.com/a'),
+    );
+    expect(normalizeUrlForMatch('https://example.com/a/')).toBe(
+      normalizeUrlForMatch('https://example.com/a'),
+    );
+    expect(normalizeUrlForMatch('  chrome://settings  ')).toBe(
+      normalizeUrlForMatch('chrome://settings/'),
+    );
+    expect(normalizeUrlForMatch('https://example.com/a')).not.toBe(
+      normalizeUrlForMatch('https://example.com/b'),
+    );
+  });
+});

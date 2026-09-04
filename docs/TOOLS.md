@@ -1107,6 +1107,48 @@ written to storage, and is replaced with `***` everywhere in the response.
 { "action": "run", "name": "site-login", "params": { "user": "me@example.com", "pw": "..." } }
 ```
 
+### `record_replay_list_published`
+
+List the published record-replay flows so you can pick one to run. A flow is recorded and
+published in the extension side panel; this tool only reads the list.
+
+**Parameters**: none (plus the common `lane`).
+
+**Returns**: `{ success, published: [{ id, slug, name, version, description }] }`.
+
+### `record_replay_flow_run`
+
+Run one published flow on this session work tab.
+
+The flow engine never picks a tab on its own: the work-tab gate supplies the tab, and every
+step the flow runs carries that tab id. So the tool needs a work tab. Call `chrome_navigate`
+first (or pass `tabId`); with no work tab the call is refused with `no_work_tab`. It cannot be
+nested inside `chrome_batch` or `chrome_shortcut` steps.
+
+**Parameters**:
+
+- `flowId` (string, required): id from `record_replay_list_published`
+- `args` (object, optional): values for the flow variables, keyed by variable name
+- `tabTarget` (string, optional, default `current`): `current` runs in the work tab. `new`
+  opens a background tab in the work tab window, runs there, and leaves the tab open
+- `startUrl` (string, optional): open this URL in the run tab before the first step
+- `refresh` (boolean, optional, default `false`): reload the run tab before the first step
+- `captureNetwork` (boolean, optional, default `false`): record network requests during the run
+- `returnLogs` (boolean, optional, default `false`): include the step log, capped at 4000 chars
+- `timeoutMs` (number, optional): abort the whole run after this many ms
+- `tabId` (number, optional): run in this exact tab instead of the session work tab
+
+**Returns** a summary, not the raw run record: `success`, `runId`, `flowId`, `tabId`,
+`summary { total, success, failed, tookMs }`, `paused`, `outputs` (the flow variables that are
+not marked sensitive) and, when a step failed, `failedStep { stepId, message }`. Step logs and
+the failure screenshot are left out unless you ask for logs.
+
+**Example**:
+
+```json
+{ "flowId": "flow_daily_report", "args": { "date": "2026-09-05" }, "returnLogs": true }
+```
+
 ## 📚 Data Management
 
 ### `chrome_history`

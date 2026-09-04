@@ -12,6 +12,7 @@
  */
 
 import type { ExecCtx, ExecResult } from '../nodes/types';
+import { setRunTab } from '../engine/tab-context';
 import type { Step } from '../types';
 import type { ActionRegistry } from './registry';
 import type {
@@ -99,6 +100,8 @@ export function execCtxToActionCtx(
     tabId,
     frameId: ctx.frameId,
     runId: options?.runId,
+    mcpSessionId: ctx.mcpSessionId,
+    lane: ctx.lane,
     log: (message: string, level?: 'info' | 'warn' | 'error') => {
       ctx.logger({
         stepId: logStepId,
@@ -480,12 +483,13 @@ export function createStepExecutor(registry: ActionRegistry) {
       ctx.frameId = actionCtx.frameId;
     }
 
-    // Sync tabId back (in case openTab/switchTab changed it)
-    // Chrome tabId is always a positive safe integer
+    // Re-pin the run when openTab/switchTab moved it to another tab.
+    // setRunTab is the only sanctioned way the run tab changes mid-flow;
+    // nothing infers the tab from whatever became active.
     if (result.status === 'success') {
       const nextTabId = result.newTabId;
-      if (typeof nextTabId === 'number' && Number.isSafeInteger(nextTabId) && nextTabId > 0) {
-        ctx.tabId = nextTabId;
+      if (typeof nextTabId === 'number') {
+        setRunTab(ctx, nextTabId);
       }
     }
 

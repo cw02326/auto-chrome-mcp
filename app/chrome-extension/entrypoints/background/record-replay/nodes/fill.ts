@@ -4,6 +4,7 @@ import type { StepFill } from '../types';
 import { locateElement } from '../selector-engine';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 
 export const fillNode: NodeRuntime<StepFill> = {
   validate: (step) => {
@@ -12,11 +13,8 @@ export const fillNode: NodeRuntime<StepFill> = {
   },
   run: async (ctx: ExecCtx, step: StepFill) => {
     const s: any = step;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const firstTab = tabs && tabs[0];
-    const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-    if (!tabId) throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveRunTab(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
     const first = s.target?.candidates?.[0]?.type;
@@ -50,7 +48,7 @@ export const fillNode: NodeRuntime<StepFill> = {
         if (typeName === 'file') {
           const uploadRes = await handleCallTool({
             name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-            args: { selector: cssSelector, filePath: String(value ?? '') },
+            args: runToolArgs(ctx, { selector: cssSelector, filePath: String(value ?? '') }),
           });
           if ((uploadRes as any).isError) throw new Error('file upload failed');
           if (fallbackUsed)
@@ -70,10 +68,10 @@ export const fillNode: NodeRuntime<StepFill> = {
       if (cssSelector)
         await handleCallTool({
           name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-          args: {
+          args: runToolArgs(ctx, {
             type: 'MAIN',
             jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});} }catch(e){}`,
-          },
+          }),
         });
     } catch {}
     try {
@@ -86,20 +84,20 @@ export const fillNode: NodeRuntime<StepFill> = {
       else if (cssSelector)
         await handleCallTool({
           name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-          args: {
+          args: runToolArgs(ctx, {
             type: 'MAIN',
             jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el&&el.focus){el.focus();}}catch(e){}`,
-          },
+          }),
         });
     } catch {}
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.FILL,
-      args: {
+      args: runToolArgs(ctx, {
         ref: (located as any)?.ref || (s as any).target?.ref,
         selector: cssSelector,
         value,
         frameId,
-      },
+      }),
     });
     if ((res as any).isError) throw new Error('fill failed');
     if (fallbackUsed)

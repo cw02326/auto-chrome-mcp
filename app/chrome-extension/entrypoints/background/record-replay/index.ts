@@ -19,6 +19,7 @@ import { listRuns } from './flow-store';
 import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
+import { queryEntryPointTab, runTabFromId } from './engine/tab-context';
 import { RecorderManager } from './recording/recorder-manager';
 import { recordingSession } from './recording/session-manager';
 // Browser/content listeners are initialized via RecorderManager.init
@@ -154,7 +155,14 @@ export function initRecordReplayListeners() {
           getFlow(message.flowId)
             .then(async (flow) => {
               if (!flow) return sendResponse({ success: false, error: 'flow not found' });
-              const result = await runFlow(flow, message.options || {});
+              // Entry point: the user pressed Run in the side panel while looking
+              // at the page they want automated, so the tab is resolved once here
+              // and pinned. The engine never asks again.
+              const tab =
+                typeof message.tabId === 'number'
+                  ? runTabFromId(message.tabId, 'explicit')
+                  : await queryEntryPointTab('sidepanel');
+              const result = await runFlow(flow, tab, message.options || {});
               sendResponse({ success: true, result });
             })
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
@@ -278,7 +286,7 @@ export function initRecordReplayListeners() {
 
   // Trigger engine: contextMenus/commands/url/dom
   if ((chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info) => {
+    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       try {
         const triggers = await listTriggers();
         const t = triggers.find(
@@ -287,18 +295,28 @@ export function initRecordReplayListeners() {
         if (!t || t.enabled === false) return;
         const flow = await getFlow(t.flowId);
         if (!flow) return;
-        await runFlow(flow, { args: t.args || {}, returnLogs: false });
+        // The click tells us which tab the user invoked the menu on.
+        const runTab =
+          typeof tab?.id === 'number'
+            ? runTabFromId(tab.id, 'explicit', tab.windowId)
+            : await queryEntryPointTab('sidepanel');
+        await runFlow(flow, runTab, { args: t.args || {}, returnLogs: false });
       } catch {}
     });
   }
-  chrome.commands.onCommand.addListener(async (command) => {
+  chrome.commands.onCommand.addListener(async (command, tab) => {
     try {
       const triggers = await listTriggers();
       const t = triggers.find((x) => x.type === 'command' && (x as any).commandKey === command);
       if (!t || t.enabled === false) return;
       const flow = await getFlow(t.flowId);
       if (!flow) return;
-      await runFlow(flow, { args: t.args || {}, returnLogs: false });
+      // The shortcut fires on the tab the user is on; pin that one.
+      const runTab =
+        typeof tab?.id === 'number'
+          ? runTabFromId(tab.id, 'explicit', tab.windowId)
+          : await queryEntryPointTab('sidepanel');
+      await runFlow(flow, runTab, { args: t.args || {}, returnLogs: false });
     } catch {}
   });
   chrome.webNavigation.onCommitted.addListener(async (details) => {
@@ -341,21 +359,32 @@ export function initRecordReplayListeners() {
         if (matchUrl(url, (t as any).match || [])) {
           const flow = await getFlow(t.flowId);
           if (!flow) continue;
-          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+          // The navigation event names its own tab; no lookup needed.
+          await runFlow(flow, runTabFromId(details.tabId, 'explicit'), {
+            args: t.args || {},
+            returnLogs: false,
+          });
         }
       }
     } catch {}
   });
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message && message.action === 'dom_trigger_fired') {
         const id = message.triggerId;
+        const senderTabId = sender?.tab?.id;
+        const senderWindowId = sender?.tab?.windowId;
         listTriggers().then(async (arr) => {
           const t = arr.find((x) => x.id === id && x.type === 'dom');
           if (!t || t.enabled === false) return;
           const flow = await getFlow(t.flowId);
           if (!flow) return;
-          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+          // The content script that fired the trigger identifies its own tab.
+          if (typeof senderTabId !== 'number') return;
+          await runFlow(flow, runTabFromId(senderTabId, 'explicit', senderWindowId), {
+            args: t.args || {},
+            returnLogs: false,
+          });
         });
         sendResponse({ ok: true });
         return true;
@@ -437,6 +466,8 @@ async function refreshTriggers() {
         once: x.once !== false,
         debounceMs: x.debounceMs ?? 800,
       }));
+    // tab-scan-ok: seeding the DOM observer means injecting into every open tab.
+    // This only installs a listener; it does not run or target a flow.
     const tabs = await chrome.tabs.query({});
     for (const t of tabs) {
       if (!t.id) continue;
@@ -497,7 +528,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (!s) return;
     const flow = await getFlow(s.flowId);
     if (!flow) return;
-    await runFlow(flow, { args: s.args || {}, returnLogs: false });
+    // Scheduled runs have no originating tab. Until batch flows get their own
+    // work tab (stage 2), pin the user's current tab once here rather than
+    // letting the engine reach for it at every step.
+    const tab = await queryEntryPointTab('sidepanel');
+    await runFlow(flow, tab, { args: s.args || {}, returnLogs: false });
   } catch (e) {
     // swallow to not spam logs
   }

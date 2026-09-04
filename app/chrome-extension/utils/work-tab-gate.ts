@@ -49,21 +49,22 @@ function ownSessionArgs(args: any): { _mcpSessionId?: unknown; lane?: unknown } 
 /**
  * 백그라운드 작업 모드에서는 **아예 실행하지 않는** 도구.
  *
- * record_replay_flow_run (2026-09-04 Codex 3차 검토, 항목 3):
- * replay 엔진은 대상 탭을 스스로 고른다. rr-utils 의 ensureTab() 은 tabTarget 이 없거나
- * 'current' 면 `chrome.tabs.query({ active: true, currentWindow: true })` 로 **사용자의
- * 활성 탭**을 잡고, legacy step executor 와 대부분의 노드(click·fill·extract·assert·
- * script·wait·drag 등)도 ctx.tabId 를 무시하고 같은 조회를 다시 한다
- * (엔진·노드 전체에서 28곳/16파일). 그래서 게이트가 작업 탭 id 를 주입해도 소비하는
- * 지점이 없고, 작업 탭 유무와 무관하게 사용자가 보고 있는 탭이 조작된다.
+ * 지금은 비어 있다.
  *
- * 엔진 전체가 ctx.tabId 를 존중하도록 고치기 전까지는 모드 ON 에서 거절한다(fail-closed).
- * 모드를 끄면(popup 토글) 예전처럼 실행된다 — 사용자가 간섭을 허용한 상태다.
- * 사이드패널에서 사람이 직접 돌리는 실행은 이 게이트를 타지 않으므로 영향이 없다.
+ * 이력 — record_replay_flow_run 이 여기 있었다(2026-09-04 Codex 3차 검토, 항목 3).
+ * replay 엔진이 대상 탭을 스스로 골랐기 때문이다: 옛 ensureTab() 이 사용자의 활성 탭을
+ * 잡았고, legacy step executor 와 대부분의 노드가 ctx.tabId 를 무시하고 같은 조회를 다시
+ * 했다. 그래서 게이트가 작업 탭 id 를 주입해도 소비하는 지점이 없었다.
+ *
+ * v1.11.3 의 run-tab 리팩터로 엔진이 호출자가 지정한 탭에만 고정됐고(engine/tab-context.ts),
+ * 노드가 부르는 모든 handleCallTool 이 `tabId: ctx.tabId` 를 싣게 됐다. 이제 주입한 작업 탭이
+ * 실제로 소비되므로 flow_run 은 TAB_ID_INJECT_TOOLS 로 옮겼다 — 작업 탭이 없으면 거절
+ * (no_work_tab)하고, 있으면 그 탭에서만 돈다.
+ *
+ * 목록을 비워 두는 것은 계약의 일부다: "모드 ON 에서 실행 자체를 막는" 판정이 필요해지면
+ * 여기에 다시 넣는다.
  */
-export const BACKGROUND_MODE_UNSUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([
-  RR.FLOW_RUN,
-]);
+export const BACKGROUND_MODE_UNSUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([]);
 
 /**
  * 백그라운드 작업 모드 게이트에서 완전히 제외되는 도구 — 정의상 사용자 대면 동작.
@@ -114,6 +115,10 @@ export const TAB_ID_INJECT_TOOLS: ReadonlySet<string> = new Set<string>([
   B.SAVE_PDF,
   B.EMULATE,
   B.NETWORK_RULES,
+  // record_replay_flow_run: 엔진은 이제 여기서 주입한 tabId 로만 돈다
+  // (engine/tab-context.ts). 주입할 작업 탭이 없으면 no_work_tab 으로 거절해야 한다 —
+  // 엔진에는 활성 탭 fallback 이 없으므로 통과시키면 run_tab_required 로 실패할 뿐이다.
+  RR.FLOW_RUN,
 ]);
 
 /**

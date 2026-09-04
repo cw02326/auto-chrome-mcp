@@ -14,6 +14,7 @@ import { waitForNavigation, waitForNetworkIdle } from '../../rr-utils';
 import { failed, invalid, ok, tryResolveNumber } from '../registry';
 import type { ActionHandler } from '../types';
 import { clampInt, resolveString, sendMessageToTab } from './common';
+import { runTabFromId } from '../../engine/tab-context';
 
 export const waitHandler: ActionHandler<'wait'> = {
   type: 'wait',
@@ -94,14 +95,15 @@ export const waitHandler: ActionHandler<'wait'> = {
         idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
       }
 
-      await waitForNetworkIdle(totalMs, idleMs);
+      await waitForNetworkIdle(runTabFromId(tabId, 'explicit', undefined, ctx), totalMs, idleMs);
       return { status: 'success' };
     }
 
     // Handle navigation condition
     if (condition.kind === 'navigation') {
       const timeout = timeoutMs === undefined ? undefined : Math.max(0, Number(timeoutMs));
-      await waitForNavigation(timeout);
+      // Wait on the tab this action targets, not on whatever tab is in front.
+      await waitForNavigation(runTabFromId(tabId, 'explicit', undefined, ctx), timeout);
       return { status: 'success' };
     }
 

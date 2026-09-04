@@ -3,6 +3,7 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepScroll } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { runToolArgs } from '../engine/tab-context';
 
 export const scrollNode: NodeRuntime<StepScroll> = {
   run: async (ctx, step: StepScroll) => {
@@ -28,7 +29,11 @@ export const scrollNode: NodeRuntime<StepScroll> = {
       const amount = 3;
       const res = await handleCallTool({
         name: TOOL_NAMES.BROWSER.COMPUTER,
-        args: { action: 'scroll', scrollDirection: direction, scrollAmount: amount },
+        args: runToolArgs(ctx, {
+          action: 'scroll',
+          scrollDirection: direction,
+          scrollAmount: amount,
+        }),
       });
       if ((res as any).isError) throw new Error('scroll failed');
       return {} as ExecResult;
@@ -36,7 +41,7 @@ export const scrollNode: NodeRuntime<StepScroll> = {
     if (code) {
       const res = await handleCallTool({
         name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-        args: { type: 'MAIN', jsScript: code },
+        args: runToolArgs(ctx, { type: 'MAIN', jsScript: code }),
       });
       if ((res as any).isError) throw new Error('scroll failed');
     }

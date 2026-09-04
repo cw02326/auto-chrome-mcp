@@ -773,6 +773,15 @@ export interface ActionExecutionContext {
   tabId: number;
   frameId?: number;
   runId?: string;
+  /**
+   * MCP session/lane of the caller that started the run.
+   *
+   * Handlers pass these back to `handleCallTool` (via `runToolArgs`) so a tool
+   * call made inside a flow lands in the same session/lane bucket as the
+   * `record_replay_flow_run` call that started it.
+   */
+  mcpSessionId?: string;
+  lane?: string;
   /** 日志记录函数 */
   log: (message: string, level?: 'info' | 'warn' | 'error') => void;
   /** 截图函数 */

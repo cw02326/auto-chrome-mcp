@@ -5,7 +5,7 @@ import type { Edge, Flow, NodeBase, RunLogEntry, RunResult, Step } from '../type
 import {
   mapDagNodeToStep,
   topoOrder,
-  ensureTab,
+  prepareRunTab,
   expandTemplatesDeep,
   defaultEdgesOnly,
 } from '../rr-utils';
@@ -30,6 +30,7 @@ import {
 } from './execution-mode';
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
+import { RunTabError, resolveRunTab, runToolArgs, type RunTabContext } from './tab-context';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
@@ -133,9 +134,9 @@ function buildExecutionModeConfig(options: RunOptions): ExecutionModeConfig {
 class ExecutionOrchestrator {
   private readonly runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   private readonly startAt = Date.now();
-  private readonly logger = new RunLogger(this.runId);
+  private readonly logger: RunLogger;
   private readonly pluginManager: PluginManager;
-  private readonly afterScripts = new AfterScriptQueue(this.logger);
+  private readonly afterScripts: AfterScriptQueue;
 
   // Execution mode configuration (defaults to legacy for safety)
   private readonly executionModeConfig: ExecutionModeConfig;
@@ -143,7 +144,6 @@ class ExecutionOrchestrator {
 
   // Runtime state
   private vars: Record<string, any> = Object.create(null);
-  private tabId: number | null = null;
   private deadline = 0;
   private networkCaptureStarted = false;
   private paused = false;
@@ -157,10 +157,20 @@ class ExecutionOrchestrator {
   private controlFlowRunner!: ControlFlowRunner;
   private subflowRunner!: SubflowRunner;
 
+  /**
+   * @param flow     Flow to execute.
+   * @param tab      Tab this run is pinned to. Supplied by the caller (MCP tool,
+   *                 side panel, trigger) and never re-derived from the active tab.
+   * @param options  Run options.
+   */
   constructor(
     private flow: Flow,
+    private tab: RunTabContext,
     private options: RunOptions = {},
   ) {
+    this.logger = new RunLogger(this.runId, this.tab);
+    this.afterScripts = new AfterScriptQueue(this.logger);
+
     // Initialize variables from flow defaults and args
     for (const v of flow.variables || []) {
       if (v.default !== undefined) this.vars[v.key] = v.default;
@@ -239,13 +249,19 @@ class ExecutionOrchestrator {
       // ignore: best-effort derive startUrl
     }
 
-    const ensured = await ensureTab({
-      tabTarget: this.options.tabTarget,
-      startUrl: this.options.startUrl || derivedStartUrl,
-      refresh: this.options.refresh,
-    });
-    // Capture tabId for use in ExecCtx
-    this.tabId = ensured?.tabId ?? null;
+    // Prepare the pinned tab. prepareRunTab may re-pin this.tab when
+    // tabTarget is 'new'; it never falls back to the user's active tab.
+    let ensured: { tabId: number; url?: string };
+    try {
+      ensured = await prepareRunTab(this.tab, {
+        tabTarget: this.options.tabTarget,
+        startUrl: this.options.startUrl || derivedStartUrl,
+        refresh: this.options.refresh,
+      });
+    } catch (e) {
+      this.prepareError = this.tabErrorResult(e);
+      return;
+    }
 
     // register run state
     await runState.restore();
@@ -272,7 +288,10 @@ class ExecutionOrchestrator {
     try {
       const u = ensured?.url || '';
       if (/^(https?:|file:)/i.test(u))
-        await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+        await handleCallTool({
+          name: TOOL_NAMES.BROWSER.READ_PAGE,
+          args: runToolArgs(this.tab, {}),
+        });
     } catch {
       // ignore: preloading read_page is best-effort
     }
@@ -287,10 +306,10 @@ class ExecutionOrchestrator {
       if (needed.length) {
         const res = await handleCallTool({
           name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
-          args: {
+          args: runToolArgs(this.tab, {
             eventName: TOOL_MESSAGE_TYPES.COLLECT_VARIABLES,
             payload: JSON.stringify({ variables: needed, useOverlay: true }),
-          },
+          }),
         });
         let values: Record<string, any> | null = null;
         try {
@@ -301,16 +320,14 @@ class ExecutionOrchestrator {
           // ignore: parse result from tool response
         }
         if (!values) {
-          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-          const tabId = tabs?.[0]?.id;
-          if (typeof tabId === 'number') {
-            const res2 = await chrome.tabs.sendMessage(tabId, {
-              action: TOOL_MESSAGE_TYPES.COLLECT_VARIABLES,
-              variables: needed,
-              useOverlay: true,
-            });
-            if (res2 && res2.success && res2.values) values = res2.values;
-          }
+          // Ask the run's own tab, not whichever tab is in front of the user.
+          const tabId = await resolveRunTab(this.tab);
+          const res2 = await chrome.tabs.sendMessage(tabId, {
+            action: TOOL_MESSAGE_TYPES.COLLECT_VARIABLES,
+            variables: needed,
+            useOverlay: true,
+          });
+          if (res2 && res2.success && res2.values) values = res2.values;
         }
         if (values) Object.assign(this.vars, values);
         else
@@ -326,10 +343,10 @@ class ExecutionOrchestrator {
 
     await this.logger.overlayInit();
 
-    // binding enforcement
+    // binding enforcement (checked against the run's tab, not the user's)
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const currentUrl = tabs?.[0]?.url || '';
+      const runTabId = await resolveRunTab(this.tab);
+      const currentUrl = (await chrome.tabs.get(runTabId))?.url || '';
       const bindings = this.flow.meta?.bindings || [];
       if (!this.options.startUrl && bindings.length > 0) {
         const ok = bindings.some((b) => {
@@ -372,7 +389,11 @@ class ExecutionOrchestrator {
       try {
         const res = await handleCallTool({
           name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_START,
-          args: { includeStatic: false, maxCaptureTime: 3 * 60_000, inactivityTimeout: 0 },
+          args: runToolArgs(this.tab, {
+            includeStatic: false,
+            maxCaptureTime: 3 * 60_000,
+            inactivityTimeout: 0,
+          }),
         });
         let started = false;
         try {
@@ -552,11 +573,17 @@ class ExecutionOrchestrator {
         : findFirstExecutableRoot();
     let guard = 0;
 
-    // Create execution context with tabId from ensureTab
-    // tabId is managed by Scheduler and may be updated by openTab/switchTab actions
+    // Execution context carries the run's pinned tab. openTab/switchTab move it
+    // through setRunTab(); nothing else may change which tab steps touch.
     const ctx: ExecCtx = {
       vars: this.vars,
-      tabId: this.tabId ?? undefined,
+      tabId: this.tab.tabId,
+      windowId: this.tab.windowId,
+      source: this.tab.source,
+      // Session/lane of the caller ride along so every tool call a node makes is
+      // attributed to the same bucket as the call that started the run.
+      mcpSessionId: this.tab.mcpSessionId,
+      lane: this.tab.lane,
       logger: (e: RunLogEntry) => this.logger.push(e),
     };
     if (currentId) {
@@ -760,12 +787,30 @@ class ExecutionOrchestrator {
     return false;
   }
 
+  /** Turn a run-tab failure into the engine's standard failed RunResult shape. */
+  private tabErrorResult(e: unknown): RunResult {
+    const message =
+      e instanceof RunTabError
+        ? e.message
+        : `run_tab_missing: ${e instanceof Error ? e.message : String(e)}`;
+    return {
+      runId: this.runId,
+      success: false,
+      summary: { total: 0, success: 0, failed: 0, tookMs: Date.now() - this.startAt },
+      url: null,
+      outputs: null,
+      logs: [{ stepId: LOG_STEP_IDS.RUN_TAB, status: 'failed', message }],
+      screenshots: { onFailure: null },
+      paused: false,
+    };
+  }
+
   private async cleanup() {
     if (this.networkCaptureStarted) {
       try {
         const stopRes = await handleCallTool({
           name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP,
-          args: {},
+          args: runToolArgs(this.tab, {}),
         });
         const text = (stopRes?.content || []).find((c: any) => c.type === 'text')?.text;
         if (text) {
@@ -840,7 +885,18 @@ class ExecutionOrchestrator {
   }
 }
 
-export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<RunResult> {
-  const orchestrator = new ExecutionOrchestrator(flow, options);
+/**
+ * Run a flow against an explicitly supplied tab.
+ *
+ * `tab` is required: callers must say which tab the run may touch. The engine
+ * has no active-tab fallback, so a flow started without a work tab cannot reach
+ * the page the user is looking at.
+ */
+export async function runFlow(
+  flow: Flow,
+  tab: RunTabContext,
+  options: RunOptions = {},
+): Promise<RunResult> {
+  const orchestrator = new ExecutionOrchestrator(flow, tab, options);
   return await orchestrator.run();
 }

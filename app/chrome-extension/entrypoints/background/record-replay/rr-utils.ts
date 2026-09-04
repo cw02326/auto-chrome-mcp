@@ -8,8 +8,15 @@ import {
 } from 'auto-chrome-mcp-shared';
 import type { Edge as DagEdge, NodeBase as DagNode, Step } from './types';
 import { handleCallTool } from '../tools';
-import { activateTab, createTab as createTabGuarded } from '@/utils/activation-guard';
+import { createTab as createTabGuarded } from '@/utils/activation-guard';
 import { EDGE_LABELS } from 'auto-chrome-mcp-shared';
+import {
+  RunTabError,
+  resolveRunTab,
+  runToolArgs,
+  setRunTab,
+  type RunTabContext,
+} from './engine/tab-context';
 
 export function applyAssign(
   target: Record<string, any>,
@@ -54,73 +61,122 @@ export function expandTemplatesDeep<T = any>(value: T, scope: Record<string, any
   return walk(value);
 }
 
-export async function ensureTab(options: {
-  tabTarget?: 'current' | 'new';
-  startUrl?: string;
-  refresh?: boolean;
-}): Promise<{ tabId: number; url?: string }> {
-  const target = options.tabTarget || 'current';
-  const startUrl = options.startUrl;
-  const isWebUrl = (u?: string | null) => !!u && /^(https?:|file:)/i.test(u);
+/** How long prepareRunTab waits for a navigation it started to settle. */
+const PREPARE_TAB_TIMEOUT_MS = 15_000;
 
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  const [active] = tabs.filter((t) => t.active);
+/** True for pages a flow can actually drive. */
+function isWebUrl(u?: string | null): boolean {
+  return !!u && /^(https?:|file:)/i.test(u);
+}
 
-  if (target === 'new') {
-    let urlToOpen = startUrl;
-    if (!urlToOpen) urlToOpen = isWebUrl(active?.url) ? active!.url! : 'about:blank';
-    // v1.9.0: 활성화 판정은 activation-guard 가 한다.
+/**
+ * Wait until the given tab stops loading. Returns early if the tab is gone or
+ * was never loading, so this can never block on a mocked or closed tab.
+ */
+async function waitForTabSettled(tabId: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    let tab: chrome.tabs.Tab | undefined;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      return;
+    }
+    if (!tab || tab.status !== 'loading') return;
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * Get the run's tab ready before the first step.
+ *
+ * Works only on the tab the run was pinned to. Unlike the old ensureTab(), it
+ * never queries the active tab and never switches the run onto some other web
+ * tab it happens to find: a run without a usable tab fails instead.
+ *
+ * `tabTarget: 'new'` opens a fresh tab and re-pins the run to it via setRunTab,
+ * which is the one sanctioned way for the tab to change here.
+ */
+export async function prepareRunTab(
+  tab: RunTabContext,
+  options: {
+    tabTarget?: 'current' | 'new';
+    startUrl?: string;
+    refresh?: boolean;
+  } = {},
+): Promise<{ tabId: number; url?: string }> {
+  // Confirms the pinned tab is still open; throws run_tab_missing otherwise.
+  let tabId = await resolveRunTab(tab);
+  let current: chrome.tabs.Tab | undefined = await chrome.tabs.get(tabId);
+
+  if (options.tabTarget === 'new') {
+    const urlToOpen =
+      options.startUrl ||
+      (isWebUrl(current?.url) ? (current as chrome.tabs.Tab).url! : 'about:blank');
+    // v1.9.0: activation-guard decides whether the new tab may take focus.
     const created = await createTabGuarded(
       { url: urlToOpen, active: true },
       { reason: 'flow:prepare-new-tab' },
     );
-    await new Promise((r) => setTimeout(r, 300));
-    return { tabId: created.id!, url: created.url };
-  }
-
-  // current tab target
-  if (startUrl) {
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.NAVIGATE, args: { url: startUrl } });
-  } else if (options.refresh) {
-    // only refresh if current tab is a web page
-    if (isWebUrl(active?.url))
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.NAVIGATE, args: { refresh: true } });
-  }
-
-  // Re-evaluate active after potential navigation
-  const cur = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-  let tabId = cur?.id;
-  let url = cur?.url;
-
-  // If still on extension/internal page and no startUrl, try switch to an existing web tab
-  if (!isWebUrl(url) && !startUrl) {
-    const candidate = tabs.find((t) => isWebUrl(t.url));
-    if (candidate?.id) {
-      await activateTab(candidate.id, { reason: 'flow:prepare-switch' });
-      tabId = candidate.id;
-      url = candidate.url;
+    if (typeof created?.id !== 'number') {
+      throw new RunTabError('run_tab_missing', 'Could not open a work tab for this run.');
     }
+    setRunTab(tab, created.id, created.windowId);
+    tabId = created.id;
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+    try {
+      current = await chrome.tabs.get(tabId);
+    } catch {
+      current = undefined;
+    }
+    return { tabId, url: current?.url ?? (typeof urlToOpen === 'string' ? urlToOpen : undefined) };
   }
-  return { tabId: tabId!, url };
+
+  if (options.startUrl) {
+    await chrome.tabs.update(tabId, { url: options.startUrl });
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+  } else if (options.refresh && isWebUrl(current?.url)) {
+    await chrome.tabs.reload?.(tabId);
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+  }
+
+  try {
+    current = await chrome.tabs.get(tabId);
+  } catch {
+    current = undefined;
+  }
+  return { tabId, url: current?.url ?? options.startUrl };
 }
 
-export async function waitForNetworkIdle(totalTimeoutMs: number, idleThresholdMs: number) {
+/**
+ * Wait until the run tab's network goes quiet.
+ *
+ * Takes the run tab context (not a bare timeout pair) because the capture it
+ * starts and stops is a tool call: without `tabId` the work-tab gate would pick
+ * the target, which is exactly what the run-tab rule forbids.
+ */
+export async function waitForNetworkIdle(
+  tab: RunTabContext,
+  totalTimeoutMs: number,
+  idleThresholdMs: number,
+) {
   const deadline = Date.now() + Math.max(500, totalTimeoutMs);
   const threshold = Math.max(200, idleThresholdMs);
   while (Date.now() < deadline) {
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
-      args: {
+      args: runToolArgs(tab, {
         includeStatic: false,
         // Ensure capture remains active until we explicitly stop it
         maxCaptureTime: Math.min(60_000, Math.max(threshold + 500, 2_000)),
         inactivityTimeout: 0,
-      },
+      }),
     });
     await new Promise((r) => setTimeout(r, threshold + 200));
     const stopRes = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP,
-      args: {},
+      args: runToolArgs(tab, {}),
     });
     const text = (stopRes as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
@@ -144,12 +200,17 @@ export async function waitForNetworkIdle(totalTimeoutMs: number, idleThresholdMs
 }
 
 // Event-driven navigation wait helper
-// Waits for top-frame navigation completion or SPA history updates on active tab.
-// Falls back to short network idle on timeout.
-export async function waitForNavigation(timeoutMs?: number, prevUrl?: string): Promise<void> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tabId = tabs?.[0]?.id;
-  if (typeof tabId !== 'number') throw new Error('Active tab not found');
+// Waits for top-frame navigation completion or SPA history updates on the run's
+// pinned tab. Falls back to short network idle on timeout.
+export async function waitForNavigation(
+  tab: RunTabContext,
+  timeoutMs?: number,
+  prevUrl?: string,
+): Promise<void> {
+  if (!tab || typeof tab.tabId !== 'number') {
+    throw new RunTabError('run_tab_required', 'waitForNavigation needs the run tab.');
+  }
+  const tabId = await resolveRunTab(tab);
   const timeout = Math.max(1000, Math.min(timeoutMs || 15000, 30000));
   const startedAt = Date.now();
 
@@ -219,7 +280,7 @@ export async function waitForNavigation(timeoutMs?: number, prevUrl?: string): P
     const onTimeout = async () => {
       cleanup();
       try {
-        await waitForNetworkIdle(2000, 800);
+        await waitForNetworkIdle(tab, 2000, 800);
         resolve();
       } catch {
         reject(new Error('navigation timeout'));

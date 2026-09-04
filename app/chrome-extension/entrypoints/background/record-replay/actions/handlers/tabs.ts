@@ -143,6 +143,9 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
         targetTabId = params.tabId;
       } else {
         // Find tab by URL or title
+        // tab-scan-ok: matching by url/title requires enumerating open tabs.
+        // Only the tab the step names is selected, and the run is re-pinned to
+        // it through newTabId.
         const tabs = await chrome.tabs.query({});
 
         if (params.urlContains !== undefined) {
@@ -256,6 +259,7 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
           return failed('VALIDATION_ERROR', 'URL pattern cannot be empty');
         }
 
+        // tab-scan-ok: closeTab by url pattern has to enumerate open tabs.
         const tabs = await chrome.tabs.query({});
         tabIds = tabs
           .filter((tab) => tab.url && tab.url.toLowerCase().includes(urlPattern) && tab.id)

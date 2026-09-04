@@ -8,6 +8,7 @@ import type { StepScript } from '../../types';
 import type { ExecCtx } from '../../nodes';
 import { RunLogger } from '../logging/run-logger';
 import { applyAssign } from '../../rr-utils';
+import { resolveRunTab } from '../tab-context';
 
 export class AfterScriptQueue {
   private queue: StepScript[] = [];
@@ -45,9 +46,8 @@ export class AfterScriptQueue {
             message: 'Script contains potentially unsafe tokens; executed in isolated world',
           });
         }
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        const tabId = tabs?.[0]?.id;
-        if (typeof tabId !== 'number') throw new Error('Active tab not found');
+        // After-scripts run on the run's pinned tab, never on the user's tab.
+        const tabId = await resolveRunTab(ctx);
         const [{ result }] = await chrome.scripting.executeScript({
           target: { tabId },
           func: (userCode: string) => {

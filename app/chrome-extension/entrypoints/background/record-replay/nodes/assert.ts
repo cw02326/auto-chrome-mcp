@@ -3,6 +3,7 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepAssert } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 
 export const assertNode: NodeRuntime<StepAssert> = {
   validate: (step) => {
@@ -29,16 +30,18 @@ export const assertNode: NodeRuntime<StepAssert> = {
       const text = (s.assert as any).textPresent;
       const res = await handleCallTool({
         name: TOOL_NAMES.BROWSER.COMPUTER,
-        args: { action: 'wait', text, appear: true, timeout: (step as any).timeoutMs || 5000 },
+        args: runToolArgs(ctx, {
+          action: 'wait',
+          text,
+          appear: true,
+          timeout: (step as any).timeoutMs || 5000,
+        }),
       });
       if ((res as any).isError) return fail('assert text failed');
     } else if ('exists' in s.assert || 'visible' in s.assert) {
       const selector = (s.assert as any).exists || (s.assert as any).visible;
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const firstTab = tabs && tabs[0];
-      const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-      if (!tabId) return fail('Active tab not found');
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+      const tabId = await resolveRunTab(ctx);
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
       const ensured: any = (await chrome.tabs.sendMessage(
         tabId,
         {
@@ -54,11 +57,8 @@ export const assertNode: NodeRuntime<StepAssert> = {
       }
     } else if ('attribute' in s.assert) {
       const { selector, name, equals, matches } = (s.assert as any).attribute || {};
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const firstTab = tabs && tabs[0];
-      const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-      if (!tabId) return fail('Active tab not found');
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+      const tabId = await resolveRunTab(ctx);
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: runToolArgs(ctx, {}) });
       const resp: any = (await chrome.tabs.sendMessage(
         tabId,
         { action: 'getAttributeForSelector', selector, name } as any,

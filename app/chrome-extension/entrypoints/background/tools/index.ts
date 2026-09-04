@@ -72,6 +72,8 @@ const WATCHDOG_OVERRIDES: Record<string, number> = {
   [B.GIF_RECORDER]: 5 * 60_000,
   [B.PERFORMANCE_START_TRACE]: 5 * 60_000,
   [B.PERFORMANCE_STOP_TRACE]: 5 * 60_000,
+  // 흐름 하나가 여러 스텝을 도는 도구 — 배치와 같은 예산을 준다.
+  [TOOL_NAMES.RECORD_REPLAY.FLOW_RUN]: 10 * 60_000,
 };
 
 /**
@@ -263,7 +265,14 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
     // chrome_batch 는 내부에서 step 별로 handleCallTool 을 재진입해 각자 탭 락을 잡는다.
     // 배치 자체가 락을 잡으면 step 과 이중 획득 → 교착이므로 배치는 락 없이 실행.
-    const lockTabId = param.name === TOOL_NAMES.BROWSER.BATCH ? undefined : trackedTabId;
+    // record_replay_flow_run 도 같다: 흐름의 각 노드가 작업 탭 id 를 실어 handleCallTool 을
+    // 다시 부르므로(engine/tab-context.ts 의 runToolArgs), 바깥 호출이 그 탭 락을 쥐고 있으면
+    // 첫 노드에서 바로 교착한다. 스텝 단위 락은 재진입 호출이 각자 잡는다.
+    const REENTRANT_TOOLS = new Set<string>([
+      TOOL_NAMES.BROWSER.BATCH,
+      TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+    ]);
+    const lockTabId = REENTRANT_TOOLS.has(param.name) ? undefined : trackedTabId;
 
     // auto-chrome-mcp fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
     // 새 탭/팝업 창을 열었으면 결과에 알림을 첨부한다. 이게 없으면 모델은 팝업이

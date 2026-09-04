@@ -13,9 +13,13 @@ import type { ActionExecutionContext } from '@/entrypoints/background/record-rep
  * Create a minimal ExecCtx for testing
  */
 export function createMockExecCtx(overrides: Partial<ExecCtx> = {}): ExecCtx {
+  // ExecCtx extends RunTabContext: every run is pinned to an explicit tab, so
+  // the mock supplies one rather than leaving the engine to find a tab itself.
   return {
     vars: {},
     logger: vi.fn(),
+    tabId: 1,
+    source: 'explicit',
     ...overrides,
   };
 }

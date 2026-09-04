@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`record_replay_flow_run` / `record_replay_list_published` 를 MCP 도구 목록에 다시 실었다.**
+  사이드패널에서 녹화·발행한 흐름을 도구 호출로 실행할 수 있다. 실행 탭은 엔진이 고르지 않고
+  작업 탭 게이트가 정한다: `tabId` 를 생략하면 이 세션·레인의 작업 탭이 주입되고, 작업 탭이
+  없으면 `no_work_tab` 으로 거절한다(먼저 `chrome_navigate` 로 작업 탭을 만들면 된다).
+  `tabTarget:'new'` 는 작업 탭이 있는 창에 세션 소유 백그라운드 탭을 만들어 거기서 실행하고
+  탭을 남긴다. 결과는 요약(성공 여부, 스텝 수, 실패한 스텝, 흐름 출력)이고 스텝 로그는
+  `returnLogs:true` 일 때만 4000자까지 싣는다. `chrome_batch` 안에 중첩하는 것은 계속 막는다.
+
+### Fixed
+
+- **백그라운드 작업 모드가 켜져 있어도 `background:false` 로 호출하면 사용자가 보던 탭을
+  작업 탭으로 채가던 문제를 고쳤다.** `chrome_navigate` 의 "이미 열린 탭" 재사용 필터가 호출
+  인자 `background` 에 묶여 있어, 모드가 켜져 있어도 인자 하나로 필터가 통째로 꺼졌다. 이제
+  재사용 범위는 전역 모드 설정이 정하고(`isBackgroundModeEnabled`), 모드가 켜져 있으면 이
+  세션·레인이 소유한 탭과 그 작업 탭만 후보가 된다. `background` 인자는 탭 활성화·창 포커스
+  여부에만 쓴다. 모드를 끄면 예전 동작 그대로다.
+- **`chrome.tabs.query` 의 오류를 전부 삼키던 것을 고쳤다.** URL 패턴 조회가 실패하면 이유를
+  가리지 않고 "재사용 후보 없음" 으로 넘어가, 권한 오류나 확장 컨텍스트 무효화 같은 진짜
+  고장도 조용히 새 탭 생성으로 이어졌다. 이제 match pattern 거부만 후보 없음으로 복구하고
+  나머지 오류는 그대로 알린다.
+- **`view-source:` 나 경로 없는 `chrome://settings` 처럼 http(s) 가 아닌 주소로 이동할 때
+  재사용 탐색이 실패하던 문제를 고쳤다.** 이런 주소는 크롬 URL 패턴 문법에 맞지 않아 조회
+  자체가 거부됐다. 이제 패턴 조회를 쓰지 않고 대상 탭들의 주소를 정규화해(앞뒤 공백, 끝
+  슬래시, 스킴·호스트 대소문자) 문자열로 비교한다. URL 패턴 생성은 http(s) 전용으로 남겼다.
+- **리다이렉트로 `file:` 문서에 도달했는데 파일 URL 접근 권한이 없으면 결과에
+  `fileSchemeAccessWarning` 경고를 함께 돌려준다.** 이동은 이미 끝난 상황이라 오류가 아니라
+  안내다.
+
+### Security
+
+- **파일 URL 접근 권한 검사를 우회할 수 있던 세 경로를 막았다.** ① 검사가 새 탭을 만들 때만
+  걸려 있어, 권한을 끈 뒤 이미 열려 있던 세션 소유 `file:` 탭을 재사용하면 그냥 지나갔다.
+  이제 재사용 탐색 전에 확인한다. ② 판별이 `startsWith('file:')` 이라 `FILE:///…` 와 앞에
+  공백이 붙은 주소가 통과했다. 이제 URL 파서로 스킴을 판별한다. ③ 권한 조회 API 호출이
+  실패하면 허용으로 넘어갔다. 이제 권한 상태를 모르면 거부한다(API 자체가 없는 옛 크롬은
+  종전대로 통과).
+
 ## [v1.11.2] file:// 이동 수정 (2026-09-05)
 
 ### Fixed

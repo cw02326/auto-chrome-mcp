@@ -14,6 +14,7 @@ import {
   pruneOwnedTabs,
   sessionKeyOf,
   getOwnedWorkTabId,
+  getSessionScopedTabIds,
   getWorkTabId,
   setWorkTab,
 } from '@/utils/work-tab-manager';
@@ -36,7 +37,13 @@ import {
 // auto-chrome-mcp fork(A2): navigate 후 로딩 완료 대기
 import { waitForPageLoad, watchNavigationStart, type NavigateWaitUntil } from './wait-for';
 import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
-import { fileSchemeAccessErrorText, isFileSchemeAccessAllowed } from './url-target';
+import {
+  assertFileSchemeAccessAllowed,
+  FILE_SCHEME_ACCESS_WARNING,
+  isFileSchemeAccessAllowed,
+  isFileSchemeUrl,
+  normalizeUrlForMatch,
+} from './url-target';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -45,10 +52,33 @@ const DEFAULT_WINDOW_HEIGHT = 720;
 // www/프로토콜 변형(altProtocol)은 http(s) 리다이렉트 관례를 노린 것이라 이 두 스킴에만 뜻이 있다.
 const HTTP_LIKE_PROTOCOLS = new Set(['http:', 'https:']);
 
-// chrome.tabs.query 의 url 매치 패턴은 'scheme://host/path' 형태를 요구한다. host 가 없는
-// 스킴(data: 등)은 애초에 유효한 패턴을 만들 수 없다 — 시도 자체를 하지 않고 재사용 후보
-// 없음으로 처리해 호출부가 곧장 새 탭 생성으로 넘어가게 한다.
-const QUERY_UNSUPPORTED_PROTOCOLS = new Set(['data:', 'javascript:', 'blob:']);
+/**
+ * chrome.tabs.query({url}) 로 후보를 찾아도 되는 입력인지.
+ *
+ * 2026-09-05 Codex 4차 검토(항목 5): match pattern 조회는 http(s) 밖에서는 신뢰할 수 없다.
+ * `view-source:https://…`, 경로 없는 `chrome://settings`, 슬래시 없는 확장 origin 은 크롬이
+ * 패턴 파싱 단계에서 거부해 조회 자체가 throw 한다. 이런 입력은 패턴을 만들지 않고,
+ * 후보 목록의 URL 을 정규화해 문자열로 비교한다(collectReuseCandidates 참조).
+ *
+ * 호출자가 직접 준 와일드카드 패턴(`*` 포함)은 예전대로 그대로 조회에 넘긴다.
+ */
+export function isPatternQueryableUrl(input: string): boolean {
+  if (typeof input !== 'string') return false;
+  const trimmed = input.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes('*')) return true;
+  try {
+    return HTTP_LIKE_PROTOCOLS.has(new URL(trimmed).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/** chrome.tabs.query 가 match pattern 을 거부한 오류인지 (그 경우에만 후보 없음으로 복구). */
+function isInvalidMatchPatternError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /invalid\s+(?:url|match)\s+pattern/i.test(message);
+}
 
 /**
  * auto-chrome-mcp fork(버그 수정): "이미 열린 탭" 재사용 후보를 찾기 위한 chrome.tabs.query
@@ -62,10 +92,10 @@ const QUERY_UNSUPPORTED_PROTOCOLS = new Set(['data:', 'javascript:', 'blob:']);
  *
  * 규칙:
  *   - `http:`/`https:` 만 www·프로토콜 변형(6개)을 만든다.
- *   - 그 외 스킴(`file:`, `chrome-extension:`, `chrome:`, `about:` 등)은 변형 없이
- *     정확한 URL 하나만 돌려준다 — 경로 끝에 `/*` 도 붙이지 않는다(스킴이 이미 전체
- *     리소스를 가리키므로 host 기준 와일드카드 확장이 의미가 없다).
- *   - chrome.tabs.query 가 애초에 거부하는 스킴(`data:` 등)은 빈 배열을 돌려준다.
+ *   - 그 외 스킴(`file:`, `chrome-extension:`, `chrome:`, `view-source:`, `data:` 등)은
+ *     빈 배열이다. 2026-09-05 Codex 4차 검토(항목 5) — 크롬 match pattern 문법에 맞지 않아
+ *     조회가 throw 하므로 이 함수는 http(s) 전용으로 남기고, 나머지 스킴은 호출부가
+ *     정규화 URL 문자열 비교로 처리한다.
  */
 export function buildUrlPatterns(input: string): string[] {
   const patterns = new Set<string>();
@@ -77,13 +107,12 @@ export function buildUrlPatterns(input: string): string[] {
 
     const u = new URL(input);
 
-    if (QUERY_UNSUPPORTED_PROTOCOLS.has(u.protocol)) {
-      return [];
-    }
-
+    // 2026-09-05 Codex 4차 검토(항목 5): http(s) 가 아닌 스킴은 패턴을 만들지 않는다.
+    // 예전에는 입력 URL 을 그대로 패턴으로 넘겼는데, 크롬은 `file:///C:/x.md` 처럼 host 가
+    // 비어 있거나 `view-source:` 처럼 패턴 문법에 맞지 않는 값을 거부한다. 호출부는 이 빈
+    // 배열을 보고 정규화 문자열 비교 경로로 간다.
     if (!HTTP_LIKE_PROTOCOLS.has(u.protocol)) {
-      patterns.add(input);
-      return Array.from(patterns);
+      return [];
     }
 
     // Use host-level wildcard to include all paths; we'll do precise selection later
@@ -168,6 +197,82 @@ class NavigateTool extends BaseBrowserToolExecutor {
     } catch (error) {
       console.warn('[NavigateTool] Idle work-tab cleanup failed:', error);
     }
+  }
+
+  /**
+   * auto-chrome-mcp fork(2026-09-05 Codex 4차 검토, 항목 1·4·5): "이미 열린 탭" 재사용 후보.
+   *
+   * 항목 1 — 재사용 범위는 호출 인자 `background` 가 아니라 **전역 백그라운드 작업 모드**가
+   *   정한다. 예전에는 `background === true` 일 때만 사용자 탭을 걸렀다. 모드가 켜져 있어도
+   *   호출자가 `background:false` 를 주면 필터가 통째로 꺼져, 사용자가 보고 있던 같은 URL 의
+   *   탭(file:// 포함 모든 스킴)을 MCP 작업 탭으로 채갔다. `background` 인자는 이 아래
+   *   경로에서 활성화·포커스 여부로만 쓴다.
+   *   모드 ON 의 후보는 이 세션·레인이 소유한 탭과 이 버킷의 작업 탭뿐이다
+   *   (getSessionScopedTabIds — url 로 대상을 고르는 도구들과 같은 규칙).
+   *
+   * 항목 4 — tabs.query 의 오류를 전부 삼키지 않는다. match pattern 거부만 "후보 없음" 으로
+   *   복구하고, 권한 오류·extension context 무효화·크롬 내부 오류는 그대로 올린다. 예전에는
+   *   전부 삼켜서 진짜 고장도 조용히 새 탭 생성으로 넘어갔다.
+   *
+   * 항목 5 — http(s) 가 아닌 스킴은 match pattern 조회 자체를 하지 않고, 후보 목록의 URL 을
+   *   정규화해 문자열로 비교한다.
+   */
+  private async collectReuseCandidates(
+    url: string,
+    mcpSessionId: string,
+    patternQueryable: boolean,
+  ): Promise<chrome.tabs.Tab[]> {
+    const scoped = await isBackgroundModeEnabled();
+
+    if (patternQueryable) {
+      const urlPatterns = buildUrlPatterns(url);
+      if (urlPatterns.length === 0) return [];
+      let matched: chrome.tabs.Tab[] = [];
+      try {
+        matched = await chrome.tabs.query({ url: urlPatterns });
+      } catch (error) {
+        if (!isInvalidMatchPatternError(error)) throw error;
+        console.warn(
+          '[NavigateTool] tabs.query rejected the url match patterns, treating as no reuse candidates:',
+          error,
+        );
+        return [];
+      }
+      console.log(
+        `Found ${matched.length} matching tabs with patterns:`,
+        urlPatterns.map(redactUrlForLog),
+      );
+      if (!scoped) return matched;
+      const allowed = new Set(await getSessionScopedTabIds(mcpSessionId));
+      const filtered = matched.filter((t) => typeof t.id === 'number' && allowed.has(t.id));
+      if (filtered.length !== matched.length) {
+        console.log(
+          `Background mode: ${matched.length - filtered.length} user tab(s) excluded from reuse`,
+        );
+      }
+      return filtered;
+    }
+
+    // 비 http(s): 정규화 URL 문자열 동등 비교.
+    const target = normalizeUrlForMatch(url);
+    if (target === null) return [];
+    const pool = scoped
+      ? await this.getSessionScopedTabs(mcpSessionId)
+      : await chrome.tabs.query({});
+    return pool.filter((tab) => normalizeUrlForMatch(tab.url) === target);
+  }
+
+  /** 이 세션·레인이 소유한 탭들을 실제 탭 객체로 읽어 온다 (닫힌 탭은 건너뛴다). */
+  private async getSessionScopedTabs(mcpSessionId: string): Promise<chrome.tabs.Tab[]> {
+    const out: chrome.tabs.Tab[] = [];
+    for (const id of await getSessionScopedTabIds(mcpSessionId)) {
+      try {
+        out.push(await chrome.tabs.get(id));
+      } catch {
+        // 이미 닫힌 탭.
+      }
+    }
+    return out;
   }
 
   /**
@@ -360,6 +465,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
         } catch {
           // 탭이 닫혔으면 기존 값 유지
         }
+        // 2026-09-05 Codex 4차 검토(항목 6): 요청 URL 은 file: 이 아니었는데 리다이렉트로
+        // file: 문서에 도달했고 권한이 없으면, 이동은 이미 끝났으므로 오류가 아니라 경고만
+        // 싣는다. 크롬이 web→file 리다이렉트를 막으므로 실제로 드문 경로다.
+        if (isFileSchemeUrl(payload.url) && !(await isFileSchemeAccessAllowed())) {
+          payload.fileSchemeAccessWarning = FILE_SCHEME_ACCESS_WARNING;
+        }
         first.text = JSON.stringify(payload);
       }
     } catch (error) {
@@ -441,8 +552,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // auto-chrome-mcp fork(버그 수정): file: 대상은 확장의 파일 URL 접근 권한이 꺼져
       // 있으면 이동이 조용히 실패(빈 페이지로 남음)하므로, tabs.query 나 tabs.create/update
       // 를 시도하기 전에 미리 걸러 구조화 오류로 안내한다.
-      if (url.startsWith('file:') && !(await isFileSchemeAccessAllowed())) {
-        return createErrorResponse(fileSchemeAccessErrorText(this.name));
+      // 2026-09-05 Codex 4차 검토(항목 2·3): 판별과 권한 확인을 url-target 의 공통 가드로
+      // 모았다. 예전 `startsWith('file:')` 은 `FILE:///…` 와 앞 공백을 놓쳤고, 재사용 탐색
+      // 경로(url-target)와 판정이 갈렸다.
+      try {
+        await assertFileSchemeAccessAllowed(url, this.name);
+      } catch (error) {
+        return createErrorResponse(error instanceof Error ? error.message : String(error));
       }
 
       // Handle history navigation: url="back" or url="forward"
@@ -492,49 +608,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
       }
 
       // 1. Check if URL is already open
-      // Prefer Chrome's URL match patterns for robust matching (host/path variations)
       console.log(`Checking if URL is already open: ${redactUrlForLog(url)}`);
-
-      // Build robust match patterns from the provided URL (module-level buildUrlPatterns,
-      // http(s) 전용 www/프로토콜 변형 — 자세한 규칙은 함수 주석 참조).
-      const urlPatterns = buildUrlPatterns(url);
-      let candidateTabs: chrome.tabs.Tab[] = [];
-      if (urlPatterns.length > 0) {
-        try {
-          candidateTabs = await chrome.tabs.query({ url: urlPatterns });
-        } catch (error) {
-          // chrome.tabs.query 가 거부하는 match pattern 이면 재사용 후보 없음으로 보고
-          // 새 탭 생성으로 넘어간다 — 이동 자체를 막지 않는다.
-          console.warn(
-            '[NavigateTool] tabs.query with url patterns failed, treating as no reuse candidates:',
-            error,
-          );
-        }
-      }
-      console.log(
-        `Found ${candidateTabs.length} matching tabs with patterns:`,
-        urlPatterns.map(redactUrlForLog),
-      );
-
-      // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 사용자가 열어둔 탭을 재사용하지 않는다
-      // — 사용자가 보던 동일 URL 탭을 MCP 가 잡아 조작하는 간섭 방지. 이 세션의 기존 작업 탭과
-      // (dedicated 모드일 때) MCP 작업 창 안의 탭만 재사용 후보로 인정하고, 없으면 아래에서
-      // 새 탭을 만든다. 창 모드와 무관하게 적용 — 'current' 모드에서도 하이재킹은 막아야 한다.
-      if (candidateTabs.length > 0 && background === true) {
-        const sessionWorkTabId = await getWorkTabId(mcpSessionId);
-        const filtered: chrome.tabs.Tab[] = [];
-        for (const t of candidateTabs) {
-          if (t.id === sessionWorkTabId || (await isMcpWindow(t.windowId))) {
-            filtered.push(t);
-          }
-        }
-        if (filtered.length !== candidateTabs.length) {
-          console.log(
-            `Background mode: ${candidateTabs.length - filtered.length} user tab(s) excluded from reuse`,
-          );
-        }
-        candidateTabs = filtered;
-      }
+      const patternQueryable = isPatternQueryableUrl(url);
+      const candidateTabs = await this.collectReuseCandidates(url, mcpSessionId, patternQueryable);
 
       // Prefer strict match when user specifies a concrete path/query.
       // Only fall back to host-level activation when the target is site root.
@@ -604,7 +680,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
       };
 
       const explicitTab = await this.tryGetTab(tabId);
-      const existingTab = explicitTab || pickBestMatch(url, candidateTabs);
+      // 비 http(s) 후보는 이미 정규화 URL 동등으로 걸러졌다 — 호스트/경로 점수 매칭은
+      // http(s) 전용이라 그대로 적용하면 멀쩡한 일치를 떨어뜨린다.
+      const existingTab =
+        explicitTab || (patternQueryable ? pickBestMatch(url, candidateTabs) : candidateTabs[0]);
       if (existingTab?.id !== undefined) {
         console.log(
           `URL already open in Tab ID: ${existingTab.id}, Window ID: ${existingTab.windowId}`,
