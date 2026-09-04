@@ -35,6 +35,39 @@ export function normalizeUrlForMatch(url?: string | null): string | null {
 }
 
 /**
+ * auto-chrome-mcp fork: `file:` 대상으로 이동하기 전에 확장이 파일 URL 접근 권한을
+ * 가졌는지 확인한다. 권한이 꺼진 채로 이동을 시도하면 탭이 빈 페이지로 남거나
+ * 조용히 실패하므로, 이동 자체를 걸기 전에 미리 걸러낸다.
+ *
+ * `chrome.extension.isAllowedFileSchemeAccess` 가 없는 환경(구형 크롬, 테스트 목)은
+ * 검사를 건너뛰고 통과시킨다.
+ */
+export async function isFileSchemeAccessAllowed(): Promise<boolean> {
+  const api = (
+    chrome as unknown as {
+      extension?: { isAllowedFileSchemeAccess?: () => Promise<boolean> };
+    }
+  )?.extension?.isAllowedFileSchemeAccess;
+  if (typeof api !== 'function') return true;
+  try {
+    return (await api()) === true;
+  } catch {
+    return true;
+  }
+}
+
+export const FILE_SCHEME_ACCESS_DISABLED_ERROR = 'file_scheme_access_disabled';
+
+/** file: 접근 권한이 꺼져 있을 때 돌려줄 구조화 오류 본문(JSON 문자열). */
+export function fileSchemeAccessErrorText(toolName: string): string {
+  return JSON.stringify({
+    error: FILE_SCHEME_ACCESS_DISABLED_ERROR,
+    tool: toolName,
+    message: "chrome://extensions 에서 이 확장의 '파일 URL에 대한 액세스 허용' 을 켜세요.",
+  });
+}
+
+/**
  * `url` 과 일치하는 탭을 찾는다. 백그라운드 작업 모드에서는 이 세션이 소유한 탭만 본다.
  * 못 찾으면 null (호출자가 새 탭을 만든다).
  */
@@ -99,6 +132,9 @@ export async function createTabForUrl(
   url: string,
   options: { background: boolean; windowId?: number; reason: string; args: any },
 ): Promise<chrome.tabs.Tab> {
+  if (url.startsWith('file:') && !(await isFileSchemeAccessAllowed())) {
+    throw new Error(fileSchemeAccessErrorText(options.reason));
+  }
   const createInfo: chrome.tabs.CreateProperties = {
     url,
     active: options.background ? false : true,

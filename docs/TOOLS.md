@@ -123,7 +123,9 @@ Navigate to a URL with optional viewport control.
 **Parameters**:
 
 - `url` (string, optional): URL to navigate to (omit when `refresh=true`). Special values:
-  `"back"` / `"forward"` navigate that tab's history.
+  `"back"` / `"forward"` navigate that tab's history. `file://` targets require the extension's
+  "Allow access to file URLs" toggle at `chrome://extensions` to be on, or the call returns a
+  `file_scheme_access_disabled` error instead of attempting the navigation.
 - `refresh` (boolean, optional, default `false`): reload instead of navigating (`url` ignored)
 - `newWindow` (boolean, optional): Create new window (default: false)
 - `newTab` (boolean, optional, default `false`): force a brand-new tab. By default this session

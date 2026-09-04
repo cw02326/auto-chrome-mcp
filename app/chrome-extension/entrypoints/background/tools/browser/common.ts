@@ -36,10 +36,80 @@ import {
 // auto-chrome-mcp fork(A2): navigate 후 로딩 완료 대기
 import { waitForPageLoad, watchNavigationStart, type NavigateWaitUntil } from './wait-for';
 import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
+import { fileSchemeAccessErrorText, isFileSchemeAccessAllowed } from './url-target';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
+
+// www/프로토콜 변형(altProtocol)은 http(s) 리다이렉트 관례를 노린 것이라 이 두 스킴에만 뜻이 있다.
+const HTTP_LIKE_PROTOCOLS = new Set(['http:', 'https:']);
+
+// chrome.tabs.query 의 url 매치 패턴은 'scheme://host/path' 형태를 요구한다. host 가 없는
+// 스킴(data: 등)은 애초에 유효한 패턴을 만들 수 없다 — 시도 자체를 하지 않고 재사용 후보
+// 없음으로 처리해 호출부가 곧장 새 탭 생성으로 넘어가게 한다.
+const QUERY_UNSUPPORTED_PROTOCOLS = new Set(['data:', 'javascript:', 'blob:']);
+
+/**
+ * auto-chrome-mcp fork(버그 수정): "이미 열린 탭" 재사용 후보를 찾기 위한 chrome.tabs.query
+ * match pattern 목록을 만든다.
+ *
+ * 예전 구현은 모든 URL 을 웹 주소로 가정해 www 유무·http↔https 변형까지 만들었다.
+ * `file:` 처럼 host 가 없는 스킴에 적용하면 altProtocol 분기가 무조건 'https:' 로 튀어
+ * (`u.protocol === 'https:' ? 'http:' : 'https:'` 는 https 가 아닌 모든 것을 https 로 본다)
+ * `https:///*` 같은 무효 패턴이 나오고, chrome.tabs.query 가 그 즉시 throw 해 이동 자체가
+ * 실패했다(`file:///C:/...README.md` 이동 시 재현).
+ *
+ * 규칙:
+ *   - `http:`/`https:` 만 www·프로토콜 변형(6개)을 만든다.
+ *   - 그 외 스킴(`file:`, `chrome-extension:`, `chrome:`, `about:` 등)은 변형 없이
+ *     정확한 URL 하나만 돌려준다 — 경로 끝에 `/*` 도 붙이지 않는다(스킴이 이미 전체
+ *     리소스를 가리키므로 host 기준 와일드카드 확장이 의미가 없다).
+ *   - chrome.tabs.query 가 애초에 거부하는 스킴(`data:` 등)은 빈 배열을 돌려준다.
+ */
+export function buildUrlPatterns(input: string): string[] {
+  const patterns = new Set<string>();
+  try {
+    if (input.includes('*')) {
+      patterns.add(input);
+      return Array.from(patterns);
+    }
+
+    const u = new URL(input);
+
+    if (QUERY_UNSUPPORTED_PROTOCOLS.has(u.protocol)) {
+      return [];
+    }
+
+    if (!HTTP_LIKE_PROTOCOLS.has(u.protocol)) {
+      patterns.add(input);
+      return Array.from(patterns);
+    }
+
+    // Use host-level wildcard to include all paths; we'll do precise selection later
+    const pathWildcard = '/*';
+
+    const hostNoWww = u.host.replace(/^www\./, '');
+    const hostWithWww = hostNoWww.startsWith('www.') ? hostNoWww : `www.${hostNoWww}`;
+
+    // Keep original host
+    patterns.add(`${u.protocol}//${u.host}${pathWildcard}`);
+    // Add no-www variant
+    patterns.add(`${u.protocol}//${hostNoWww}${pathWildcard}`);
+    // Add www variant
+    patterns.add(`${u.protocol}//${hostWithWww}${pathWildcard}`);
+
+    // Add protocol variant to catch http↔https redirects
+    const altProtocol = u.protocol === 'https:' ? 'http:' : 'https:';
+    patterns.add(`${altProtocol}//${u.host}${pathWildcard}`);
+    patterns.add(`${altProtocol}//${hostNoWww}${pathWildcard}`);
+    patterns.add(`${altProtocol}//${hostWithWww}${pathWildcard}`);
+  } catch {
+    // Fallback: best-effort wildcard suffix
+    patterns.add(input.endsWith('/') ? `${input}*` : `${input}/*`);
+  }
+  return Array.from(patterns);
+}
 
 interface NavigateToolParams {
   url?: string;
@@ -368,6 +438,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
         return createErrorResponse('URL parameter is required when refresh is not true');
       }
 
+      // auto-chrome-mcp fork(버그 수정): file: 대상은 확장의 파일 URL 접근 권한이 꺼져
+      // 있으면 이동이 조용히 실패(빈 페이지로 남음)하므로, tabs.query 나 tabs.create/update
+      // 를 시도하기 전에 미리 걸러 구조화 오류로 안내한다.
+      if (url.startsWith('file:') && !(await isFileSchemeAccessAllowed())) {
+        return createErrorResponse(fileSchemeAccessErrorText(this.name));
+      }
+
       // Handle history navigation: url="back" or url="forward"
       if (url === 'back' || url === 'forward') {
         // auto-chrome-mcp fork(F3): refresh 와 같은 해석 순서를 쓴다.
@@ -418,44 +495,22 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // Prefer Chrome's URL match patterns for robust matching (host/path variations)
       console.log(`Checking if URL is already open: ${redactUrlForLog(url)}`);
 
-      // Build robust match patterns from the provided URL.
-      // This mirrors the approach in CloseTabsTool: ensure wildcard path and
-      // add common variants (www/no-www, http/https) to handle real-world redirects.
-      const buildUrlPatterns = (input: string): string[] => {
-        const patterns = new Set<string>();
-        try {
-          if (!input.includes('*')) {
-            const u = new URL(input);
-            // Use host-level wildcard to include all paths; we'll do precise selection later
-            const pathWildcard = '/*';
-
-            const hostNoWww = u.host.replace(/^www\./, '');
-            const hostWithWww = hostNoWww.startsWith('www.') ? hostNoWww : `www.${hostNoWww}`;
-
-            // Keep original host
-            patterns.add(`${u.protocol}//${u.host}${pathWildcard}`);
-            // Add no-www variant
-            patterns.add(`${u.protocol}//${hostNoWww}${pathWildcard}`);
-            // Add www variant
-            patterns.add(`${u.protocol}//${hostWithWww}${pathWildcard}`);
-
-            // Add protocol variant to catch http↔https redirects
-            const altProtocol = u.protocol === 'https:' ? 'http:' : 'https:';
-            patterns.add(`${altProtocol}//${u.host}${pathWildcard}`);
-            patterns.add(`${altProtocol}//${hostNoWww}${pathWildcard}`);
-            patterns.add(`${altProtocol}//${hostWithWww}${pathWildcard}`);
-          } else {
-            patterns.add(input);
-          }
-        } catch {
-          // Fallback: best-effort wildcard suffix
-          patterns.add(input.endsWith('/') ? `${input}*` : `${input}/*`);
-        }
-        return Array.from(patterns);
-      };
-
+      // Build robust match patterns from the provided URL (module-level buildUrlPatterns,
+      // http(s) 전용 www/프로토콜 변형 — 자세한 규칙은 함수 주석 참조).
       const urlPatterns = buildUrlPatterns(url);
-      let candidateTabs = await chrome.tabs.query({ url: urlPatterns });
+      let candidateTabs: chrome.tabs.Tab[] = [];
+      if (urlPatterns.length > 0) {
+        try {
+          candidateTabs = await chrome.tabs.query({ url: urlPatterns });
+        } catch (error) {
+          // chrome.tabs.query 가 거부하는 match pattern 이면 재사용 후보 없음으로 보고
+          // 새 탭 생성으로 넘어간다 — 이동 자체를 막지 않는다.
+          console.warn(
+            '[NavigateTool] tabs.query with url patterns failed, treating as no reuse candidates:',
+            error,
+          );
+        }
+      }
       console.log(
         `Found ${candidateTabs.length} matching tabs with patterns:`,
         urlPatterns.map(redactUrlForLog),

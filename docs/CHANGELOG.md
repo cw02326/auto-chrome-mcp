@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.11.2] file:// 이동 수정 (2026-09-05)
+
+### Fixed
+
+- **`chrome_navigate` 로 `file://` 로 이동하면 무효 URL 패턴 오류로 실패하던 버그를 고쳤다.**
+  `buildUrlPatterns` 가 모든 URL 을 웹 주소로 가정해 www·http/https 변형까지 만들었는데,
+  `file:` 처럼 host 가 없는 스킴에 적용하면 altProtocol 분기가 무조건 `https:` 로 튀어
+  `https:///*` 같은 무효 match pattern 이 나오고 `chrome.tabs.query` 가 그 자리에서 실패했다.
+  이제 `http:`/`https:` 만 변형을 만들고, 그 외 스킴은 정확한 URL 하나만 쓰며,
+  `chrome.tabs.query` 가 애초에 거부하는 스킴(`data:` 등)은 패턴을 만들지 않고 곧장 새 탭을
+  만든다.
+- **`file://` 이동 전에 확장의 파일 URL 접근 권한을 확인한다.** 권한이 꺼져 있으면 이동을
+  시도하지 않고 `file_scheme_access_disabled` 오류와 `chrome://extensions` 에서 켜라는 안내를
+  돌려준다. `chrome_navigate` 와 `url` 인자로 대상을 고르는 다른 도구(웹 콘텐츠 읽기, 콘솔,
+  스크립트 주입, 네트워크 캡처)에 공통으로 적용된다.
+
 ## [v1.11.1] 산출물 저장 위치·자동 정리·doctor 포트 탐색 (2026-09-05)
 
 확장과 브리지를 함께 1.11.1 로 올린다. 자동 정리는 새 브리지가 시작할 때부터 돈다.
