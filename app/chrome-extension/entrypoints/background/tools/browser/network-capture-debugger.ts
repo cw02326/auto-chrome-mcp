@@ -2,11 +2,10 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import {
-  createTab as createTabGuarded,
-  focusWindow as focusWindowIfAllowed,
-} from '@/utils/activation-guard';
+import { focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
 import { NETWORK_FILTERS } from '@/common/constants';
+// auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 디버거를 붙이지 않도록 세션 소유 탭으로만 조회한다.
+import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
@@ -788,31 +787,34 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     let tabToOperateOn: chrome.tabs.Tab | undefined;
 
     try {
-      if (targetUrl) {
-        const existingTabs = await chrome.tabs.query({
-          url: targetUrl.startsWith('http') ? targetUrl : `*://*/*${targetUrl}*`,
-        }); // More specific query
-        if (existingTabs.length > 0 && existingTabs[0]?.id) {
-          tabToOperateOn = existingTabs[0];
-          // Ensure window gets focus (tab activation removed — the CDP Network domain
+      // auto-chrome-mcp fork(2026-09-04): 주입된 tabId 가 url 보다 우선한다 (webRequest 쪽과 동일).
+      const preferredTab = await this.tryGetTab(requestedTabId);
+
+      if (preferredTab) {
+        tabToOperateOn = preferredTab;
+      } else if (targetUrl) {
+        // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 이 세션이 소유한 탭에서만 찾는다.
+        // 예전에는 chrome.tabs.query({ url }) 로 모든 창을 뒤져 사용자 탭에 디버거가 붙었다.
+        const existing = await findTabByUrlInSessionScope(targetUrl, args);
+        if (existing?.id) {
+          tabToOperateOn = existing;
+          // Ensure window gets focus (tab activation removed; the CDP Network domain
           // works fine on background tabs; auto-chrome-mcp fork: OS 윈도우 포커스는 정책 통과 시에만).
           await focusWindowIfAllowed(tabToOperateOn.windowId);
         } else {
-          tabToOperateOn = await createTabGuarded(
-            {
-              url: targetUrl,
-              active: background === true ? false : true,
-            },
-            { reason: 'network-capture' },
-          );
+          // 지정한 창, 없으면 작업 탭의 창에 만든다.
+          tabToOperateOn = await createTabForUrl(targetUrl, {
+            background: background === true,
+            reason: 'network-capture',
+            args,
+          });
           // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
           // but for debugger attachment, it just needs the tabId.
           await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay
         }
       } else {
         try {
-          tabToOperateOn =
-            (await this.tryGetTab(requestedTabId)) || (await this.getActiveTabOrThrow());
+          tabToOperateOn = await this.getActiveTabOrThrow();
         } catch {
           return createErrorResponse('No active tab found and no URL provided.');
         }

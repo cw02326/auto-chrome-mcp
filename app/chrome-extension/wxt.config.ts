@@ -46,6 +46,9 @@ export default defineConfig({
     permissions: [
       'nativeMessaging',
       'tabs',
+      // auto-chrome-mcp fork: MCP 작업 탭을 탭 그룹 "MCP"(green) 로 묶는다
+      // (utils/mcp-tab-group.ts). 권한이 없으면 그룹 API 가 조용히 실패한다.
+      'tabGroups',
       'activeTab',
       'scripting',
       'contextMenus',

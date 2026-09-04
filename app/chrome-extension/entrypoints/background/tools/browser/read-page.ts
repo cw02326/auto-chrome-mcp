@@ -245,9 +245,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     const userControlled = requestedDepth !== undefined || !!focusRefId;
 
     try {
-      // Tip text returned to callers to guide next action
-      const standardTips =
-        "If the specific element you need is missing from the returned data, use the 'screenshot' tool to capture the current viewport and confirm the element's on-screen coordinates. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
+      // auto-chrome-mcp fork(T5): 고정 안내문(스크린샷 권고, markedElements 우선, compact 포맷 규칙,
+      // allFrames 프레임 마커)은 매 호출 250자+를 먹어 chrome_read_page description 으로 옮겼다.
+      // 응답에는 결과가 빈약할 때(sparse)만 한 줄 힌트를 싣는다.
+      const SPARSE_TIP =
+        'Few/no elements returned; if the target is missing, take a screenshot (chrome_computer action="screenshot") for its on-screen coordinates.';
 
       const explicit = await this.tryGetTab(args?.tabId);
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
@@ -394,7 +396,6 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         success: true,
         filter: filter || 'all',
         pageContent: mergedPageContent,
-        tips: standardTips,
         viewport: treeOk ? resp.viewport : { width: null, height: null, dpr: null },
         stats: stats || { processed: 0, included: 0, durationMs: 0 },
         refMapCount: refCount,
@@ -414,9 +415,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       if (allFrames) {
         basePayload.allFrames = true;
         basePayload.frames = frameSummaries ?? [];
-        basePayload.tips =
-          standardTips +
-          " Frame sections are marked with '=== frame <frameId> | <url> ==='. refs and selectors inside a frame section are frame-local: pass that frameId to chrome_click_element / chrome_fill_or_select when acting on them.";
+        // 프레임 마커 규칙("=== frame <frameId> | <url> ===", frame-local refs)은 description 으로 이동.
       }
 
       // Normal path: return tree
@@ -427,9 +426,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         if (compact) {
           basePayload.compact = true;
           basePayload.compactSavedChars = compactSavedChars;
-          basePayload.tips =
-            basePayload.tips +
-            ' Compact format (lossless): indentation is 1 space per tree level; the bare token ref_N is the element ref (pass it as refId/ref); @x,y is the element center. Unnamed empty wrapper nodes are collapsed. Pass compact:false for the verbose format.';
+          // compact 포맷 규칙(1칸=1레벨, ref_N, @x,y)은 description 으로 이동.
         }
 
         // auto-chrome-mcp fork(T2): 직전 호출과 본문이 완전히 같으면 본문을 다시 보내지 않는다.
@@ -530,6 +527,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             : resp?.error || topFrameError || 'tree_failed';
           basePayload.elements = merged;
           basePayload.count = fallback.elements.length;
+          basePayload.tips = SPARSE_TIP; // sparse 경로에서만 한 줄 안내
           if (!basePayload.pageContent) {
             basePayload.pageContent = formatElementsAsPageContent(merged);
           }

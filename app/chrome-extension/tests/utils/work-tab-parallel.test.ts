@@ -324,3 +324,178 @@ describe('pruneOwnedTabs — 병렬 에이전트 격리 (P1)', () => {
     expect(h.tabs.has(1003)).toBe(true);
   });
 });
+
+// ===========================================================================
+// F4 — 작업 탭·소유 탭 기록의 직렬화
+// ===========================================================================
+/**
+ * 재현하려는 실패: setWorkTab / addOwnedTab / pruneOwnedTabs 는 공유 map 을 읽어 복제한 뒤
+ * 비동기로 저장했다. 두 레인이 동시에 navigate 하면 각자 옛 map 을 복제하므로 마지막
+ * write 만 남아 한쪽 레인의 작업 탭 기록이 사라졌고, touch 디바운스 flush 는 3초 전에
+ * 캡처한 map 을 그대로 저장해 그 사이의 정리 결과를 되살렸다.
+ *
+ * 계약: 초기 load 는 promise 를 공유하고, 모든 map 변경과 storage write 는 한 줄로 세운다.
+ * 디바운스 flush 는 캡처한 map 이 아니라 실행 시점의 최신 상태를 저장한다.
+ */
+describe('work-tab 기록 직렬화 (F4)', () => {
+  let h: ChromeHarness;
+
+  beforeEach(() => {
+    h = installChromeMocks();
+  });
+
+  const laneKey = (mod: WorkTabManager, lane: string): string =>
+    mod.sessionKeyOf({ _mcpSessionId: SESSION, lane });
+
+  it('동시 첫 접근이 storage 를 한 번만 읽는다 (초기 load promise 공유)', async () => {
+    const { mod } = await loadModules();
+    h.openTab(701);
+    h.sessionStore['mcpWorkTabs'] = { [SESSION]: { tabId: 701, lastUsedAt: 1, owned: true } };
+
+    const results = await Promise.all([
+      mod.getWorkTabId(SESSION),
+      mod.getWorkTabId(SESSION),
+      mod.getWorkTabId(SESSION),
+    ]);
+    expect(results).toEqual([701, 701, 701]);
+
+    const getMock = chrome.storage.session.get as unknown as { mock: { calls: unknown[][] } };
+    const reads = getMock.mock.calls.filter((call) =>
+      JSON.stringify(call[0] ?? null).includes('mcpWorkTabs'),
+    );
+    expect(reads).toHaveLength(1);
+  });
+
+  it('회귀: 두 레인의 동시 setWorkTab 이 마지막 write 만 남기지 않는다', async () => {
+    const { mod } = await loadModules();
+    h.openTab(901);
+    h.openTab(902);
+    const keyA = laneKey(mod, 'a');
+    const keyB = laneKey(mod, 'b');
+
+    await Promise.all([mod.setWorkTab(901, keyA, true), mod.setWorkTab(902, keyB, true)]);
+
+    const stored = h.sessionStore['mcpWorkTabs'] as Record<string, { tabId: number }>;
+    expect(Object.keys(stored).sort()).toEqual([keyA, keyB].sort());
+    expect(stored[keyA].tabId).toBe(901);
+    expect(stored[keyB].tabId).toBe(902);
+    // in-memory 캐시도 같은 상태여야 한다.
+    expect(await mod.getWorkTabId(keyA)).toBe(901);
+    expect(await mod.getWorkTabId(keyB)).toBe(902);
+  });
+
+  it('회귀: 두 레인의 동시 addOwnedTab 이 서로의 소유 목록을 덮어쓰지 않는다', async () => {
+    const { mod } = await loadModules();
+    h.openTab(801);
+    h.openTab(802);
+    const keyA = laneKey(mod, 'a');
+    const keyB = laneKey(mod, 'b');
+
+    await Promise.all([mod.addOwnedTab(801, keyA), mod.addOwnedTab(802, keyB)]);
+
+    const owned = h.sessionStore['mcpOwnedTabs'] as Record<string, Array<{ tabId: number }>>;
+    expect(Object.keys(owned).sort()).toEqual([keyA, keyB].sort());
+    expect(owned[keyA].map((e) => e.tabId)).toEqual([801]);
+    expect(owned[keyB].map((e) => e.tabId)).toEqual([802]);
+  });
+
+  it('회귀: 네 레인이 동시에 작업 탭을 열어도 네 기록이 모두 남는다', async () => {
+    const { mod } = await loadModules();
+    const keys = ['a', 'b', 'c', 'd'].map((lane) => laneKey(mod, lane));
+
+    await Promise.all(keys.map((key, i) => openWorkTab(mod, h, 1101 + i, key)));
+
+    const stored = h.sessionStore['mcpWorkTabs'] as Record<string, { tabId: number }>;
+    expect(Object.keys(stored).sort()).toEqual([...keys].sort());
+    for (let i = 0; i < keys.length; i++) {
+      expect(await mod.getWorkTabId(keys[i])).toBe(1101 + i);
+    }
+    expect([...h.tabs.keys()].sort()).toEqual([1101, 1102, 1103, 1104]);
+  });
+});
+
+describe('touch 디바운스 flush 는 최신 상태를 저장한다 (F4)', () => {
+  let h: ChromeHarness;
+
+  beforeEach(() => {
+    h = installChromeMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-04T00:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('회귀: flush 가 그 사이 정리된 탭을 소유 목록에 되살리지 않는다', async () => {
+    const { mod } = await loadModules();
+
+    await openWorkTab(mod, h, 601, SESSION);
+    vi.setSystemTime(Date.now() + 1_000);
+    await openWorkTab(mod, h, 602, SESSION);
+    // 601 은 유예 안이라 아직 살아 있다.
+    expect(h.tabs.has(601)).toBe(true);
+
+    // 601 을 대상으로 도구 호출이 있었다고 표시 → 3초 뒤 저장이 예약된다.
+    mod.touchOwnedTab(601);
+    // 표시도 같은 큐를 타므로 반영을 기다린다 (락을 잡는 아무 호출이나 큐를 비워 준다).
+    await mod.getWorkTabId(SESSION);
+
+    // 두 탭 모두 유예 밖으로 보낸다. setSystemTime 은 예약된 타이머를 실행하지 않는다.
+    vi.setSystemTime(Date.now() + mod.OWNED_GRACE_MS + 1_000);
+
+    // 새 작업 탭이 열리며 유휴 탭 601·602 가 정리된다.
+    await openWorkTab(mod, h, 603, SESSION);
+    expect(h.tabs.has(601)).toBe(false);
+    expect(h.tabs.has(602)).toBe(false);
+
+    // 이제 예약돼 있던 flush 가 실행된다. 캡처한 map 을 그대로 쓰면 이미 닫힌 601·602 가
+    // 소유 목록에 되살아나고, 이후 정리가 없는 탭 id 를 계속 들고 다닌다.
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const owned = h.sessionStore['mcpOwnedTabs'] as Record<string, Array<{ tabId: number }>>;
+    const ids = Object.values(owned)
+      .flat()
+      .map((e) => e.tabId)
+      .sort();
+    expect(ids).toEqual([603]);
+  });
+});
+
+describe('touchOwnedTab 도 같은 큐를 쓴다 (F4)', () => {
+  let h: ChromeHarness;
+
+  beforeEach(() => {
+    h = installChromeMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-04T00:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('회귀: 정리 판정이 진행되는 중에 끼어든 touch 가 그 판정을 뒤집지 않는다', async () => {
+    const { mod } = await loadModules();
+
+    // 어느 레인의 현재 작업 탭도 아닌 소유 탭 하나를 유예 밖으로 보낸다 → 정리 대상.
+    h.openTab(1201);
+    await mod.addOwnedTab(1201, SESSION);
+    vi.setSystemTime(Date.now() + mod.OWNED_GRACE_MS + 1_000);
+
+    // 정리가 이 탭의 상태를 조회하는 그 순간, 다른 도구 호출이 "지금 쓰고 있다" 고 표시한다.
+    // touch 가 공유 map 을 락 밖에서 직접 고치면, 이미 유휴로 판정된 탭이 되살아난다.
+    const getMock = chrome.tabs.get as unknown as {
+      mockImplementationOnce: (fn: (tabId: number) => Promise<unknown>) => void;
+    };
+    getMock.mockImplementationOnce(async (tabId: number) => {
+      mod.touchOwnedTab(1201);
+      return { id: tabId, url: `https://example.com/${tabId}`, active: false, windowId: 1 };
+    });
+
+    const closed = await mod.pruneOwnedTabs(SESSION, 9999);
+
+    expect(closed).toEqual([1201]);
+    expect(h.tabs.has(1201)).toBe(false);
+  });
+});

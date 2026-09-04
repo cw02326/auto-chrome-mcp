@@ -34,11 +34,15 @@ interface Harness {
   tabs: TabRecord[];
   lastFocusedId: { value: number | null | undefined };
   focusListeners: Array<(windowId: number) => void>;
+  windowRemovedListeners: Array<(windowId: number) => void>;
   windowsCreate: ReturnType<typeof vi.fn>;
   windowsUpdate: ReturnType<typeof vi.fn>;
   windowsGet: ReturnType<typeof vi.fn>;
   tabsCreate: ReturnType<typeof vi.fn>;
   tabsUpdate: ReturnType<typeof vi.fn>;
+  tabsReload: ReturnType<typeof vi.fn>;
+  tabsGoBack: ReturnType<typeof vi.fn>;
+  tabsGoForward: ReturnType<typeof vi.fn>;
   debuggerSend: ReturnType<typeof vi.fn>;
 }
 
@@ -62,6 +66,7 @@ function installChrome(): Harness {
   ];
   const lastFocusedId: { value: number | null | undefined } = { value: USER_WINDOW_ID };
   const focusListeners: Array<(windowId: number) => void> = [];
+  const windowRemovedListeners: Array<(windowId: number) => void> = [];
   let nextWindowId = 100;
   let nextTabId = 500;
 
@@ -143,6 +148,22 @@ function installChrome(): Harness {
     return tab;
   });
 
+  // auto-chrome-mcp fork(F3): refresh / back / forward 경로가 쓰는 API.
+  const requireTab = (tabId: number): TabRecord => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) throw new Error(`no tab ${tabId}`);
+    return tab;
+  };
+  const tabsReload = vi.fn(async (tabId: number) => {
+    requireTab(tabId);
+  });
+  const tabsGoBack = vi.fn(async (tabId: number) => {
+    requireTab(tabId);
+  });
+  const tabsGoForward = vi.fn(async (tabId: number) => {
+    requireTab(tabId);
+  });
+
   const debuggerSend = vi.fn(async () => ({}));
 
   (globalThis as unknown as { chrome: unknown }).chrome = {
@@ -167,6 +188,9 @@ function installChrome(): Harness {
       }),
       create: tabsCreate,
       update: tabsUpdate,
+      reload: tabsReload,
+      goBack: tabsGoBack,
+      goForward: tabsGoForward,
       remove: vi.fn(async () => undefined),
       sendMessage: vi.fn(async () => {
         throw new Error('no content script in test');
@@ -187,7 +211,10 @@ function installChrome(): Harness {
       create: windowsCreate,
       update: windowsUpdate,
       remove: vi.fn(async () => undefined),
-      onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      onRemoved: {
+        addListener: vi.fn((fn: (windowId: number) => void) => windowRemovedListeners.push(fn)),
+        removeListener: vi.fn(),
+      },
       onFocusChanged: {
         addListener: vi.fn((fn: (windowId: number) => void) => focusListeners.push(fn)),
         removeListener: vi.fn((fn: (windowId: number) => void) => {
@@ -232,13 +259,47 @@ function installChrome(): Harness {
     tabs,
     lastFocusedId,
     focusListeners,
+    windowRemovedListeners,
     windowsCreate,
     windowsUpdate,
     windowsGet,
     tabsCreate,
     tabsUpdate,
+    tabsReload,
+    tabsGoBack,
+    tabsGoForward,
     debuggerSend,
   };
+}
+
+/**
+ * 가상 시간을 조금씩 흘리며 promise 가 끝나기를 기다린다.
+ *
+ * 실제 타이머로 고정 시간을 기다리면 느린 CI 에서 흔들린다. 그렇다고 한 번에 크게
+ * 흘리면 아직 관측해야 할 예약(지연 비포커스 300ms·1200ms)까지 지나가 버린다.
+ * 작은 걸음으로 흘려 promise 가 끝나는 최소 시점에 멈춘다.
+ */
+async function settleWithFakeTimers<T>(promise: Promise<T>, stepMs = 20, steps = 200): Promise<T> {
+  let done = false;
+  const watched = promise.then(
+    (value) => {
+      done = true;
+      return value;
+    },
+    (error) => {
+      done = true;
+      throw error;
+    },
+  );
+  for (let i = 0; i < steps && !done; i++) {
+    await vi.advanceTimersByTimeAsync(stepMs);
+  }
+  return await watched;
+}
+
+/** fire-and-forget(void withMarkerLock(...)) 이 끝나도록 마이크로태스크를 비운다. */
+async function flushMicrotasks(times = 20): Promise<void> {
+  for (let i = 0; i < times; i++) await Promise.resolve();
 }
 
 async function loadWindowManager() {
@@ -501,28 +562,36 @@ describe('2-b. 포커스 감시의 TOCTOU 방어', () => {
 // ===========================================================================
 describe('2-c. 기존 작업 창 재사용 (설계 A 확장)', () => {
   it('기존 MCP 작업 창에 active 탭을 만들 때도 포커스 보호를 예약한다', async () => {
+    // 실제 타이머로 400ms 를 기다리면 느린 CI 에서 예약이 아직 안 끝나 흔들린다.
+    // 가상 시간으로 흘려 보내 결과를 결정적으로 만든다.
+    vi.useFakeTimers();
     const { navigateTool } = await loadNavigateTool();
+    h.localStore.mcpWorkWindowMode = 'dedicated'; // 전용 작업 창 경로를 명시적으로 켠다 (기본값은 current)
 
-    await navigateTool.execute({
-      url: 'https://example.com/first',
-      background: true,
-      waitUntil: 'none',
-    } as never);
+    await settleWithFakeTimers(
+      navigateTool.execute({
+        url: 'https://example.com/first',
+        background: true,
+        waitUntil: 'none',
+      } as never),
+    );
     expect(h.windowsCreate).toHaveBeenCalledTimes(1);
     const workWindowId = (await h.windowsCreate.mock.results[0].value).id as number;
 
-    // 첫 예약의 타이머가 다 지나가길 기다린 뒤 관측을 초기화한다.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // 첫 예약의 타이머(지연 비포커스 300ms·1200ms)가 다 지나간 뒤 관측을 초기화한다.
+    await vi.advanceTimersByTimeAsync(2000);
     const listenersBefore = h.focusListeners.length;
     h.windowsUpdate.mockClear();
 
     // 같은 창을 재사용하는 두 번째 호출(newTab:true — lane 이 늘어난 상황과 같다)
-    await navigateTool.execute({
-      url: 'https://example.com/second',
-      background: true,
-      newTab: true,
-      waitUntil: 'none',
-    } as never);
+    await settleWithFakeTimers(
+      navigateTool.execute({
+        url: 'https://example.com/second',
+        background: true,
+        newTab: true,
+        waitUntil: 'none',
+      } as never),
+    );
 
     // 창을 새로 만들지 않았는데도
     expect(h.windowsCreate).toHaveBeenCalledTimes(1);
@@ -539,7 +608,7 @@ describe('2-c. 기존 작업 창 재사용 (설계 A 확장)', () => {
     expect(h.windowsUpdate).toHaveBeenCalledWith(workWindowId, { state: 'minimized' });
 
     // 지연 비포커스도 예약됐다.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(2000);
     const unfocusCalls = h.windowsUpdate.mock.calls.filter(
       (c) => c[0] === workWindowId && (c[1] as Record<string, unknown>)?.focused === false,
     );
@@ -553,6 +622,7 @@ describe('2-c. 기존 작업 창 재사용 (설계 A 확장)', () => {
 describe('2-e. 복원 구간의 예외 안전성', () => {
   it('탭 생성이 실패해도 되돌린 작업 창을 다시 최소화한다', async () => {
     const { navigateTool } = await loadNavigateTool();
+    h.localStore.mcpWorkWindowMode = 'dedicated'; // 전용 작업 창 경로를 명시적으로 켠다 (기본값은 current)
 
     // 1차 navigate 로 전용 작업 창을 만들고 최소화까지 끝낸다.
     await navigateTool.execute({
@@ -666,6 +736,101 @@ describe('2-d. 작업 창 표지 검증', () => {
     const second = await mod2.getOrCreateMcpWindow();
     expect(h.windowsCreate).toHaveBeenCalledTimes(2);
     expect(second).not.toBe(first);
+  });
+
+  it('회귀: 동시 registerWorkWindowTab 이 서로의 탭 기록을 덮어쓰지 않는다 (F4)', async () => {
+    // 표지는 read-modify-write 였다 — 두 레인이 동시에 작업 탭을 등록하면 각자 옛 표지를
+    // 복제해 마지막 write 만 남고, 살아남지 못한 탭은 표지에서 사라졌다. 표지에 남은 탭이
+    // 먼저 닫히면 "우리 창" 증명이 깨져 전용 작업 창을 새로 만들게 된다.
+    const mod = await loadWindowManager();
+    const id = await mod.getOrCreateMcpWindow();
+    const first = (await chrome.tabs.create({
+      url: 'https://example.com/lane-a',
+      windowId: id!,
+      active: false,
+    })) as { id: number };
+    const second = (await chrome.tabs.create({
+      url: 'https://example.com/lane-b',
+      windowId: id!,
+      active: false,
+    })) as { id: number };
+
+    await Promise.all([
+      mod.registerWorkWindowTab(id!, first.id),
+      mod.registerWorkWindowTab(id!, second.id),
+    ]);
+
+    const marker = h.sessionStore.mcpWorkWindowId as { tabIds: number[] };
+    expect(marker.tabIds).toContain(first.id);
+    expect(marker.tabIds).toContain(second.id);
+  });
+
+  it('회귀: 표지 판정 중에 등록된 새 작업 탭을 지우지 않는다 (compare-and-clear)', async () => {
+    // 예전에는 판정과 무효화가 따로 놀았다. verifyWorkWindowMarker 가 chrome.windows.get 을
+    // 기다리는 사이 다른 레인이 살아 있는 새 작업 탭을 표지에 등록해도, 판정이 끝나면 그
+    // 새 표지까지 통째로 지웠다 — 멀쩡한 전용 작업 창을 버리고, 그 사이 isMcpWindow 가
+    // false 를 답해 activation-guard 가 작업 창을 사용자 창으로 오인했다.
+    const mod = await loadWindowManager();
+    const id = (await mod.getOrCreateMcpWindow()) as number;
+
+    // 창 생성 시의 about:blank(표지에 기록된 유일한 탭)가 사라졌다 →
+    // 이 시점의 표지만 보면 "우리 탭이 하나도 없는 창" 으로 판정된다.
+    for (let i = h.tabs.length - 1; i >= 0; i--) {
+      if (h.tabs[i].windowId === id) h.tabs.splice(i, 1);
+    }
+    // 그 사이 다른 레인이 이 창에 새 작업 탭을 만들었다.
+    const fresh = (await chrome.tabs.create({
+      url: 'https://example.com/lane-a',
+      windowId: id,
+      active: false,
+    })) as { id: number };
+
+    // 판정이 크롬 API 를 기다리는 동안 registerWorkWindowTab 이 끼어든다.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const realGet = h.windowsGet.getMockImplementation() as (
+      windowId: number,
+      info?: { populate?: boolean },
+    ) => Promise<unknown>;
+    h.windowsGet.mockImplementationOnce(async (windowId: number, info?: { populate?: boolean }) => {
+      await held;
+      return await realGet(windowId, info);
+    });
+
+    const verifying = mod.isMcpWindow(id);
+    await mod.registerWorkWindowTab(id, fresh.id);
+    release();
+    await verifying;
+
+    const marker = h.sessionStore.mcpWorkWindowId as { tabIds: number[] } | undefined;
+    expect(marker, '판정 도중 갱신된 표지를 지우면 안 된다').toBeTruthy();
+    expect(marker!.tabIds).toContain(fresh.id);
+    // 다음 판정은 새 표지로 통과한다 — 멀쩡한 작업 창을 버리지 않는다.
+    expect(await mod.isMcpWindow(id)).toBe(true);
+  });
+
+  it('windows.onRemoved 는 그 사이 새로 만들어진 작업 창의 표지를 지우지 않는다', async () => {
+    const mod = await loadWindowManager();
+    const closed = (await mod.getOrCreateMcpWindow()) as number;
+    expect(h.windowRemovedListeners).toHaveLength(1); // import 시점 등록
+
+    // 사용자가 그 창을 닫는 것과 동시에 다른 레인이 새 작업 창을 만든 상황.
+    const listener = h.windowRemovedListeners[0];
+    h.windows.splice(
+      h.windows.findIndex((w) => w.id === closed),
+      1,
+    );
+    listener(closed);
+    const recreated = (await mod.getOrCreateMcpWindow()) as number;
+    expect(recreated).not.toBe(closed);
+
+    // onRemoved 의 비동기 처리가 늦게 끝나도 새 표지를 지우면 안 된다.
+    await flushMicrotasks();
+    const marker = h.sessionStore.mcpWorkWindowId as { id: number } | undefined;
+    expect(marker, '닫힌 창의 onRemoved 가 새 표지를 지웠다').toBeTruthy();
+    expect(marker!.id).toBe(recreated);
   });
 
   it('registerWorkWindowTab 으로 등록한 탭이 살아 있으면 계속 우리 창이다', async () => {
@@ -794,7 +959,7 @@ describe('7. 배치 설정의 기본값과 저장값 (설계 J)', () => {
     expect(await mod.getWorkWindowPlacement()).toBe(mod.DEFAULT_WORK_WINDOW_PLACEMENT);
   });
 
-  it('저장 키 우선순위가 확정대로다: 새 키 > 구버전 키 > 기본값(dedicated)', async () => {
+  it('저장 키 우선순위가 확정대로다: 새 키 > 구버전 키 > 기본값(current)', async () => {
     // 1) 새 키만 있음
     h.localStore.mcpWorkWindowMode = 'current';
     let mod = await loadWindowManager();
@@ -812,10 +977,10 @@ describe('7. 배치 설정의 기본값과 저장값 (설계 J)', () => {
     h.localStore.mcpWorkWindowMode = 'current';
     expect(await mod.getWorkWindowMode()).toBe('current');
 
-    // 4) 둘 다 없으면 v1.9.0 기본값
+    // 4) 둘 다 없으면 기본값 'current' (2026-09-04)
     delete h.localStore.mcpWorkWindowMode;
     delete h.localStore.dedicatedWorkWindow;
-    expect(await mod.getWorkWindowMode()).toBe('dedicated');
+    expect(await mod.getWorkWindowMode()).toBe('current');
   });
 
   it('setter 는 지정된 키에만 쓴다', async () => {
@@ -892,5 +1057,182 @@ describe('활성화 가드 (설계 H.1)', () => {
     h.localStore.forceFocusOnToolCall = true;
     await guard.focusWindow(USER_WINDOW_ID);
     expect(focusTrueCalls()).toEqual([[USER_WINDOW_ID, { focused: true }]]);
+  });
+});
+
+// ===========================================================================
+// 8. refresh / back / forward 의 대상 탭 해석 (F3)
+// ===========================================================================
+describe('8. refresh · history 탐색이 세션 작업 탭을 대상으로 한다 (F3)', () => {
+  /**
+   * 재현하려는 실패: chrome_navigate 의 refresh / back / forward 분기는 작업 탭을 조회하지
+   * 않고 `explicit || 활성 탭` 으로 대상을 골랐다. 그래서 lane 의 작업 탭이 멀쩡히 있어도
+   * `{refresh:true, lane:'a'}` 가 사용자가 보고 있는 탭을 새로고침하고, 그 탭을 그 lane 의
+   * 작업 탭으로 기록해 버렸다 (그 다음 호출부터 사용자 탭이 계속 조작 대상이 된다).
+   *
+   * 계약: tabId 명시 → 그 레인의 작업 탭 → (background mode 꺼짐일 때만) 지정 창의 활성 탭.
+   */
+  const SESSION_ID = 'stdio-f3';
+
+  /** lane 을 준 navigate 로 그 레인의 작업 탭을 만들고 tabId 를 돌려준다. */
+  async function openWorkTab(
+    navigateTool: { execute: (args: unknown) => Promise<{ content: unknown[] }> },
+    lane: string,
+  ): Promise<number> {
+    const result = await navigateTool.execute({
+      url: `https://example.com/${lane}`,
+      lane,
+      _mcpSessionId: SESSION_ID,
+      background: true,
+      waitUntil: 'none',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    return payload.tabId as number;
+  }
+
+  const textOf = (result: { content: unknown[] }): string =>
+    (result.content[0] as { text: string }).text;
+
+  it('회귀: 작업 탭이 없으면 사용자 탭을 새로고침하지 않고 no_work_tab 을 돌려준다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('no_work_tab');
+    expect(h.tabsReload).not.toHaveBeenCalled();
+  });
+
+  it('회귀: 작업 탭이 있으면 사용자 탭이 아니라 그 작업 탭을 새로고침한다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+    const workTabId = await openWorkTab(navigateTool as never, 'a');
+    expect(workTabId).not.toBe(USER_TAB_ID);
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(false);
+    expect(h.tabsReload).toHaveBeenCalledTimes(1);
+    expect(h.tabsReload).toHaveBeenCalledWith(workTabId);
+    expect(h.tabsReload).not.toHaveBeenCalledWith(USER_TAB_ID);
+  });
+
+  it('회귀: back / forward 도 사용자 탭이 아니라 레인의 작업 탭에서 움직인다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+    const workTabId = await openWorkTab(navigateTool as never, 'a');
+
+    await navigateTool.execute({
+      url: 'back',
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      background: true,
+      waitUntil: 'none',
+    } as never);
+    await navigateTool.execute({
+      url: 'forward',
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      background: true,
+      waitUntil: 'none',
+    } as never);
+
+    expect(h.tabsGoBack).toHaveBeenCalledWith(workTabId);
+    expect(h.tabsGoForward).toHaveBeenCalledWith(workTabId);
+    expect(h.tabsGoBack).not.toHaveBeenCalledWith(USER_TAB_ID);
+    expect(h.tabsGoForward).not.toHaveBeenCalledWith(USER_TAB_ID);
+  });
+
+  it('작업 탭이 없으면 back / forward 도 no_work_tab 으로 거절한다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+
+    for (const url of ['back', 'forward']) {
+      const result = await navigateTool.execute({
+        url,
+        lane: 'a',
+        _mcpSessionId: SESSION_ID,
+        background: true,
+        waitUntil: 'none',
+      } as never);
+      expect(result.isError, url).toBe(true);
+      expect(textOf(result), url).toContain('no_work_tab');
+    }
+    expect(h.tabsGoBack).not.toHaveBeenCalled();
+    expect(h.tabsGoForward).not.toHaveBeenCalled();
+  });
+
+  it('다른 레인의 작업 탭을 빌려 쓰지 않는다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+    await openWorkTab(navigateTool as never, 'a');
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      lane: 'b',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('no_work_tab');
+    expect(h.tabsReload).not.toHaveBeenCalled();
+  });
+
+  it('tabId 를 명시하면 작업 탭보다 그 탭이 우선한다', async () => {
+    const { navigateTool } = await loadNavigateTool();
+    const workTabId = await openWorkTab(navigateTool as never, 'a');
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      tabId: USER_TAB_ID,
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(false);
+    expect(h.tabsReload).toHaveBeenCalledWith(USER_TAB_ID);
+    expect(h.tabsReload).not.toHaveBeenCalledWith(workTabId);
+  });
+
+  it('모드를 꺼도 그 레인의 작업 탭이 있으면 그 탭이 우선한다 (해석 순서 고정)', async () => {
+    // 확정된 해석 순서는 tabId 명시 > 그 레인의 작업 탭 > (모드 OFF 일 때만) 활성 탭이다.
+    // 즉 활성 탭 fallback 만 모드에 걸려 있고, 작업 탭 우선은 모드와 무관하다.
+    const { navigateTool } = await loadNavigateTool();
+    const workTabId = await openWorkTab(navigateTool as never, 'a');
+    h.localStore.backgroundWorkMode = false;
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(false);
+    expect(h.tabsReload).toHaveBeenCalledWith(workTabId);
+    expect(h.tabsReload).not.toHaveBeenCalledWith(USER_TAB_ID);
+  });
+
+  it('background mode 를 끄면 작업 탭이 없을 때 예전처럼 활성 탭으로 떨어진다', async () => {
+    h.localStore.backgroundWorkMode = false;
+    const { navigateTool } = await loadNavigateTool();
+
+    const result = await navigateTool.execute({
+      refresh: true,
+      lane: 'a',
+      _mcpSessionId: SESSION_ID,
+      waitUntil: 'none',
+    } as never);
+
+    expect(result.isError).toBe(false);
+    expect(h.tabsReload).toHaveBeenCalledWith(USER_TAB_ID);
   });
 });

@@ -24,6 +24,13 @@ import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from '../mcp/mcp-server';
 import { registerAdminRoutes } from './routes';
+import { registerAuthGuard } from './auth-guard';
+import { ensureAuthToken, readAuthToken } from '../security/auth-token';
+import {
+  collectExtensionOriginsFromArgv,
+  isAllowedCorsOrigin,
+  setTrustedExtensionOrigins,
+} from '../security/origin';
 
 // ============================================================
 // Types
@@ -47,11 +54,32 @@ export class Server {
     new Map();
   /** Process start timestamp (auto-chrome-mcp: admin /health uptime 보고용). */
   private readonly startedAt: number = Date.now();
+  /**
+   * 이 브리지의 bearer 토큰 (start() 에서 생성/로드). 파일에 못 써도 메모리 값으로
+   * 인증은 유지한다 — 그때는 stdio 프록시가 토큰을 못 읽으니 doctor 가 알려준다.
+   */
+  private authToken: string | null = null;
 
   constructor() {
     this.fastify = Fastify({ logger: SERVER_CONFIG.LOGGER_ENABLED });
     this.setupPlugins();
     this.setupRoutes();
+  }
+
+  /**
+   * 인증에 쓸 정답 토큰. 메모리 값 우선, 없으면 토큰 파일에서 읽는다
+   * (테스트나 start() 이전 요청도 파일이 있으면 인증된다).
+   */
+  private getExpectedToken(): string | null {
+    return this.authToken ?? readAuthToken();
+  }
+
+  /**
+   * 이 브리지의 bearer 토큰. 네이티브 호스트가 SERVER_STARTED 로 확장에 넘겨준다
+   * (확장은 파일을 읽을 수 없으므로 이 경로가 유일한 전달 수단이다).
+   */
+  public getAuthToken(): string | null {
+    return this.getExpectedToken();
   }
 
   /**
@@ -64,15 +92,14 @@ export class Server {
   private async setupPlugins(): Promise<void> {
     await this.fastify.register(cors, {
       origin: (origin, cb) => {
-        // Allow requests with no origin (e.g., curl, server-to-server)
+        // Allow requests with no origin (e.g., curl, server-to-server).
+        // 부작용이 있는 경로는 auth-guard 가 토큰을 따로 검사한다.
         if (!origin) {
           return cb(null, true);
         }
-        // Check if origin matches any pattern in whitelist
-        const allowed = SERVER_CONFIG.CORS_ORIGIN.some((pattern) =>
-          pattern instanceof RegExp ? pattern.test(origin) : origin.startsWith(pattern),
-        );
-        cb(null, allowed);
+        // origin 은 문자열 prefix 가 아니라 URL 로 파싱해 비교한다.
+        // (예전 startsWith('http://127.0.0.1') 는 http://127.0.0.1.attacker.example 을 통과시켰다)
+        cb(null, isAllowedCorsOrigin(origin));
       },
       methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       credentials: true,
@@ -80,6 +107,13 @@ export class Server {
   }
 
   private setupRoutes(): void {
+    // 인증 게이트 — 라우트 등록보다 먼저 붙인다. /ping, /health 만 공개.
+    registerAuthGuard(
+      this.fastify,
+      () => this.getExpectedToken(),
+      () => this.listeningPort,
+    );
+
     // Health check (legacy /ping)
     this.setupHealthRoutes();
 
@@ -377,6 +411,31 @@ export class Server {
     if (this.isRunning) {
       return;
     }
+
+    // listen 전에 토큰을 확보한다 — 포트가 열린 순간부터 인증이 가능해야 한다.
+    const tokenResult = ensureAuthToken();
+    this.authToken = tokenResult.token;
+    if (!tokenResult.persisted) {
+      console.error(
+        '[auth] token file could not be written; the stdio proxy will not be able to read it. ' +
+          'Run "auto-chrome-mcp-bridge doctor" for details.',
+      );
+    } else if (tokenResult.insecure) {
+      // 잠금 실패로 서버를 멈추지는 않는다 (사용자 PC 는 대개 단일 계정 — 가용성 우선).
+      // 대신 여기와 doctor 양쪽에서 분명히 알린다.
+      console.error(
+        '[auth] the token file or its directory could not be locked down to the current user. ' +
+          'The bridge keeps running, but another local account could read the token. ' +
+          'Run "auto-chrome-mcp-bridge doctor" for the fix command.',
+      );
+    }
+    // Chrome 은 native host 를 띄울 때 호출자 origin(chrome-extension://<id>/)을 인자로 준다.
+    // 이 값은 로그·doctor 정보용으로만 기록한다 — 인증은 토큰 하나로만 판정한다.
+    const callerOrigins = collectExtensionOriginsFromArgv(process.argv);
+    setTrustedExtensionOrigins(callerOrigins);
+    console.error(
+      `[bridge] caller extension origins: ${callerOrigins.length > 0 ? callerOrigins.join(', ') : '(none passed by the launcher)'}`,
+    );
 
     try {
       await this.fastify.listen({ port, host: SERVER_CONFIG.HOST });

@@ -11,6 +11,7 @@ import {
   type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
+import { getBridgeAuthHeaders } from '@/utils/bridge-auth';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
@@ -96,7 +97,7 @@ async function subscribeToSessionStatus(
   try {
     const response = await fetch(sseUrl, {
       method: 'GET',
-      headers: { Accept: 'text/event-stream' },
+      headers: { Accept: 'text/event-stream', ...(await getBridgeAuthHeaders()) },
       signal: abortController.signal,
     });
 
@@ -1035,7 +1036,7 @@ export function initWebEditorListeners(): void {
               `http://127.0.0.1:${port}/agent/projects/${encodeURIComponent(projectId)}/open-file`,
               {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getBridgeAuthHeaders()) },
                 body: JSON.stringify({
                   filePath: file,
                   line,
@@ -1304,7 +1305,7 @@ export function initWebEditorListeners(): void {
 
           const resp = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await getBridgeAuthHeaders()) },
             body: JSON.stringify({
               instruction,
               // Pass dbSessionId so backend loads session-level configuration (engine, model, options)
@@ -1508,7 +1509,7 @@ export function initWebEditorListeners(): void {
 
           const resp = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await getBridgeAuthHeaders()) },
             body: JSON.stringify({
               instruction,
               projectId,
@@ -1594,7 +1595,10 @@ export function initWebEditorListeners(): void {
           try {
             // Call cancel API
             const cancelUrl = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`;
-            const response = await fetch(cancelUrl, { method: 'DELETE' });
+            const response = await fetch(cancelUrl, {
+              method: 'DELETE',
+              headers: await getBridgeAuthHeaders(),
+            });
 
             if (!response.ok) {
               const errorText = await response.text().catch(() => `HTTP ${response.status}`);

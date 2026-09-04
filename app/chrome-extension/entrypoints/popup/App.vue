@@ -83,6 +83,28 @@
                       <span class="force-focus-switch__thumb" />
                     </span>
                   </label>
+                  <!-- auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 -->
+                  <label
+                    class="force-focus-switch"
+                    title="ON(기본): MCP 작업 탭을 초록색 탭 그룹 'MCP' 로 묶어 사용자가 직접 연 탭과 한눈에 구분되게 합니다. 탭을 활성화하거나 창 포커스를 바꾸지 않습니다. OFF: 묶지 않고 그대로 둡니다."
+                  >
+                    <input
+                      type="checkbox"
+                      class="force-focus-switch__input"
+                      :checked="tabGroupEnabled"
+                      :aria-label="
+                        tabGroupEnabled ? '작업 탭 그룹 표시 끄기' : '작업 탭 그룹 표시 켜기'
+                      "
+                      @change="toggleTabGroup"
+                    />
+                    <span class="force-focus-switch__label">작업 탭 그룹 표시</span>
+                    <span
+                      class="force-focus-switch__track"
+                      :class="{ 'force-focus-switch__track--on': tabGroupEnabled }"
+                    >
+                      <span class="force-focus-switch__thumb" />
+                    </span>
+                  </label>
                 </div>
               </div>
               <!-- auto-chrome-mcp fork v1.9.0: 전용 작업 창 배치 + 무간섭 권장 설정 -->
@@ -330,6 +352,7 @@ import {
 import {
   getWorkWindowMode,
   setWorkWindowMode,
+  DEFAULT_WORK_WINDOW_MODE,
   getWorkWindowPlacement,
   setWorkWindowPlacement,
   DEFAULT_WORK_WINDOW_PLACEMENT,
@@ -337,6 +360,11 @@ import {
   WORK_WINDOW_PLACEMENT_STORAGE_KEY,
   type WorkWindowPlacement,
 } from '@/utils/mcp-window-manager';
+import {
+  isMcpTabGroupEnabled,
+  setMcpTabGroupEnabled,
+  MCP_TAB_GROUP_STORAGE_KEY,
+} from '@/utils/mcp-tab-group';
 import {
   getToggles,
   setToggle as setSitePermissionToggleStorage,
@@ -532,6 +560,10 @@ const dedicatedWindowEnabled = ref<boolean>(true);
 
 // auto-chrome-mcp fork v1.9.0: 전용 작업 창을 화면에서 어떻게 숨길지.
 const workWindowPlacement = ref<WorkWindowPlacement>(DEFAULT_WORK_WINDOW_PLACEMENT);
+
+// auto-chrome-mcp fork: MCP 작업 탭 그룹 토글. true(기본) = 작업 탭을 초록색 탭 그룹
+// "MCP" 로 묶어 사용자 탭과 구분. false = 묶지 않음.
+const tabGroupEnabled = ref<boolean>(true);
 
 // 권장 설정 적용 결과를 잠깐 보여 주는 안내 문구
 const noInterferenceNotice = ref<string>('');
@@ -1337,6 +1369,26 @@ const toggleDedicatedWindow = async () => {
   }
 };
 
+// auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 — load + toggle handler.
+const loadTabGroupPreference = async () => {
+  try {
+    tabGroupEnabled.value = await isMcpTabGroupEnabled();
+  } catch (error) {
+    console.error('작업 탭 그룹 설정 로드 실패:', error);
+  }
+};
+
+const toggleTabGroup = async () => {
+  const next = !tabGroupEnabled.value;
+  tabGroupEnabled.value = next; // optimistic
+  try {
+    await setMcpTabGroupEnabled(next);
+  } catch (error) {
+    console.error('작업 탭 그룹 설정 저장 실패:', error);
+    tabGroupEnabled.value = !next; // revert
+  }
+};
+
 // auto-chrome-mcp fork v1.9.0: 전용 작업 창 배치 — load + change handler.
 const loadWorkWindowPlacement = async () => {
   try {
@@ -1366,11 +1418,11 @@ const onPlacementChange = async (event: Event) => {
  */
 const applyNoInterferenceDefaults = async () => {
   try {
-    await setWorkWindowMode('dedicated');
+    await setWorkWindowMode(DEFAULT_WORK_WINDOW_MODE);
     await setWorkWindowPlacement(DEFAULT_WORK_WINDOW_PLACEMENT);
     await setBackgroundModeEnabled(true);
     await setForceFocusEnabled(false);
-    dedicatedWindowEnabled.value = true;
+    dedicatedWindowEnabled.value = DEFAULT_WORK_WINDOW_MODE === 'dedicated';
     workWindowPlacement.value = DEFAULT_WORK_WINDOW_PLACEMENT;
     backgroundModeEnabled.value = true;
     forceFocusEnabled.value = false;
@@ -1751,6 +1803,7 @@ onMounted(async () => {
   await loadBackgroundModePreference();
   await loadDedicatedWindowPreference();
   await loadWorkWindowPlacement();
+  await loadTabGroupPreference();
   await loadSitePermissionToggles();
   await loadModelPreference();
   await checkNativeConnection();
@@ -1779,10 +1832,10 @@ onMounted(async () => {
         if (Object.prototype.hasOwnProperty.call(changes || {}, BACKGROUND_MODE_STORAGE_KEY)) {
           backgroundModeEnabled.value = changes[BACKGROUND_MODE_STORAGE_KEY]?.newValue !== false;
         }
-        // auto-chrome-mcp fork: 작업 창 모드도 동일하게 동기화 (v1.9.0 기본값 'dedicated').
+        // auto-chrome-mcp fork: 작업 창 모드도 동일하게 동기화 (기본값 'current' — 'dedicated' 만 ON).
         if (Object.prototype.hasOwnProperty.call(changes || {}, WORK_WINDOW_MODE_STORAGE_KEY)) {
           dedicatedWindowEnabled.value =
-            changes[WORK_WINDOW_MODE_STORAGE_KEY]?.newValue !== 'current';
+            changes[WORK_WINDOW_MODE_STORAGE_KEY]?.newValue === 'dedicated';
         }
         // auto-chrome-mcp fork v1.9.0: 작업 창 배치.
         if (
@@ -1792,6 +1845,10 @@ onMounted(async () => {
           if (next === 'minimized' || next === 'offscreen' || next === 'visible') {
             workWindowPlacement.value = next;
           }
+        }
+        // auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 (기본값 true — false 만 OFF).
+        if (Object.prototype.hasOwnProperty.call(changes || {}, MCP_TAB_GROUP_STORAGE_KEY)) {
+          tabGroupEnabled.value = changes[MCP_TAB_GROUP_STORAGE_KEY]?.newValue !== false;
         }
         // v1.0.31+: 사이트 권한 토글 동기화 (background 가 consent 후 ON 으로 바꿀 때도)
         if (Object.prototype.hasOwnProperty.call(changes || {}, SITE_PERMS_STORAGE_KEY)) {

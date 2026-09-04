@@ -7,12 +7,18 @@
  * 본 CLI 는 그 gap 을 메운다:
  *
  *   1. 우리 fork 의 run_host.sh path 자동 해석 (이 파일 경로 기반)
- *   2. allowed_origins 에 사용자 unpacked extension ID + upstream Chrome Web Store ID 모두 등록
+ *   2. allowed_origins 에 fork 고정 ID 등록 (+ --extension-id 로 준 ID 가 있으면 추가)
  *   3. OS 분기 manifest 위치 (macOS / Windows / Linux)
  *   4. Chrome / Brave / Edge 등 Chromium 기반 브라우저 다중 등록
  *
+ * allowed_origins 에서 upstream 웹스토어 ID 를 뺀 이유:
+ *   allowed_origins 에 든 확장은 이 네이티브 호스트를 띄울 수 있고, 브리지는 붙는 확장에게
+ *   SERVER_STARTED 로 bearer 토큰을 넘긴다. upstream 확장이 설치돼 있기만 하면 그 토큰을
+ *   받아 로컬 브리지를 그대로 조종할 수 있었다. 이제 기본은 우리 포크 ID 뿐이고, 추가 ID 는
+ *   `--extension-id` 로 명시했을 때만 들어간다.
+ *
  * 사용:
- *   auto-chrome-mcp-bridge auto-chrome-mcp-install --extension-id <ID> [--browser chrome|brave|edge|all]
+ *   auto-chrome-mcp-bridge auto-chrome-mcp-install [--extension-id <ID>] [--browser chrome|brave|edge|all]
  *   또는
  *   auto-chrome-mcp-install --extension-id <ID>
  */
@@ -29,24 +35,49 @@ import path from 'node:path';
 
 // v1.0.2 부터 fork 전용 host name — upstream 과 분리.
 const HOST_NAME = 'com.autochromemcp.nativehost';
-const UPSTREAM_CHROME_WEB_STORE_ID = 'hbdgbgagpkpjffpklnamcljpakneikee';
 
-interface CliArgs {
+/**
+ * 우리 포크 확장의 고정 ID. manifest key 로 고정돼 있어 unpacked 로 로드해도 같은 값이다.
+ * 기본으로 등록되는 유일한 origin.
+ */
+export const FORK_EXTENSION_ID = 'aogfhfajjknomcnmlkbjmihjbknlhbbi';
+
+export interface CliArgs {
   extensionId?: string;
   browser: string;
   autoDetectId: boolean;
   help: boolean;
 }
 
-const parseArgs = (argv: string[]): CliArgs => {
+export const parseArgs = (argv: string[]): CliArgs => {
   const out: CliArgs = { browser: 'chrome', autoDetectId: false, help: false };
-  for (const a of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (a === '--help' || a === '-h') out.help = true;
     else if (a === '--auto-detect-id') out.autoDetectId = true;
     else if (a.startsWith('--extension-id=')) out.extensionId = a.split('=', 2)[1];
     else if (a.startsWith('--browser=')) out.browser = a.split('=', 2)[1];
+    // 도움말이 `--extension-id <ID>` 형태를 안내하므로 공백 표기도 받는다.
+    else if (a === '--extension-id' && argv[i + 1] && !argv[i + 1].startsWith('-')) {
+      out.extensionId = argv[++i];
+    } else if (a === '--browser' && argv[i + 1] && !argv[i + 1].startsWith('-')) {
+      out.browser = argv[++i];
+    }
   }
   return out;
+};
+
+/**
+ * manifest 의 allowed_origins 를 만든다.
+ *
+ * 기본은 포크 고정 ID 하나뿐이다. 여기 든 확장은 네이티브 호스트를 띄우고 브리지 토큰을
+ * 받으므로, "혹시 몰라서" 다른 ID 를 넣지 않는다. 추가는 호출자가 명시한 것만.
+ */
+export const buildAllowedOrigins = (extraExtensionId?: string): string[] => {
+  const ids = [FORK_EXTENSION_ID];
+  const extra = (extraExtensionId || '').trim();
+  if (extra && extra !== FORK_EXTENSION_ID) ids.push(extra);
+  return ids.map((id) => `chrome-extension://${id}/`);
 };
 
 const printHelp = () => {
@@ -59,7 +90,7 @@ const printHelp = () => {
   auto-chrome-mcp-install --auto-detect-id
 
 옵션:
-  --extension-id <ID>   Chrome 의 unpacked fork extension ID (32자 영문)
+  --extension-id <ID>   추가로 등록할 extension ID (32자 영문). 생략하면 fork 고정 ID 만.
                         chrome://extensions 에서 Developer mode ON 후 카드 ID 확인
   --browser <name>      대상 브라우저 (chrome / brave / edge / chromium / all)
                         기본: chrome
@@ -71,7 +102,8 @@ const printHelp = () => {
   1. 우리 fork 의 run_host.sh 경로 자동 해석
   2. native messaging host manifest 생성/갱신
      - path: 우리 fork 의 run_host.sh
-     - allowed_origins: 사용자 unpacked ID + upstream Chrome Web Store ID 둘 다
+     - allowed_origins: fork 고정 ID (+ --extension-id 로 준 ID)
+       ※ allowed_origins 에 든 확장은 브리지 토큰을 받으므로 최소로 유지한다
   3. 실행 권한 부여 (chmod 755)
 
 다음 단계:
@@ -181,9 +213,9 @@ const main = () => {
   }
 
   if (!extensionId) {
-    console.warn('⚠️  --extension-id 미지정 — upstream Chrome Web Store ID 만 등록됩니다.');
-    console.warn('   unpacked fork extension 은 chrome 이 silent 거부할 수 있습니다.');
-    console.warn('   chrome://extensions 에서 ID 확인 후 다시 실행 권장.');
+    console.log(`ℹ️  --extension-id 가 없어 fork 고정 ID(${FORK_EXTENSION_ID})만 등록합니다.`);
+    console.log('   다른 ID 로 로드했다면 chrome://extensions 에서 확인 후');
+    console.log('   --extension-id <ID> 로 다시 실행하세요.');
   }
 
   // 2. run_host.sh 경로 (이 파일은 dist/scripts/ 안에 있으므로 ../run_host.sh)
@@ -194,13 +226,8 @@ const main = () => {
     process.exit(1);
   }
 
-  // 3. allowed_origins 조합
-  const allowedOrigins: string[] = [];
-  if (extensionId) {
-    allowedOrigins.push(`chrome-extension://${extensionId}/`);
-  }
-  // upstream Chrome Web Store ID 도 함께 등록 (backward compat — 사용자가 둘 다 쓸 수 있게)
-  allowedOrigins.push(`chrome-extension://${UPSTREAM_CHROME_WEB_STORE_ID}/`);
+  // 3. allowed_origins 조합 — 포크 고정 ID + 명시한 ID 만.
+  const allowedOrigins = buildAllowedOrigins(extensionId);
 
   // 4. manifest content
   const manifest = {
@@ -259,10 +286,14 @@ const main = () => {
     console.log('   3. extension popup → ⚡ 강제 재연결 버튼 클릭');
     console.log('   4. ④ 핸드셰이크가 통과하면 성공');
   } else {
-    console.log('⚠️  extension-id 없이 진행됨 — unpacked fork extension 은 동작 안 할 가능성 큼.');
-    console.log('   chrome://extensions 에서 ID 확인 후 재실행:');
+    console.log('✅ 다음 단계:');
+    console.log('   1. Chrome 완전 종료 후 재시작');
+    console.log('   2. extension popup → ⚡ 강제 재연결');
+    console.log('   확장 ID 가 fork 고정 ID 와 다르면 다음으로 다시 실행:');
     console.log('   auto-chrome-mcp-install --extension-id <ID>');
   }
 };
 
-main();
+if (require.main === module) {
+  main();
+}

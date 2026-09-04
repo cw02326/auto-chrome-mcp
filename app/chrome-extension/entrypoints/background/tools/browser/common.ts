@@ -19,6 +19,7 @@ import {
 } from '@/utils/work-tab-manager';
 import { isTabBusy, markTabBusy, unmarkTabBusy } from '@/utils/tab-lock';
 import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { noWorkTabErrorText } from '@/utils/work-tab-gate';
 import {
   applyWorkWindowPlacement,
   createManagedWindow,
@@ -122,6 +123,37 @@ class NavigateTool extends BaseBrowserToolExecutor {
       console.warn('[NavigateTool] Failed to resolve MCP work window:', error);
       return null;
     }
+  }
+
+  /**
+   * auto-chrome-mcp fork(F3): 이미 있는 탭을 대상으로 하는 분기(refresh · back · forward)의
+   * 대상 탭을 정한다. 해석 순서는 하나뿐이다:
+   *
+   *   1. 호출자가 명시한 tabId
+   *   2. 이 세션·레인의 MCP 작업 탭
+   *   3. (백그라운드 작업 모드가 꺼져 있을 때만) 지정 창의 활성 탭
+   *
+   * 예전에는 2번이 없어서 `{refresh:true, lane:'a'}` 가 사용자가 보고 있는 탭을
+   * 새로고침하고, 그 탭을 그 레인의 작업 탭으로 기록했다. 그 뒤로는 사용자 탭이 계속
+   * 조작 대상이 됐다. 모드가 켜져 있고 작업 탭도 없으면 null 을 돌려 호출부가 거절한다.
+   */
+  private async resolveExistingTargetTab(
+    tabId: number | undefined,
+    windowId: number | undefined,
+    sessionKey: string,
+  ): Promise<chrome.tabs.Tab | null> {
+    const explicit = await this.tryGetTab(tabId);
+    if (explicit) return explicit;
+
+    const workTabId = await getWorkTabId(sessionKey);
+    if (workTabId !== null) {
+      const workTab = await this.tryGetTab(workTabId);
+      if (workTab) return workTab;
+    }
+
+    // 모드가 켜져 있으면 사용자 탭으로 흘려보내지 않는다 (fail-closed).
+    if (await isBackgroundModeEnabled()) return null;
+    return await this.getActiveTabOrThrowInWindow(windowId);
   }
 
   /**
@@ -294,11 +326,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
     try {
       // Handle refresh option first
       if (refresh) {
-        console.log('Refreshing current active tab');
-        const explicit = await this.tryGetTab(tabId);
-        // Get target tab (explicit or active in provided window)
-        const targetTab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
+        // auto-chrome-mcp fork(F3): 명시 tabId → 이 레인의 작업 탭 → (모드 OFF 일 때만) 활성 탭
+        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId);
+        if (targetTab === null) return createErrorResponse(noWorkTabErrorText(this.name));
         if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
+        console.log(`Refreshing tab ${targetTab.id}`);
         await chrome.tabs.reload(targetTab.id);
 
         console.log(`Refreshed tab ID: ${targetTab.id}`);
@@ -334,8 +366,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       // Handle history navigation: url="back" or url="forward"
       if (url === 'back' || url === 'forward') {
-        const explicitTab = await this.tryGetTab(tabId);
-        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
+        // auto-chrome-mcp fork(F3): refresh 와 같은 해석 순서를 쓴다.
+        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId);
+        if (targetTab === null) return createErrorResponse(noWorkTabErrorText(this.name));
         if (!targetTab.id) {
           return createErrorResponse('No target tab found for history navigation');
         }

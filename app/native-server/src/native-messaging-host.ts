@@ -1,7 +1,7 @@
 import { stdin, stdout } from 'process';
 import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
-import { NativeMessageType } from 'auto-chrome-mcp-shared';
+import { NativeMessageType, ServerStartedPayload } from 'auto-chrome-mcp-shared';
 import { TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
 
@@ -228,6 +228,19 @@ export class NativeMessagingHost {
   /**
    * Start Fastify server (now accepts Server instance)
    */
+  /**
+   * SERVER_STARTED payload.
+   *
+   * 브리지의 HTTP 인증 토큰을 함께 넘긴다. 확장은 파일을 읽을 수 없어 토큰 파일을 볼 수
+   * 없으므로 이 네이티브 메시지가 유일한 전달 경로다. 확장은 이 값을
+   * chrome.storage.session 에만 보관하고 `/admin/*`, `/mcp` 호출에 Bearer 로 붙인다.
+   * 토큰을 아직 못 만들었으면 필드를 생략한다 (옛 확장과 같은 모양).
+   */
+  private serverStartedPayload(port: number): ServerStartedPayload {
+    const authToken = this.associatedServer?.getAuthToken() ?? null;
+    return authToken ? { port, authToken } : { port };
+  }
+
   private async startServer(port: number): Promise<void> {
     if (!this.associatedServer) {
       this.sendError('Internal error: server instance not set');
@@ -246,7 +259,7 @@ export class NativeMessagingHost {
         if (currentPort === port) {
           this.sendMessage({
             type: NativeMessageType.SERVER_STARTED,
-            payload: { port },
+            payload: this.serverStartedPayload(port),
           });
           return;
         }
@@ -262,7 +275,7 @@ export class NativeMessagingHost {
 
       this.sendMessage({
         type: NativeMessageType.SERVER_STARTED,
-        payload: { port },
+        payload: this.serverStartedPayload(port),
       });
     } catch (error: any) {
       // v1.0.19: listen 실패 시 client 에게 PORT_CONFLICT 신호 보내고 self-exit.

@@ -13,6 +13,10 @@ interface NetworkCaptureToolParams {
   maxCaptureTime?: number;
   inactivityTimeout?: number;
   includeStatic?: boolean;
+  // auto-chrome-mcp fork(2026-09-04): 게이트가 주입하는 대상 탭. delegate 까지 반드시 전달한다.
+  // 예전에는 여기서 버려져, 위임받은 legacy 도구가 사용자의 활성 탭을 다시 골랐다.
+  tabId?: number;
+  background?: boolean;
 }
 
 /**
@@ -108,6 +112,9 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
 
     const result = await delegate.execute({
       url: args.url,
+      // 주입된 작업 탭을 delegate 로 넘긴다 — 버리면 delegate 가 활성 탭으로 fallback 한다.
+      tabId: args.tabId,
+      background: args.background,
       maxCaptureTime: args.maxCaptureTime,
       inactivityTimeout: args.inactivityTimeout,
       includeStatic: args.includeStatic,
@@ -146,7 +153,7 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
 
     const delegateStop =
       backendToStop === 'debugger' ? networkDebuggerStopTool : networkCaptureStopTool;
-    const result = await delegateStop.execute();
+    const result = await delegateStop.execute({ tabId: args?.tabId });
 
     return decorateJsonResult(result, {
       backend: backendToStop,

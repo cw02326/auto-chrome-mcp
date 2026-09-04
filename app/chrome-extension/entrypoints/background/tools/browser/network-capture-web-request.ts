@@ -1,6 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
-import { createTab as createTabGuarded } from '@/utils/activation-guard';
 import { BaseBrowserToolExecutor } from '../base-browser';
+// auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 캡처를 붙이지 않도록 세션 소유 탭으로만 조회한다.
+import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { LIMITS, NETWORK_FILTERS } from '@/common/constants';
 
@@ -805,31 +806,37 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       // Get current tab or create new tab
       let tabToOperateOn: chrome.tabs.Tab;
 
-      if (targetUrl) {
-        // Find tabs matching the URL
-        const matchingTabs = await chrome.tabs.query({ url: targetUrl });
+      // auto-chrome-mcp fork(2026-09-04): 주입된 tabId 가 url 보다 우선한다.
+      // 예전에는 url 분기가 먼저라, 게이트가 작업 탭을 주입해도 chrome.tabs.query({url}) 가
+      // 다른 창의 사용자 탭을 골라 캡처를 붙였다.
+      const preferredTab = await this.tryGetTab(requestedTabId);
 
-        if (matchingTabs.length > 0) {
+      if (preferredTab) {
+        tabToOperateOn = preferredTab;
+      } else if (targetUrl) {
+        // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 이 세션이 소유한 탭에서만 찾는다.
+        // 예전에는 chrome.tabs.query({ url }) 로 모든 창을 뒤져 사용자 탭에 캡처가 붙었다.
+        const existing = await findTabByUrlInSessionScope(targetUrl, args);
+
+        if (existing) {
           // Use existing tab
-          tabToOperateOn = matchingTabs[0];
-          console.log(`NetworkCaptureV2: Found existing tab with URL: ${targetUrl}`);
+          tabToOperateOn = existing;
+          console.log(`NetworkCaptureV2: Found session tab with URL: ${targetUrl}`);
         } else {
-          // Create new tab
+          // Create new tab (지정한 창, 없으면 작업 탭의 창에 만든다)
           console.log(`NetworkCaptureV2: Creating new tab with URL: ${targetUrl}`);
-          tabToOperateOn = await createTabGuarded(
-            {
-              url: targetUrl,
-              active: background === true ? false : true,
-            },
-            { reason: 'network-capture-web-request' },
-          );
+          tabToOperateOn = await createTabForUrl(targetUrl, {
+            background: background === true,
+            reason: 'network-capture-web-request',
+            args,
+          });
 
           // Wait for page to load
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } else {
-        // Use the explicitly requested tab, falling back to the current active tab
-        const tab = (await this.tryGetTab(requestedTabId)) || (await this.getActiveTabInWindow());
+        // No tabId and no url — fall back to the current active tab.
+        const tab = await this.getActiveTabInWindow();
         if (!tab) {
           return createErrorResponse('No active tab found');
         }

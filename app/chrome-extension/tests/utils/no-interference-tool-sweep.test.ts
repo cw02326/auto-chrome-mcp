@@ -39,6 +39,14 @@ const EXEMPT_TOOLS = new Set<string>([
  */
 const STORAGE_ONLY_TOOLS = new Set<string>([B.STORAGE]);
 
+/**
+ * 백그라운드 작업 모드에서 **게이트가 실행 자체를 막는** 도구 (2026-09-04 항목 3).
+ * chrome API 를 한 번도 부르지 않는 것이 정상이자 합격 조건이다 — 아래 (2) 검사에서 뺀다.
+ * "정말 거절됐는지(구조화 오류 background_mode_unsupported)" 는
+ * tests/record-replay/mcp-tool-exposure.integration.test.ts 가 못박는다.
+ */
+const GATE_REFUSED_TOOLS = new Set<string>([TOOL_NAMES.RECORD_REPLAY.FLOW_RUN]);
+
 const USER_WINDOW_ID = 1;
 const USER_TAB_ID = 11;
 
@@ -443,7 +451,10 @@ describe('무간섭 모드 범용 회귀 (설계 K)', () => {
 
     // (2) 인자가 틀려 앞단에서 튕긴 fixture 는 그물 역할을 못 한다.
     const inert = outcomes
-      .filter((o) => o.apiCalls === 0 && !STORAGE_ONLY_TOOLS.has(o.name))
+      .filter(
+        (o) =>
+          o.apiCalls === 0 && !STORAGE_ONLY_TOOLS.has(o.name) && !GATE_REFUSED_TOOLS.has(o.name),
+      )
       .map((o) => o.name);
     expect(
       inert,

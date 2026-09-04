@@ -186,7 +186,8 @@ if defined ANTHROPIC_AUTH_TOKEN (
 )
 
 echo Executing: "%NODE_EXEC%" "%NODE_SCRIPT%" >> "%WRAPPER_LOG%"
-call "%NODE_EXEC%" "%NODE_SCRIPT%" 2>> "%STDERR_LOG%"
+REM Forward Chrome's arguments (caller origin, --parent-window) to the bridge.
+call "%NODE_EXEC%" "%NODE_SCRIPT%" %* 2>> "%STDERR_LOG%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo Exit code: %EXIT_CODE% >> "%WRAPPER_LOG%"

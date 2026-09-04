@@ -25,6 +25,7 @@ import {
   getLogDir,
 } from './utils';
 import { NATIVE_SERVER_PORT } from '../constant';
+import { inspectTokenFile, readAuthToken } from '../security/auth-token';
 
 const EXPECTED_PORT = 12320;
 const SCHEMA_VERSION = 1;
@@ -678,6 +679,165 @@ async function checkConnectivity(
   }
 }
 
+/** 포트로 쓸 수 있는 값인가. 아니면 null. */
+export function parsePortValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const num = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isInteger(num) || num <= 0 || num >= 65536) return null;
+  return num;
+}
+
+/**
+ * stale-extension 검사에 쓸 포트 후보를 모은다.
+ *
+ * 고정 포트 하나만 보면 안 된다. `.mcp.json` 의 `env.CHROME_PORT` 로 포트를 바꿔 쓰거나
+ * 팝업에서 동적 포트를 고른 설치에서는 그 포트에 브리지가 있고, 12320 에는 아무도 없다.
+ * 그러면 401 카운트를 읽지 못한 채 "확장이 토큰을 보낸다" 고 답하게 된다.
+ *
+ * 순서: env CHROME_PORT(stdio 프록시의 loadConfig 와 같은 우선순위) → stdio-config.json 의
+ * url 포트 → 포크 기본 포트 → 실제로 /ping 에 응답한 브리지 포트.
+ */
+export function resolveExtensionAuthPorts(input: {
+  configuredPort?: number | null;
+  envPort?: unknown;
+  responsivePorts?: number[];
+}): number[] {
+  const ports: number[] = [];
+  const push = (value: unknown) => {
+    const port = parsePortValue(value);
+    if (port !== null && !ports.includes(port)) ports.push(port);
+  };
+  push(input.envPort);
+  push(input.configuredPort);
+  push(EXPECTED_PORT);
+  for (const port of input.responsivePorts ?? []) push(port);
+  return ports;
+}
+
+/**
+ * 브리지의 `/health` 상세를 토큰과 함께 읽어 "확장이 토큰을 안 쓰고 있는지"를 본다.
+ *
+ * 후보 포트를 모두 조회해 401 카운트를 합산한다. 브리지가 안 떠 있거나 토큰 파일이 없으면
+ * 판정할 수 없다. 그때는 ok 로 두되 왜 못 봤는지 메시지에 남긴다 (없는 검사를 통과했다고
+ * 쓰지 않는다).
+ */
+export async function checkExtensionAuth(ports: number[]): Promise<{
+  check: DoctorCheckResult;
+  nextStep?: string;
+}> {
+  const base = { id: 'extension.auth', title: 'Extension token support' };
+  const token = readAuthToken();
+  if (!token) {
+    return {
+      check: {
+        ...base,
+        status: 'ok',
+        message: 'not checked (no token file yet)',
+        details: { hint: 'Start the bridge once, then re-run doctor.' },
+      },
+    };
+  }
+
+  const fetchFn = resolveFetch();
+  if (!fetchFn) {
+    return {
+      check: { ...base, status: 'ok', message: 'not checked (fetch unavailable)' },
+    };
+  }
+
+  const candidates: number[] = [];
+  for (const value of ports ?? []) {
+    const port = parsePortValue(value);
+    if (port !== null && !candidates.includes(port)) candidates.push(port);
+  }
+  if (candidates.length === 0) {
+    return {
+      check: { ...base, status: 'ok', message: 'not checked (no bridge port to query)' },
+    };
+  }
+
+  let rejections = 0;
+  let lastOrigin: unknown;
+  const reportingPorts: number[] = [];
+  const skipped: string[] = [];
+
+  for (const port of candidates) {
+    const url = `http://127.0.0.1:${port}/health`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    if (typeof timeout.unref === 'function') timeout.unref();
+
+    try {
+      const res = await fetchFn(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        skipped.push(`port ${port}: GET /health -> ${res.status}`);
+        continue;
+      }
+      const payload: any = await res.json().catch(() => null);
+      const detail = payload?.extension_auth;
+      if (!detail) {
+        skipped.push(`port ${port}: the running bridge is older than this doctor build`);
+        continue;
+      }
+      reportingPorts.push(port);
+      const count = Number(detail.stale_client_rejections) || 0;
+      rejections += count;
+      if (count > 0 && detail.last_origin) lastOrigin = detail.last_origin;
+    } catch (e: unknown) {
+      skipped.push(`port ${port}: ${stringifyError(e)}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (reportingPorts.length === 0) {
+    return {
+      check: {
+        ...base,
+        status: 'ok',
+        message: `not checked (${skipped.join('; ') || 'no bridge responded'})`,
+        details: {
+          probedPorts: candidates,
+          hint: 'The bridge is probably not running on these ports.',
+        },
+      },
+    };
+  }
+
+  if (rejections > 0) {
+    return {
+      check: {
+        ...base,
+        status: 'warn',
+        message: `the installed extension called the bridge ${rejections} time(s) without a token on port ${reportingPorts.join(
+          ', ',
+        )}, so its version is older than the bridge`,
+        details: {
+          staleClientRejections: rejections,
+          probedPorts: candidates,
+          reportingPorts,
+          lastOrigin,
+          fix: ['Rebuild the extension and reload it at chrome://extensions'],
+        },
+      },
+      nextStep: 'Rebuild the extension and reload it at chrome://extensions',
+    };
+  }
+
+  return {
+    check: {
+      ...base,
+      status: 'ok',
+      message: 'the extension sends the bridge token',
+      details: { staleClientRejections: 0, probedPorts: candidates, reportingPorts },
+    },
+  };
+}
+
 // ============================================================================
 // Summary Computation
 // ============================================================================
@@ -1043,6 +1203,11 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     }
   }
 
+  // 확장 토큰 검사(8b)가 쓸 포트. 고정 포트만 보면 CHROME_PORT 커스텀·동적 포트 설치에서
+  // 401 카운트를 못 본다. Check 7 이 이미 해석한 설정 포트와 응답한 브리지 포트를 물려받는다.
+  let configuredPort: number | null = null;
+  let responsiveBridgePorts: number[] = [];
+
   // Check 7: Port configuration
   if (fs.existsSync(stdioConfigPath)) {
     const cfg = readJsonFile(stdioConfigPath);
@@ -1058,6 +1223,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
         const configValue = cfg.value as Record<string, unknown>;
         const url = new URL(configValue.url as string);
         const port = Number(url.port);
+        configuredPort = parsePortValue(port);
         const portOk = port === EXPECTED_PORT;
         checks.push({
           id: 'port.config',
@@ -1093,6 +1259,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
           activePortsHint = await probeActiveBridgePorts();
         }
         const liveAlt = activePortsHint?.responsivePorts ?? [];
+        responsiveBridgePorts = liveAlt;
 
         let connectivityStatus: DoctorStatus;
         let connectivityMessage: string;
@@ -1136,7 +1303,87 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     }
   }
 
-  // Check 8: Logs directory
+  // Check 8: Bridge auth token (auto-chrome-mcp fork)
+  // 브리지는 listen 전에 무작위 bearer 토큰을 이 파일에 남기고, stdio 프록시가 그걸 읽어
+  // Authorization 헤더로 보낸다. 파일이 없거나 남에게 읽히면 인증이 무력해진다.
+  const tokenInspection = inspectTokenFile();
+  let tokenStatus: DoctorStatus = 'ok';
+  let tokenMessage = `${tokenInspection.path} (${tokenInspection.detail})`;
+  const tokenFix: string[] = [];
+  if (!tokenInspection.exists) {
+    tokenStatus = 'warn';
+    tokenMessage = `${tokenInspection.path} not found`;
+    tokenFix.push(
+      'Start the bridge once (click Connect in the extension popup) so it can create the token file',
+    );
+  } else if (!tokenInspection.valid) {
+    tokenStatus = 'error';
+    tokenMessage = `${tokenInspection.path} is unreadable or malformed`;
+    tokenFix.push('Delete the file and reconnect the extension so the bridge writes a new token');
+  } else if (tokenInspection.ownerOnly !== true) {
+    // false = 남이 읽을 수 있음. null = 권한을 확인하지 못함 — 확인 못 한 것을 안전하다고
+    // 보고하지 않는다 (브리지도 같은 기준으로 다시 잠근다).
+    tokenStatus = 'warn';
+    tokenMessage = `${tokenInspection.path} is not confirmed owner-only (${tokenInspection.detail})`;
+    tokenFix.push(
+      process.platform === 'win32'
+        ? `icacls "${tokenInspection.path}" /inheritance:r /grant:r "%USERNAME%:F"`
+        : `chmod 600 "${tokenInspection.path}"`,
+    );
+  }
+  // 파일이 잠겨 있어도 디렉터리가 열려 있으면 남이 파일을 갈아치울 수 있다.
+  // 브리지는 잠금에 실패해도 계속 뜨므로(가용성 우선) 여기서 반드시 보고한다.
+  if (tokenInspection.stateDirOwnerOnly === false) {
+    if (tokenStatus === 'ok') {
+      tokenStatus = 'warn';
+      tokenMessage = `${tokenInspection.stateDir} is open to other accounts (${tokenInspection.stateDirDetail})`;
+    }
+    tokenFix.push(
+      process.platform === 'win32'
+        ? `icacls "${tokenInspection.stateDir}" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"`
+        : `chmod 700 "${tokenInspection.stateDir}"`,
+    );
+  }
+  checks.push({
+    id: 'auth.token',
+    title: 'Bridge auth token',
+    status: tokenStatus,
+    message: tokenMessage,
+    details: {
+      path: tokenInspection.path,
+      exists: tokenInspection.exists,
+      valid: tokenInspection.valid,
+      ownerOnly: tokenInspection.ownerOnly,
+      permissions: tokenInspection.detail,
+      stateDir: tokenInspection.stateDir,
+      stateDirOwnerOnly: tokenInspection.stateDirOwnerOnly,
+      stateDirPermissions: tokenInspection.stateDirDetail,
+      hint: 'The stdio proxy reads this file and sends it as "Authorization: Bearer <token>". /ping and /health stay public.',
+      ...(tokenFix.length > 0 ? { fix: tokenFix } : {}),
+    },
+  });
+  if (tokenStatus !== 'ok' && tokenFix.length > 0) {
+    nextSteps.push(tokenFix[0]);
+  }
+
+  // Check 8b: 확장이 브리지 토큰을 실제로 쓰고 있는가 (auto-chrome-mcp fork)
+  //
+  // 확장이 보내는 START 메시지에는 auth 지원 여부가 없어서, 핸드셰이크만으로는 "토큰을
+  // 받고도 안 쓰는 옛 확장"을 구분할 수 없다. 대신 브리지가 세어 둔 값을 읽는다:
+  // 확장 origin 이 붙은 요청이 토큰 없이 들어와 401 을 받으면 브리지가 기록한다.
+  // 그 값은 /health 의 상세에 실리고, 상세는 토큰이 있어야 나오므로 여기서 토큰을 붙인다.
+  // 조회 대상은 고정 포트 하나가 아니라 설정된 포트와 응답한 브리지 포트 전부다.
+  const extensionAuthCheck = await checkExtensionAuth(
+    resolveExtensionAuthPorts({
+      configuredPort,
+      envPort: process.env.CHROME_PORT,
+      responsivePorts: responsiveBridgePorts,
+    }),
+  );
+  checks.push(extensionAuthCheck.check);
+  if (extensionAuthCheck.nextStep) nextSteps.push(extensionAuthCheck.nextStep);
+
+  // Check 9: Logs directory
   checks.push({
     id: 'logs',
     title: 'Logs',

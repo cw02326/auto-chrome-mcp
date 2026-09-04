@@ -4,17 +4,20 @@
  * auto-chrome-mcp fork 가 신설한 admin endpoints. Force Reconnect Stage A 의
  * 자살 패턴을 안전하게 지원하기 위한 backend.
  *
- * - GET  /health        — extension 측 readiness probe 용 (process info, uptime, transports)
+ * - GET  /health        — readiness probe. 토큰 없이도 살아 있는지는 답하지만, 상세는
+ *                          토큰이 있을 때만 준다.
  * - POST /admin/drain   — graceful drain + process.exit. Chrome 의 native messaging 이
  *                          끊김을 감지하면 우리 bridge 를 자동 respawn 한다 (extension 의
  *                          chrome.runtime.connectNative 호출 시).
  *
- * 보안: 두 엔드포인트 모두 localhost (127.0.0.1) 만 접근 가능해야 함.
- * 현재는 CORS_ORIGIN 화이트리스트 (chrome-extension://, moz-extension://,
- * http://127.0.0.1) 로 1차 차단. 향후 추가 토큰 검증 가능.
+ * 보안: /admin/* 은 auth-guard 가 토큰을 요구한다. /health 는 공개지만, 인증 없이는
+ * pid·node 버전·메모리·transport 수를 주지 않는다. 아무 웹페이지나 로컬 브리지에 GET 을
+ * 날려 그 값들을 읽어갈 수 있었기 때문이다 (프로세스 지문·핑거프린팅). 확장 팝업의
+ * 진단·강제 재연결은 토큰을 붙이므로 상세를 계속 받는다.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { HTTP_STATUS } from '../../constant';
+import { getStaleExtensionReport, isRequestAuthenticated } from '../auth-guard';
 
 export interface AdminRoutesOptions {
   /** Server class 의 graceful drain 콜백. transport 모두 닫고 process.exit(0). */
@@ -23,26 +26,39 @@ export interface AdminRoutesOptions {
   getTransportCount: () => number;
   /** Process start time (uptime 계산용). */
   startedAt: number;
+  /** 이 요청이 토큰 인증을 통과했는가. 기본값은 auth-guard 가 남긴 표시를 읽는다. */
+  isAuthenticated?: (request: FastifyRequest) => boolean;
 }
 
 export function registerAdminRoutes(fastify: FastifyInstance, options: AdminRoutesOptions): void {
+  const authenticated = options.isAuthenticated ?? isRequestAuthenticated;
+
   // ---------- GET /health ----------
-  fastify.get('/health', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const uptimeMs = Date.now() - options.startedAt;
-    reply.status(HTTP_STATUS.OK).send({
+  fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body: Record<string, unknown> = {
       status: 'ok',
       fork: 'auto-chrome-mcp',
       version: '1.0.0',
-      bridge: {
+    };
+
+    if (authenticated(request)) {
+      const stale = getStaleExtensionReport();
+      body.bridge = {
         pid: process.pid,
-        uptime_ms: uptimeMs,
+        uptime_ms: Date.now() - options.startedAt,
         node: process.version,
         memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      },
-      transports: {
-        active_count: options.getTransportCount(),
-      },
-    });
+      };
+      body.transports = { active_count: options.getTransportCount() };
+      // 확장이 토큰을 안 쓰고 있으면 여기에 남는다 (doctor 가 읽어 "확장 버전 낮음"으로 보고).
+      body.extension_auth = {
+        stale_client_rejections: stale.rejections,
+        last_at: stale.lastAt,
+        ...(stale.lastOrigin ? { last_origin: stale.lastOrigin } : {}),
+      };
+    }
+
+    reply.status(HTTP_STATUS.OK).send(body);
   });
 
   // ---------- POST /admin/drain ----------

@@ -28,6 +28,7 @@ import {
 } from '@/common/message-types';
 import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
+import { getBridgeAuthHeaders } from '@/utils/bridge-auth';
 
 // ============================================================
 // Constants
@@ -241,7 +242,7 @@ function cleanupRequest(requestId: string, reason: string): void {
 async function validateSession(port: number, sessionId: string): Promise<boolean> {
   const url = `http://127.0.0.1:${port}/agent/sessions/${encodeURIComponent(sessionId)}`;
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: await getBridgeAuthHeaders() });
     return response.ok;
   } catch {
     return false;
@@ -326,7 +327,7 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
     try {
       const response = await fetch(sseUrl, {
         method: 'GET',
-        headers: { Accept: 'text/event-stream' },
+        headers: { Accept: 'text/event-stream', ...(await getBridgeAuthHeaders()) },
         signal: request.abortController.signal,
       });
 
@@ -432,7 +433,7 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await getBridgeAuthHeaders()) },
     body: JSON.stringify(payload),
     signal: request.abortController.signal,
   });
@@ -453,7 +454,7 @@ async function cancelRequestOnServer(
 ): Promise<void> {
   const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`;
   try {
-    await fetch(url, { method: 'DELETE' });
+    await fetch(url, { method: 'DELETE', headers: await getBridgeAuthHeaders() });
   } catch {
     // Best-effort: cancellation might still succeed if request already ended
   }

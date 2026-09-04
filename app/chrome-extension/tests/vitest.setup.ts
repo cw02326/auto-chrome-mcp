@@ -45,8 +45,22 @@ if (typeof globalThis.chrome === 'undefined') {
       update: vi.fn().mockResolvedValue({}),
       remove: vi.fn().mockResolvedValue(undefined),
       captureVisibleTab: vi.fn().mockResolvedValue('data:image/png;base64,'),
+      // auto-chrome-mcp fork: MCP 작업 탭 그룹 편입 (utils/mcp-tab-group.ts)
+      group: vi.fn().mockResolvedValue(100),
+      ungroup: vi.fn().mockResolvedValue(undefined),
       onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
       onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
+      onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
+    },
+    // auto-chrome-mcp fork: 탭 그룹 "MCP" 조회·제목/색 지정 (utils/mcp-tab-group.ts)
+    tabGroups: {
+      query: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({ id: 100, title: 'MCP', color: 'green', windowId: 1 }),
+      update: vi.fn().mockResolvedValue({ id: 100, title: 'MCP', color: 'green', windowId: 1 }),
+      move: vi.fn().mockResolvedValue(undefined),
+      TAB_GROUP_ID_NONE: -1,
+      onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
+      onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
       onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     // auto-chrome-mcp fork: work-tab badge ("MCP") lives on chrome.action

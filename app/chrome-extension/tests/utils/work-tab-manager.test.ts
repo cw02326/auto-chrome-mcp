@@ -231,6 +231,48 @@ describe('work-tab-manager (auto-chrome-mcp fork — 세션별 MCP 작업 탭)',
     expect(all).not.toHaveProperty('s1'); // 이제 s1 이 최고령
   });
 
+  it('조회(getWorkTabId)는 호출마다 storage 에 쓰지 않는다 (LRU 표시는 메모리 + 디바운스)', async () => {
+    // 게이트가 도구 호출마다 이 함수를 부른다. 예전에는 조회마다 persistMap 이 돌아
+    // 모든 도구 호출에 chrome.storage.session.set 이 한 번씩 고정으로 붙었다.
+    const mod = await loadModule();
+    h.openTabs.add(310);
+    await mod.setWorkTab(310, 'perf');
+    h.sessionSet.mockClear();
+
+    for (let i = 0; i < 5; i++) {
+      expect(await mod.getWorkTabId('perf')).toBe(310);
+    }
+
+    expect(h.sessionSet).not.toHaveBeenCalled();
+  });
+
+  it('디바운스가 지나면 갱신된 LRU 표시가 storage 에 반영된다', async () => {
+    vi.useFakeTimers();
+    const mod = await loadModule();
+    h.openTabs.add(311);
+    await mod.setWorkTab(311, 'perf2');
+    await mod.getWorkTabId('perf2');
+    h.sessionSet.mockClear();
+
+    await vi.advanceTimersByTimeAsync(3100);
+
+    const writes = h.sessionSet.mock.calls.filter((call) =>
+      Object.prototype.hasOwnProperty.call(call[0] as Record<string, unknown>, 'mcpWorkTabs'),
+    );
+    expect(writes.length).toBe(1);
+  });
+
+  it('닫힌 탭을 만나면 디바운스를 기다리지 않고 바로 기록을 지운다', async () => {
+    const mod = await loadModule();
+    h.openTabs.add(312);
+    await mod.setWorkTab(312, 'gone');
+    h.openTabs.delete(312);
+
+    expect(await mod.getWorkTabId('gone')).toBeNull();
+    expect(await mod.getAllWorkTabs()).not.toHaveProperty('gone');
+    expect(h.sessionStore.mcpWorkTabs).not.toHaveProperty('gone');
+  });
+
   it('chrome.tabs.onRemoved 리스너가 그 탭을 쓰던 세션을 전부 지운다', async () => {
     const mod = await loadModule();
     expect(h.tabRemovedListeners).toHaveLength(1); // import 시점 등록

@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import {
+  BRIDGE_AUTH_MISMATCH_MESSAGE,
+  getBridgeAuthHeaders,
+  isBridgeAuthFailure,
+} from '@/utils/bridge-auth';
 
 const props = defineProps<{
   port: number;
@@ -57,10 +62,14 @@ const probeHealth = async () => {
   try {
     const res = await fetch(`${base.value}/health`, {
       method: 'GET',
+      headers: await getBridgeAuthHeaders(),
       signal: AbortSignal.timeout(2000),
     });
     if (!res.ok) {
-      healthError.value = `HTTP ${res.status}`;
+      // 브리지가 토큰을 요구하는데 확장이 못 보내면(또는 그 반대면) 401/403 이 온다.
+      healthError.value = isBridgeAuthFailure(res.status)
+        ? BRIDGE_AUTH_MISMATCH_MESSAGE
+        : `HTTP ${res.status}`;
       health.value = null;
       return;
     }
@@ -95,6 +104,7 @@ const initializeOnce = async (): Promise<{
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
+        ...(await getBridgeAuthHeaders()),
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -110,6 +120,9 @@ const initializeOnce = async (): Promise<{
     });
     const ms = Date.now() - t0;
     const sid = res.headers.get('mcp-session-id') ?? undefined;
+    if (isBridgeAuthFailure(res.status)) {
+      return { ok: false, ms, err: BRIDGE_AUTH_MISMATCH_MESSAGE };
+    }
     return { ok: res.ok && !!sid, sid, ms };
   } catch (e: any) {
     return { ok: false, ms: Date.now() - t0, err: e?.message || String(e) };

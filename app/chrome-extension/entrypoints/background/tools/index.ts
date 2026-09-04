@@ -1,13 +1,15 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { touchOwnedTab, describeClosedTab } from '@/utils/work-tab-manager';
+// auto-chrome-mcp fork(F2): 게이트 판정은 utils/work-tab-gate.ts 한곳에서만 한다.
+// (이 모듈은 도구 레지스트리 전체를 끌어와 테스트에서 import 할 수 없으므로 판정을 분리했다.)
 import {
-  getWorkTabId,
-  sessionKeyOf,
-  touchOwnedTab,
-  describeClosedTab,
-} from '@/utils/work-tab-manager';
+  applyBackgroundModeGate,
+  backgroundModeUnsupportedErrorText,
+  invalidTabIdErrorText,
+  noWorkTabErrorText,
+} from '@/utils/work-tab-gate';
 import { withTabLock } from '@/utils/tab-lock';
 import { applyAutomationGuard } from '@/utils/automation-guard';
 import { runWithWatchdog } from '@/utils/tool-watchdog';
@@ -18,6 +20,9 @@ import { looksLikeLoginUrl } from '@/utils/login-detector';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import * as browserTools from './browser';
 import { setBatchToolInvoker } from './browser/batch';
+// auto-chrome-mcp fork: url 로 대상을 고르는 호출의 대상 탭을 잠금 전에 미리 해석한다.
+// (barrel 로 재수출하면 함수가 toolsMap 에 섞이므로 직접 import — batch.ts 주석과 같은 이유)
+import { resolveUrlTargetTabId } from './browser/url-target';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
@@ -32,57 +37,6 @@ const toolsMap = new Map(Object.values(tools).map((tool: any) => [tool.name, too
 export const REGISTERED_TOOL_NAMES: readonly string[] = Array.from(toolsMap.keys()) as string[];
 
 const B = TOOL_NAMES.BROWSER;
-
-/**
- * 백그라운드 작업 모드 게이트에서 완전히 제외되는 도구 — 정의상 사용자 대면 동작.
- */
-const GATE_EXEMPT_TOOLS = new Set<string>([
-  B.SWITCH_TAB,
-  B.REQUEST_ELEMENT_SELECTION,
-  B.REQUEST_USER_CONSENT,
-]);
-
-/**
- * tabId 파라미터를 받는 도구 — 모드 ON + tabId 미지정이면 해당 세션의 MCP 작업 탭을
- * 주입해 사용자의 활성 탭 대신 작업 탭을 대상으로 하게 한다.
- * (chrome_navigate 는 자체 탭 선택 로직 + 작업 탭 기록 담당이라 제외.
- *  chrome_close_tabs 는 tabIds 배열이라 도구 내부에서 작업 탭 fallback 처리.)
- */
-const TAB_ID_INJECT_TOOLS = new Set<string>([
-  B.SCREENSHOT,
-  B.WEB_FETCHER,
-  B.CLICK,
-  B.FILL,
-  B.KEYBOARD,
-  B.JAVASCRIPT,
-  B.CONSOLE,
-  B.FILE_UPLOAD,
-  B.READ_PAGE,
-  B.COMPUTER,
-  B.GIF_RECORDER,
-  B.INJECT_SCRIPT,
-  B.GET_INTERACTIVE_ELEMENTS,
-  B.HANDLE_DIALOG,
-  B.NETWORK_REQUEST,
-  B.NETWORK_CAPTURE_START,
-  B.NETWORK_CAPTURE_STOP,
-  B.NETWORK_DEBUGGER_START,
-  B.NETWORK_DEBUGGER_STOP,
-  B.NETWORK_CAPTURE,
-  B.USERSCRIPT,
-  B.PERFORMANCE_START_TRACE,
-  B.PERFORMANCE_STOP_TRACE,
-  B.PERFORMANCE_ANALYZE_INSIGHT,
-  B.WAIT_FOR,
-  B.SCROLL_COLLECT,
-  B.EXTRACT,
-  B.FIND,
-  // auto-chrome-mcp fork(B1~B4)
-  B.STORAGE,
-  B.SAVE_PDF,
-  B.EMULATE,
-  B.NETWORK_RULES,
-]);
 
 /**
  * 액션성 도구 — automation guard(도메인 속도 제한 + 반복 폭주 가드) 적용 대상.
@@ -120,44 +74,6 @@ const WATCHDOG_OVERRIDES: Record<string, number> = {
 export interface ToolCallParam {
   name: string;
   args: any;
-}
-
-/**
- * 작업 탭 버킷 키 — stdio 프록시가 실어 보낸 _mcpSessionId 에, 호출자가 준 lane 을 더한다.
- *
- * 한 Claude Code 세션의 서브에이전트들은 stdio 프로세스를 공유해 _mcpSessionId 가 같다.
- * lane 을 주면 그만큼 버킷이 갈라져 병렬 에이전트가 서로의 작업 탭을 덮어쓰지 않는다.
- * 인자는 strip 하지 않는다 (navigate/close_tabs 가 같은 키를 다시 계산한다).
- */
-function getSessionId(args: any): string {
-  return sessionKeyOf(args);
-}
-
-/**
- * 백그라운드 작업 모드가 ON 이면 도구 args 를 무간섭 방향으로 보정한다.
- * 호출자가 명시한 값은 절대 덮어쓰지 않는다.
- */
-async function applyBackgroundModeGate(
-  name: string,
-  args: any,
-): Promise<{ args: any; workTabId: number | null }> {
-  // auto-chrome-mcp fork: 작업 탭 조회는 호출당 한 번이면 충분하다. 예전엔 게이트와
-  // handleCallTool 이 각각 조회해 매 호출마다 chrome.storage.session 쓰기가 두 번 났다.
-  // 조회는 게이트를 타지 않는 경로에서도 한다 — handleCallTool 의 팝업 감지가 이 값을
-  // opener 후보로 쓰므로, 모드가 꺼져 있다고 빼면 팝업 알림이 조용히 사라진다.
-  const workTabId = await getWorkTabId(getSessionId(args));
-
-  if (GATE_EXEMPT_TOOLS.has(name)) return { args, workTabId };
-  if (!(await isBackgroundModeEnabled())) return { args, workTabId };
-
-  const patched = { ...(args ?? {}) };
-  if (patched.background === undefined) {
-    patched.background = true;
-  }
-  if (TAB_ID_INJECT_TOOLS.has(name) && patched.tabId === undefined && workTabId !== null) {
-    patched.tabId = workTabId;
-  }
-  return { args: patched, workTabId };
 }
 
 // 탭 단위 직렬화는 utils/tab-lock.ts 로 분리했다 (navigate 의 재사용 판정도 같은 busy 상태를 본다).
@@ -274,6 +190,26 @@ export const handleCallTool = async (param: ToolCallParam) => {
     const args = gate.args;
     gatedArgs = args;
 
+    // 탭 id 가 될 수 없는 값(null·문자열·0·음수)을 tabId 로 받은 호출은 여기서 끝낸다.
+    // 예전에는 "tabId 를 명시했다" 로 보고 통과시켰고, 도구 구현은 그 값을 못 쓰니
+    // 사용자의 활성 탭으로 fallback 했다 — 게이트를 우회하는 가장 쉬운 길이었다.
+    if (gate.invalidTabId) {
+      return createErrorResponse(invalidTabIdErrorText(param.name, param.args?.tabId));
+    }
+
+    // auto-chrome-mcp fork(F2): 백그라운드 작업 모드에서 tabId 도, 이 세션·레인의 작업 탭도
+    // 없으면 여기서 끝낸다. 예전에는 그대로 통과시켜, 도구 구현의 활성 탭 fallback 때문에
+    // 사용자가 보고 있는 탭이 읽히고 조작됐다.
+    if (gate.noWorkTab) {
+      return createErrorResponse(noWorkTabErrorText(param.name));
+    }
+
+    // auto-chrome-mcp fork(항목 3): 대상 탭을 스스로 고르는 도구(record_replay_flow_run)는
+    // 작업 탭을 주입해도 소비하지 않는다 — 모드 ON 에서는 실행 자체를 막는다.
+    if (gate.unsupportedInBackgroundMode) {
+      return createErrorResponse(backgroundModeUnsupportedErrorText(param.name));
+    }
+
     // 대상 탭이 이미 없으면 여기서 끝낸다 — 아래 도구들은 없으면 활성 탭으로 흘러간다.
     const goneTab = await rejectIfTargetTabGone(param.name, args);
     if (goneTab) return goneTab;
@@ -289,16 +225,33 @@ export const handleCallTool = async (param: ToolCallParam) => {
       }
     }
 
+    // auto-chrome-mcp fork(2026-09-04 Codex 최종 검토, 남은 항목):
+    // 잠금·busy·touch 추적은 원래 args.tabId 하나만 봤다. 그런데 url 이 곧 대상 지정인
+    // 호출(URL_SELECTS_TARGET_TOOLS)에는 게이트가 일부러 tabId 를 주입하지 않는다 —
+    // 주입하면 도구가 tabId 분기로 빠져 url 이 통째로 무시되기 때문이다. 그래서 이
+    // 호출들만 잠금 없이 실행됐고, url 이 기존 작업 탭과 같으면 tabId 를 명시한
+    // click·navigate 와 fetch·inject·capture 가 같은 탭에서 동시에 돌았다.
+    //
+    // 그래서 도구가 쓰는 것과 **같은 조회 규칙**으로 대상 탭 id 만 미리 확인해, 추적·잠금
+    // 에만 쓴다. args 는 손대지 않는다 — 주입하면 위의 회귀가 되살아나고, 백그라운드 작업
+    // 모드 OFF 에서 "인자를 보정하지 않는다" 는 게이트 계약도 깨진다.
+    // 조회가 빈손이면(도구가 새 탭을 만들 예정) 아직 아무도 모르는 탭이라 잠글 대상이 없다.
+    const urlTargetTabId = await resolveUrlTargetTabId(param.name, args);
+    /** 이 호출이 실제로 건드릴 탭 — 잠금·busy·touch·팝업 감지의 기준. */
+    const trackedTabId = args?.tabId ?? urlTargetTabId;
+
     // chrome_batch 는 내부에서 step 별로 handleCallTool 을 재진입해 각자 탭 락을 잡는다.
     // 배치 자체가 락을 잡으면 step 과 이중 획득 → 교착이므로 배치는 락 없이 실행.
-    const lockTabId = param.name === TOOL_NAMES.BROWSER.BATCH ? undefined : args?.tabId;
+    const lockTabId = param.name === TOOL_NAMES.BROWSER.BATCH ? undefined : trackedTabId;
 
     // auto-chrome-mcp fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
     // 새 탭/팝업 창을 열었으면 결과에 알림을 첨부한다. 이게 없으면 모델은 팝업이
     // 열린 사실을 모르고 원래 탭에만 명령을 보내다 실패한다.
     const spawnWatchStart = Date.now();
     const openerCandidates: number[] = [];
-    if (typeof args?.tabId === 'number') openerCandidates.push(args.tabId);
+    // url 로 해석한 대상 탭도 포함한다 — 예전에는 후보가 세션 작업 탭뿐이어서, url 호출의
+    // 팝업 감지·실패 스크린샷·로그인 리다이렉트 경고가 엉뚱한 탭을 봤다.
+    if (typeof trackedTabId === 'number') openerCandidates.push(trackedTabId);
     // 게이트가 이미 조회해 둔 작업 탭을 재사용한다 (중복 조회 = storage 쓰기 2회였다).
     const sessionWorkTab = gate.workTabId;
     if (sessionWorkTab !== null && !openerCandidates.includes(sessionWorkTab)) {
@@ -318,7 +271,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
     // auto-chrome-mcp fork(P1): 이 탭을 지금 쓰고 있다고 표시 — 정리 로직이 살아 있는
     // 병렬 작업 탭을 유휴로 오인해 닫지 않게 한다.
-    touchOwnedTab(args?.tabId);
+    touchOwnedTab(trackedTabId);
 
     const result = (await withTabLock(lockTabId, () =>
       runWithWatchdog<ToolResult>(

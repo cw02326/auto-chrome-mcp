@@ -24,6 +24,9 @@ export const SERVER_CONFIG = {
   /**
    * CORS origin whitelist - only allow Chrome/Firefox extensions and local debugging.
    * Use RegExp patterns for extension origins, string for exact match.
+   *
+   * 실제 판정은 src/security/origin.ts 가 한다 (URL 파싱). 이 목록은 문서·호환용으로만
+   * 남겨 둔다. 문자열 prefix 비교는 http://127.0.0.1.attacker.example 을 통과시켰다.
    */
   CORS_ORIGIN: [/^chrome-extension:\/\//, /^moz-extension:\/\//, 'http://127.0.0.1'] as const,
   LOGGER_ENABLED: false,
@@ -35,6 +38,8 @@ export const HTTP_STATUS = {
   CREATED: 201,
   NO_CONTENT: 204,
   BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
   NOT_FOUND: 404,
   INTERNAL_SERVER_ERROR: 500,
   GATEWAY_TIMEOUT: 504,
@@ -51,6 +56,9 @@ export const ERROR_MESSAGES = {
   MCP_SESSION_DELETION_ERROR: 'Internal server error during MCP session deletion.',
   MCP_REQUEST_PROCESSING_ERROR: 'Internal server error during MCP request processing.',
   INVALID_SSE_SESSION: 'Invalid or missing MCP session ID for SSE.',
+  UNAUTHORIZED: 'Missing or invalid bridge auth token.',
+  FORBIDDEN_ORIGIN: 'Origin is not allowed to reach the local bridge.',
+  FORBIDDEN_HOST: 'Host header must address the local bridge (127.0.0.1, localhost or [::1]).',
 } as const;
 
 // ============================================================

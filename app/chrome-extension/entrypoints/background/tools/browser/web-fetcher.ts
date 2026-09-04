@@ -2,11 +2,9 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
-import {
-  activateTab,
-  createTab as createTabGuarded,
-  focusWindow as focusWindowIfAllowed,
-} from '@/utils/activation-guard';
+import { activateTab, focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
+// auto-chrome-mcp fork: url 분기가 사용자 창의 탭을 집지 않도록 세션 소유 탭으로만 조회한다.
+import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 // auto-chrome-mcp fork(T2): 직전 읽기와 동일하면 본문을 다시 보내지 않기 위한 콘텐츠 해시 캐시
 import { diffCheck } from '@/utils/content-cache';
 // auto-chrome-mcp fork: iframe 안의 interactive elements 까지 수집하기 위한 프레임 열거 유틸
@@ -64,29 +62,22 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
       if (typeof explicitTabId === 'number') {
         tab = await chrome.tabs.get(explicitTabId);
       } else if (url) {
-        // If URL is provided, check if it's already open
-        console.log(`Checking if URL is already open: ${url}`);
-        const allTabs = await chrome.tabs.query({});
-
-        // Find tab with matching URL
-        const matchingTabs = allTabs.filter((t) => {
-          // Normalize URLs for comparison (remove trailing slashes)
-          const tabUrl = t.url?.endsWith('/') ? t.url.slice(0, -1) : t.url;
-          const targetUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-          return tabUrl === targetUrl;
-        });
-
-        if (matchingTabs.length > 0) {
-          // Use existing tab
-          tab = matchingTabs[0];
-          console.log(`Found existing tab with URL: ${url}, tab ID: ${tab.id}`);
+        // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 이 세션이 소유한 탭에서만 찾는다.
+        // 예전에는 chrome.tabs.query({}) 로 모든 창을 뒤져 사용자 탭이 걸렸다.
+        const existing = await findTabByUrlInSessionScope(url, args);
+        if (existing) {
+          tab = existing;
+          console.log(`Found session tab with URL: ${url}, tab ID: ${tab.id}`);
         } else {
-          // Create new tab with the URL
-          console.log(`No existing tab found with URL: ${url}, creating new tab`);
-          tab = await createTabGuarded(
-            { url, active: background ? false : true },
-            { reason: 'web-fetcher' },
-          );
+          // Create new tab with the URL (지정한 창에 만든다 — 예전엔 windowId 를 안 넘겨
+          // 사용자가 보고 있는 창에 탭이 붙었다).
+          console.log(`No session tab found with URL: ${url}, creating new tab`);
+          tab = await createTabForUrl(url, {
+            background,
+            windowId,
+            reason: 'web-fetcher',
+            args,
+          });
 
           // Wait for page to load
           console.log('Waiting for page to load...');
@@ -293,6 +284,9 @@ interface GetInteractiveElementsToolParams {
   types?: string[]; // Types of interactive elements to include (default: all types)
   // auto-chrome-mcp fork: true 면 top frame 외에 iframe 안의 요소도 함께 수집한다. default: false
   allFrames?: boolean;
+  // auto-chrome-mcp fork(2026-09-04): 게이트가 주입하는 대상 탭. 없으면 활성 탭.
+  // 이 필드가 없어서 작업 탭 주입이 통째로 버려지고 사용자의 활성 탭이 읽혔다.
+  tabId?: number;
 }
 
 /** auto-chrome-mcp fork: allFrames 수집 시 프레임당 / 전체 요소 상한 (read-page.ts 와 동일) */
@@ -368,13 +362,15 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
     console.log(`Starting get interactive elements with options:`, args);
 
     try {
-      // Get current tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
+      // auto-chrome-mcp fork(2026-09-04): 주입된 tabId 를 최우선으로 소비한다.
+      // 예전에는 이 값을 무시하고 currentWindow 활성 탭을 조회해 사용자 탭이 읽혔다.
+      // windowId 는 소비하지 않는다 — 게이트의 WINDOW_ID_AWARE_TOOLS 에서 빠져 있고,
+      // 창 지정만으로 통과시키지 않는 fail-closed 판정을 그대로 두기 위함이다.
+      const explicit = await this.tryGetTab(args.tabId);
+      const tab = explicit || (await this.getActiveTabInWindow());
+      if (!tab) {
         return createErrorResponse('No active tab found');
       }
-
-      const tab = tabs[0];
       if (!tab.id) {
         return createErrorResponse('Active tab has no ID');
       }

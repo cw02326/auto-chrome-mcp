@@ -190,10 +190,11 @@ describe('mcp-window-manager (auto-chrome-mcp fork — 작업 창 모드)', () =
   });
 
   describe('모드 접근자', () => {
-    it("키가 없으면 'dedicated'(전용 작업 창)가 기본값이다 — v1.9.0 무간섭 모드", async () => {
+    it("키가 없으면 'current'(사용자 창에 새 탭)가 기본값이다 — 2026-09-04", async () => {
       const mod = await loadWindowManager();
-      expect(await mod.getWorkWindowMode()).toBe('dedicated');
-      expect(await mod.isDedicatedWindowEnabled()).toBe(true);
+      expect(mod.DEFAULT_WORK_WINDOW_MODE).toBe('current');
+      expect(await mod.getWorkWindowMode()).toBe('current');
+      expect(await mod.isDedicatedWindowEnabled()).toBe(false);
     });
 
     it('신규 키를 그대로 읽는다', async () => {
@@ -204,18 +205,17 @@ describe('mcp-window-manager (auto-chrome-mcp fork — 작업 창 모드)', () =
       expect(await mod.getWorkWindowMode()).toBe('current');
     });
 
-    it('알 수 없는 값이면 기본값(dedicated)으로 떨어진다', async () => {
+    it('알 수 없는 값이면 기본값(current)으로 떨어진다', async () => {
       const mod = await loadWindowManager();
       h.localStore.mcpWorkWindowMode = 'weird';
-      expect(await mod.getWorkWindowMode()).toBe('dedicated');
+      expect(await mod.getWorkWindowMode()).toBe('current');
     });
 
     it('구버전 boolean 설정을 그대로 승계한다 (마이그레이션, 설계 J)', async () => {
       const mod = await loadWindowManager();
       h.localStore.dedicatedWorkWindow = true;
       expect(await mod.getWorkWindowMode()).toBe('dedicated');
-      // v1.9.0 의 새 기본값은 두 키가 **모두 없을 때만** 적용된다 —
-      // 예전에 토글을 끈 사용자(false 가 남아 있는 사용자)의 저장값은 그대로 존중한다.
+      // 기본값은 두 키가 **모두 없을 때만** 적용된다 — 저장값은 그대로 존중한다.
       h.localStore.dedicatedWorkWindow = false;
       expect(await mod.getWorkWindowMode()).toBe('current');
     });
@@ -227,10 +227,10 @@ describe('mcp-window-manager (auto-chrome-mcp fork — 작업 창 모드)', () =
       expect(await mod.getWorkWindowMode()).toBe('current');
     });
 
-    it("storage 읽기 실패 시에도 'dedicated' 로 fail-safe", async () => {
+    it("storage 읽기 실패 시에도 'current' 로 fail-safe", async () => {
       const mod = await loadWindowManager();
       h.localGet.mockRejectedValueOnce(new Error('storage down'));
-      expect(await mod.getWorkWindowMode()).toBe('dedicated');
+      expect(await mod.getWorkWindowMode()).toBe('current');
     });
 
     it('setter 는 신규 키와 구버전 boolean 을 함께 쓴다', async () => {

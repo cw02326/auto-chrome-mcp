@@ -18,6 +18,12 @@ type UserscriptAction =
 interface UserscriptArgsBase {
   action: UserscriptAction;
   args?: any;
+  /**
+   * auto-chrome-mcp fork(2026-09-04): work-tab-gate 는 **top-level** 에 작업 탭 id 를 주입한다.
+   * 이 도구는 중첩된 `args.tabId` 만 읽어 그 주입값을 버렸고, 그러면 각 action 이
+   * getActiveTab() 으로 내려가 사용자가 보고 있는 탭에 스크립트를 넣었다.
+   */
+  tabId?: number;
 }
 
 interface CreateArgs {
@@ -426,7 +432,13 @@ class UserscriptTool extends BaseBrowserToolExecutor {
   async execute(params: UserscriptArgsBase): Promise<ToolResult> {
     try {
       const { action } = params;
-      const args = params.args || {};
+      // 게이트가 주입한 top-level tabId 를 중첩 args 로 내린다. 호출자가 args.tabId 를
+      // 직접 지정했으면 그 값이 우선한다(명시 > 주입).
+      const nested = params.args || {};
+      const args =
+        typeof params.tabId === 'number' && typeof nested.tabId !== 'number'
+          ? { ...nested, tabId: params.tabId }
+          : nested;
 
       switch (action) {
         case 'create':

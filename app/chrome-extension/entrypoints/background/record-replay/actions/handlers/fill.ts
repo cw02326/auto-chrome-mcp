@@ -54,7 +54,8 @@ export const fillHandler: ActionHandler<'fill'> = {
     }
 
     // Ensure page is read before locating element
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    // auto-chrome-mcp fork: click.ts 와 같은 이유로 재생 중인 탭을 명시한다.
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
 
     // Resolve fill value
     const valueResolved = resolveString(action.params.value, vars);

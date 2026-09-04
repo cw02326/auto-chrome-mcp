@@ -15,11 +15,23 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getTokenFilePath, readAuthToken } from '../security/auth-token';
 
 let stdioMcpServer: Server | null = null;
 let mcpClient: Client | null = null;
 let sessionId: string | undefined = undefined;
 let isCleaningUp = false;
+/**
+ * 진행 중인 연결. 병렬 첫 호출이 서로의 client 를 닫아버리던 버그(F6) 때문에 도입.
+ * 연결이 끝나기 전에는 모든 호출이 이 promise 하나를 기다린다.
+ */
+let connectPromise: Promise<Client> | null = null;
+/**
+ * 연결 세대. `chrome_use_browser` 가 connectPromise 를 지우면 옛 연결과 새 연결이 겹칠 수
+ * 있다. 그때 늦게 끝난 옛 연결이 전역을 덮어쓰거나 새 client 를 닫아버리면 안 된다.
+ */
+let connectionGeneration = 0;
+const clientGenerations = new WeakMap<object, number>();
 
 // auto-chrome-mcp fork: 이 stdio 프로세스(=Claude Code 세션 1개당 1개)의 고유 세션 id.
 // 모든 tools/call 인자에 _mcpSessionId 로 실려 extension 까지 전달되고, extension 은 이 값(+ 호출자가
@@ -49,6 +61,39 @@ const loadConfig = () => {
     console.error('Failed to load stdio-config.json:', error);
     throw new Error('Configuration file stdio-config.json not found or invalid');
   }
+};
+
+// ============================================================
+// auto-chrome-mcp fork: 브리지 인증 (bearer token)
+// ============================================================
+// 브리지는 listen 전에 무작위 토큰을 ~/.auto-chrome-mcp/auth-token 에 (소유자만 읽기)
+// 남긴다. 같은 사용자로 도는 이 프록시만 그 파일을 읽을 수 있다.
+// 토큰이 없으면 헤더를 안 붙인다 — 토큰을 모르는 옛 브리지와도 그대로 붙는다.
+
+const authHeaders = (): Record<string, string> => {
+  const token = readAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+/** 401/403 을 "무엇을 하면 되는지"까지 담은 에러로 바꿔 준다. */
+const describeAuthFailure = (error: any, url: string): Error => {
+  const raw = `${error?.message || error || ''}`;
+  const unauthorized =
+    raw.includes('401') || raw.includes('403') || /unauthorized|forbidden/i.test(raw);
+  if (!unauthorized) return error instanceof Error ? error : new Error(raw || 'connect failed');
+
+  const tokenPath = getTokenFilePath();
+  const tokenState = readAuthToken() ? 'present but rejected' : 'missing or unreadable';
+  return new Error(
+    [
+      `The bridge at ${url} rejected this connection (not authorized).`,
+      `Auth token file: ${tokenPath} (${tokenState}).`,
+      'What to check: 1) is the bridge running? the extension popup shows its port.',
+      '2) run "auto-chrome-mcp-bridge doctor" to verify the token file and permissions.',
+      '3) the token file is created by the bridge on startup, so reconnect the extension if it is missing.',
+      `Original error: ${raw}`,
+    ].join(' '),
+  );
 };
 
 // ============================================================
@@ -178,7 +223,7 @@ const terminateActiveSession = async (): Promise<void> => {
   try {
     await fetch(getActiveUrl(), {
       method: 'DELETE',
-      headers: { 'Mcp-Session-Id': sessionId },
+      headers: { 'Mcp-Session-Id': sessionId, ...authHeaders() },
       signal: abortController.signal,
     });
   } catch (e: any) {
@@ -275,12 +320,13 @@ const handleUseBrowser = async (args: any): Promise<CallToolResult> => {
   await terminateActiveSession();
   if (mcpClient) {
     try {
-      mcpClient.close();
+      await mcpClient.close();
     } catch {
       /* ignore close errors */
     }
   }
   mcpClient = null;
+  connectPromise = null;
   sessionId = undefined;
   activeUrl = mcpUrlForPort(port);
   console.error(`[chrome-mcp-stdio] Switched active browser → ${activeUrl}`);
@@ -322,52 +368,107 @@ export const getStdioMcpServer = () => {
   return stdioMcpServer;
 };
 
-export const ensureMcpClient = async (forceNew = false) => {
-  try {
-    if (mcpClient && !forceNew) {
-      try {
-        const pingResult = await mcpClient.ping();
-        if (pingResult) {
-          return mcpClient;
-        }
-      } catch {
-        // Ping failed — old client/transport is dead, will rebuild below
-        console.error('[chrome-mcp-stdio] Ping failed, rebuilding client');
-      }
-    }
+/**
+ * 새 client 를 만들어 연결한다. 성공한 뒤에만 전역(mcpClient/sessionId)에 반영한다 —
+ * 연결 중인 client 가 전역에 노출되면 다른 호출이 그걸 ping 하고 실패시켜 닫아버린다.
+ */
+const connectNewClient = async (stale: Client | null): Promise<Client> => {
+  const generation = ++connectionGeneration;
 
-    // Always close the old client before creating a new one
-    if (mcpClient) {
+  if (stale) {
+    // 자기보다 새 세대의 client 는 닫지 않는다 (겹친 연결이 서로를 죽이던 원인).
+    const staleGeneration = clientGenerations.get(stale as unknown as object) ?? 0;
+    if (staleGeneration <= generation) {
       try {
-        mcpClient.close();
+        await stale.close();
       } catch {
         /* ignore close errors */
       }
-      mcpClient = null;
+    } else {
+      console.error('[chrome-mcp-stdio] Skipped closing a newer client (generation guard)');
     }
-
-    // auto-chrome-mcp fork: config 의 url 이 아니라 "현재 활성 url" 을 연결 시점에 읽는다.
-    // (chrome_use_browser 로 세션 도중 바뀔 수 있음 — 캐시하면 전환이 먹지 않는다)
-    const url = getActiveUrl();
-    mcpClient = new Client({ name: 'Mcp Chrome Proxy', version: '1.0.0' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(new URL(url), {});
-    await mcpClient.connect(transport);
-    // Save session ID for cleanup on exit
-    sessionId = transport.sessionId;
-    return mcpClient;
-  } catch (error) {
-    if (mcpClient) {
-      try {
-        mcpClient.close();
-      } catch {
-        /* ignore close errors */
-      }
-    }
-    mcpClient = null;
-    sessionId = undefined;
-    console.error('[chrome-mcp-stdio] Failed to connect to MCP server:', error);
-    throw error;
   }
+
+  // auto-chrome-mcp fork: config 의 url 이 아니라 "현재 활성 url" 을 연결 시점에 읽는다.
+  // (chrome_use_browser 로 세션 도중 바뀔 수 있음 — 캐시하면 전환이 먹지 않는다)
+  const url = getActiveUrl();
+  const headers = authHeaders();
+  const client = new Client({ name: 'Mcp Chrome Proxy', version: '1.0.0' }, { capabilities: {} });
+  const transport = new StreamableHTTPClientTransport(
+    new URL(url),
+    Object.keys(headers).length > 0 ? { requestInit: { headers } } : {},
+  );
+
+  try {
+    await client.connect(transport);
+  } catch (error: any) {
+    try {
+      await client.close();
+    } catch {
+      /* ignore close errors */
+    }
+    console.error('[chrome-mcp-stdio] Failed to connect to MCP server:', error);
+    throw describeAuthFailure(error, url);
+  }
+
+  // 연결하는 동안 chrome_use_browser 로 대상이 바뀌었으면 이 client 는 버린다.
+  if (getActiveUrl() !== url) {
+    try {
+      await client.close();
+    } catch {
+      /* ignore close errors */
+    }
+    throw new Error(`Active browser changed while connecting (${url} is no longer the target)`);
+  }
+
+  clientGenerations.set(client as unknown as object, generation);
+  if (generation === connectionGeneration) {
+    mcpClient = client;
+    sessionId = transport.sessionId;
+  } else {
+    // 이 연결이 끝나는 사이 더 새 연결이 전역을 차지했다. 이 client 는 호출자에게만 준다.
+    console.error('[chrome-mcp-stdio] A newer connection won; not publishing this client');
+  }
+  return client;
+};
+
+export const ensureMcpClient = async (forceNew = false): Promise<Client> => {
+  // 이미 누군가 연결 중이면 forceNew 여부와 무관하게 그 결과를 함께 쓴다.
+  //
+  // 예전에는 forceNew 면 진행 중인 연결을 기다린 뒤 그 client 를 닫고 새로 만들었다.
+  // 그래서 세션 시작 직후 도구 호출 두 개가 (재시도 경로로) 겹치면 첫 호출자가 닫힌
+  // client 를 쥐고, 브리지에는 쓰이지 않는 HTTP 세션이 하나 남았다. 방금 맺은 연결을
+  // 버릴 이유는 없다 — 실패했으면 promise 가 그대로 reject 되어 호출자의 재시도로 간다.
+  if (connectPromise) {
+    return connectPromise;
+  }
+
+  if (mcpClient && !forceNew) {
+    try {
+      const pingResult = await mcpClient.ping();
+      if (pingResult) {
+        return mcpClient;
+      }
+    } catch {
+      // Ping failed — old client/transport is dead, will rebuild below
+      console.error('[chrome-mcp-stdio] Ping failed, rebuilding client');
+    }
+    // ping 을 기다리는 동안 다른 호출이 재연결을 시작했을 수 있다.
+    if (connectPromise) {
+      return connectPromise;
+    }
+  }
+
+  const stale = mcpClient;
+  mcpClient = null;
+  sessionId = undefined;
+  const promise: Promise<Client> = connectNewClient(stale).finally(() => {
+    if (connectPromise === promise) {
+      connectPromise = null;
+    }
+  });
+  connectPromise = promise;
+  return promise;
 };
 
 // Cleanup function to close session on exit
@@ -380,7 +481,11 @@ const cleanup = async () => {
   // auto-chrome-mcp fork: config 의 url 이 아니라 "현재" 활성 url 로 DELETE
   // (chrome_use_browser 로 전환한 뒤 종료해도 올바른 bridge 의 세션이 정리되도록)
   await terminateActiveSession();
-  mcpClient?.close();
+  try {
+    await mcpClient?.close();
+  } catch {
+    /* ignore close errors */
+  }
   stdioMcpServer?.close();
   process.exit(0);
 };

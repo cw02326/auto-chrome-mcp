@@ -24,6 +24,22 @@ export enum NativeMessageType {
   PORT_CONFLICT = 'port_conflict',
 }
 
+/**
+ * `SERVER_STARTED` payload — 네이티브 호스트가 HTTP 브리지를 띄운 뒤 확장에 보낸다.
+ *
+ * `authToken` 은 브리지의 로컬 HTTP 인증 토큰이다. 확장은 파일 시스템을 읽을 수 없어
+ * `~/.auto-chrome-mcp/auth-token` 을 볼 수 없으므로, 이 메시지가 확장이 토큰을 얻는
+ * 유일한 경로다. 확장은 이 값을 `chrome.storage.session`(디스크에 남지 않는다)에만
+ * 보관하고 `/admin/*`, `/mcp` 호출에 `Authorization: Bearer <token>` 으로 붙인다.
+ *
+ * 옛 브리지는 이 필드를 보내지 않는다. 그때는 확장이 토큰 없이 붙고, 브리지도 인증을
+ * 요구하지 않으므로 그대로 동작한다.
+ */
+export interface ServerStartedPayload {
+  port: number;
+  authToken?: string;
+}
+
 export interface NativeMessage<P = any, E = any> {
   type?: NativeMessageType;
   responseToRequestId?: string;

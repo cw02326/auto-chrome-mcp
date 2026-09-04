@@ -5,6 +5,12 @@ import { handleCallTool } from './tools';
 import { listPublished, getFlow } from './record-replay/flow-store';
 import { acquireKeepalive } from './keepalive-manager';
 import { HeartbeatWatchdog, type HeartbeatPhase } from './native-heartbeat';
+import {
+  BRIDGE_AUTH_MISMATCH_MESSAGE,
+  getBridgeAuthHeaders,
+  isBridgeAuthFailure,
+  setBridgeAuthToken,
+} from '@/utils/bridge-auth';
 
 const LOG_PREFIX = '[NativeHost]';
 
@@ -324,8 +330,15 @@ const heartbeat = new HeartbeatWatchdog({
     try {
       const res = await fetch(`http://127.0.0.1:${port}/ping`, {
         method: 'GET',
+        headers: await getBridgeAuthHeaders(),
         signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS),
       });
+      // 인증 거절은 "조용히 죽었다" 가 아니다 — 브리지는 살아서 답했다. 여기서 죽었다고
+      // 보고하면 재연결만 반복하고 원인은 그대로다. 안내만 남기고 살아 있다고 본다.
+      if (isBridgeAuthFailure(res.status)) {
+        console.warn(`${LOG_PREFIX} ${BRIDGE_AUTH_MISMATCH_MESSAGE}`);
+        return true;
+      }
       return res.ok;
     } catch {
       return false;
@@ -495,6 +508,12 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
         }
       } else if (message.type === NativeMessageType.SERVER_STARTED) {
         const port = message.payload?.port;
+        // auto-chrome-mcp fork: 브리지가 기동 시 만든 loopback HTTP 인증 토큰. 네이티브
+        // 메시징으로만 오므로 같은 PC 의 다른 프로그램은 볼 수 없다. 옛 브리지는 보내지
+        // 않으니 없으면 기록을 비운다(그러면 헤더 없이 호출한다).
+        await setBridgeAuthToken(
+          (message.payload as { authToken?: string } | undefined)?.authToken,
+        );
         currentServerStatus = {
           isRunning: true,
           port: port,

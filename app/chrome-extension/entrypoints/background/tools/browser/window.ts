@@ -5,6 +5,14 @@ import { getAllWorkTabs } from '@/utils/work-tab-manager';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
 import { getRecentSpawnedTabs } from '@/utils/spawned-tab-tracker';
 
+// auto-chrome-mcp fork(T6): 탭 title/url 은 상한이 없어 목록이 길면 토큰을 크게 먹는다.
+// 스키마/옵션은 그대로 두고 응답에서만 클립한다(잘리면 "…"). 식별에는 이 길이로 충분하다.
+const TITLE_CLIP = 80;
+const URL_CLIP = 200;
+function clip(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) + '…' : value;
+}
+
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
@@ -29,8 +37,8 @@ class WindowTool extends BaseBrowserToolExecutor {
               tabCount++;
               const entry: Record<string, unknown> = {
                 tabId: tab.id || 0,
-                url: tab.url || '',
-                title: tab.title || '',
+                url: clip(tab.url || '', URL_CLIP),
+                title: clip(tab.title || '', TITLE_CLIP),
                 active: tab.active || false,
               };
               const sessions = typeof tab.id === 'number' ? workTabSessions.get(tab.id) : undefined;

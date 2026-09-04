@@ -14,6 +14,7 @@
 import { hideWorkTabIndicator, showWorkTabIndicator } from '@/utils/work-tab-indicator';
 import { isTabBusy } from '@/utils/tab-lock';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
+import { assignTabToMcpGroup } from '@/utils/mcp-tab-group';
 
 const SESSION_KEY = 'mcpWorkTabs';
 /** auto-chrome-mcp fork: 세션이 직접 만든 탭 목록 (정리 대상 판정용) */
@@ -79,16 +80,45 @@ interface WorkTabEntry {
 type WorkTabMap = Record<string, WorkTabEntry>;
 
 let cachedMap: WorkTabMap | null = null;
+let mapLoad: Promise<WorkTabMap> | null = null;
+
+/**
+ * auto-chrome-mcp fork(F4): 기록 변경을 한 줄로 세운다.
+ *
+ * 예전에는 setWorkTab / addOwnedTab / pruneOwnedTabs 가 각자 공유 map 을 읽어 복제한 뒤
+ * 비동기로 저장했다. 두 레인이 동시에 navigate 하면 둘 다 옛 map 을 복제하므로 마지막
+ * write 만 남아 한쪽 레인의 작업 탭 기록이 조용히 사라졌다 (그 레인의 다음 호출은 작업
+ * 탭을 못 찾는다). 읽기·판정·저장을 한 임계 구역으로 묶어 그것을 막는다.
+ *
+ * 규칙: 락을 잡은 함수는 락을 잡지 않는 *Impl 만 부른다 (재진입 = 교착).
+ */
+let mutationQueue: Promise<unknown> = Promise.resolve();
+
+function withStateLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = mutationQueue.then(fn, fn);
+  // 큐는 실패로 멈추지 않는다 — 한 번의 예외가 이후 모든 변경을 영영 막으면 안 된다.
+  mutationQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 async function loadMap(): Promise<WorkTabMap> {
   if (cachedMap) return cachedMap;
-  try {
-    const result = await chrome.storage.session.get([SESSION_KEY]);
-    cachedMap = (result[SESSION_KEY] as WorkTabMap) ?? {};
-  } catch {
-    cachedMap = {};
+  // 동시 첫 접근이 storage 를 각자 읽고 서로의 결과를 덮어쓰지 않게 promise 를 공유한다.
+  if (mapLoad === null) {
+    mapLoad = (async () => {
+      try {
+        const result = await chrome.storage.session.get([SESSION_KEY]);
+        cachedMap = (result[SESSION_KEY] as WorkTabMap) ?? {};
+      } catch {
+        cachedMap = {};
+      }
+      return cachedMap;
+    })();
   }
-  return cachedMap;
+  return await mapLoad;
 }
 
 async function persistMap(map: WorkTabMap): Promise<void> {
@@ -98,6 +128,39 @@ async function persistMap(map: WorkTabMap): Promise<void> {
   } catch {
     // storage.session 실패해도 in-memory 캐시로 동작
   }
+}
+
+/**
+ * auto-chrome-mcp fork: "자주 바뀌지만 몇 초 낡아도 되는" 기록의 storage 쓰기를 한
+ * 타이머로 모은다 (작업 탭 LRU 표시, 소유 탭 touch).
+ *
+ * 예전에는 getWorkTabId 가 조회마다 chrome.storage.session.set 을 했다. 게이트가 도구
+ * 호출마다 이 함수를 부르므로 **모든 도구 호출에 storage 쓰기 1회가 고정으로 붙었다.**
+ * 메모리 캐시가 곧 진실이고 storage 는 service worker 재시작 대비 백업이라, 쓰기를
+ * 디바운스해도 정리·퇴출 판정에는 지장이 없다 (최대 몇 초 낡을 뿐).
+ */
+const STATE_FLUSH_DEBOUNCE_MS = 3000;
+let stateFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let workMapDirty = false;
+let ownedMapDirty = false;
+
+function scheduleStateFlush(): void {
+  if (stateFlushTimer !== null) return;
+  stateFlushTimer = setTimeout(() => {
+    stateFlushTimer = null;
+    // auto-chrome-mcp fork(F4): 몇 초 전에 캡처한 map 을 저장하면 그 사이 pruneOwnedTabs 가
+    // 닫은 탭이 소유 목록에 되살아난다. 실행 시점의 최신 상태를 저장한다.
+    void withStateLock(async () => {
+      if (ownedMapDirty) {
+        ownedMapDirty = false;
+        await persistOwned(await loadOwned());
+      }
+      if (workMapDirty) {
+        workMapDirty = false;
+        await persistMap(await loadMap());
+      }
+    });
+  }, STATE_FLUSH_DEBOUNCE_MS);
 }
 
 async function setBadge(tabId: number, on: boolean): Promise<void> {
@@ -118,7 +181,7 @@ async function setBadge(tabId: number, on: boolean): Promise<void> {
   }
 }
 
-export async function setWorkTab(
+async function setWorkTabImpl(
   tabId: number,
   sessionId: string = DEFAULT_SESSION_ID,
   owned = false,
@@ -148,7 +211,22 @@ export async function setWorkTab(
   void setBadge(tabId, true);
 }
 
-export async function clearWorkTab(sessionId: string = DEFAULT_SESSION_ID): Promise<void> {
+export async function setWorkTab(
+  tabId: number,
+  sessionId: string = DEFAULT_SESSION_ID,
+  owned = false,
+): Promise<void> {
+  await withStateLock(() => setWorkTabImpl(tabId, sessionId, owned));
+
+  // auto-chrome-mcp fork: MCP 작업 탭을 크롬 탭 그룹 "MCP"(초록)로 묶는다. 이 함수가
+  // MCP 가 만든 탭(navigate 계열)과 chrome_set_work_tab 지정 탭이 모두 지나는 단일
+  // 관문이라 편입도 여기서 한다. 실패는 assignTabToMcpGroup 안에서 삼켜지므로
+  // (throw 없음, null 반환) 작업 탭 등록 자체를 실패시키지 않는다.
+  // 기록과 무관한 부수 작업이라 임계 구역 밖에서 한다 (락을 오래 쥐지 않는다).
+  await assignTabToMcpGroup(tabId);
+}
+
+async function clearWorkTabImpl(sessionId: string = DEFAULT_SESSION_ID): Promise<void> {
   const map = { ...(await loadMap()) };
   const entry = map[sessionId];
   if (!entry) return;
@@ -159,23 +237,35 @@ export async function clearWorkTab(sessionId: string = DEFAULT_SESSION_ID): Prom
   }
 }
 
+export async function clearWorkTab(sessionId: string = DEFAULT_SESSION_ID): Promise<void> {
+  return await withStateLock(() => clearWorkTabImpl(sessionId));
+}
+
 /**
  * 유효한(아직 존재하는) 세션 작업 탭 id 를 반환. 없거나 닫혔으면 null.
  * 조회 시 LRU 타임스탬프 갱신.
  */
-export async function getWorkTabId(sessionId: string = DEFAULT_SESSION_ID): Promise<number | null> {
+async function getWorkTabIdImpl(sessionId: string = DEFAULT_SESSION_ID): Promise<number | null> {
   const map = await loadMap();
   const entry = map[sessionId];
   if (!entry) return null;
   try {
     await chrome.tabs.get(entry.tabId);
-    entry.lastUsedAt = Date.now();
-    void persistMap({ ...map });
-    return entry.tabId;
   } catch {
-    await clearWorkTab(sessionId);
+    await clearWorkTabImpl(sessionId);
     return null;
   }
+  // LRU 표시는 메모리에서 갱신하고 저장은 디바운스 flush 에 태운다. 락은 스냅샷 읽기와
+  // 존재 확인(chrome.tabs.get)에만 쓴다 — 예전에는 조회마다 storage 쓰기가 한 번씩 나서,
+  // 도구 호출마다 그 대기가 고정으로 붙었다.
+  entry.lastUsedAt = Date.now();
+  workMapDirty = true;
+  scheduleStateFlush();
+  return entry.tabId;
+}
+
+export async function getWorkTabId(sessionId: string = DEFAULT_SESSION_ID): Promise<number | null> {
+  return await withStateLock(() => getWorkTabIdImpl(sessionId));
 }
 
 /**
@@ -185,10 +275,12 @@ export async function getWorkTabId(sessionId: string = DEFAULT_SESSION_ID): Prom
 export async function getOwnedWorkTabId(
   sessionId: string = DEFAULT_SESSION_ID,
 ): Promise<number | null> {
-  const map = await loadMap();
-  const entry = map[sessionId];
-  if (!entry || entry.owned !== true) return null;
-  return await getWorkTabId(sessionId);
+  return await withStateLock(async () => {
+    const map = await loadMap();
+    const entry = map[sessionId];
+    if (!entry || entry.owned !== true) return null;
+    return await getWorkTabIdImpl(sessionId);
+  });
 }
 
 /**
@@ -241,16 +333,23 @@ function normalizeOwned(raw: unknown): OwnedMap {
 }
 
 let cachedOwned: OwnedMap | null = null;
+let ownedLoad: Promise<OwnedMap> | null = null;
 
 async function loadOwned(): Promise<OwnedMap> {
   if (cachedOwned) return cachedOwned;
-  try {
-    const result = await chrome.storage.session.get([OWNED_KEY]);
-    cachedOwned = normalizeOwned(result[OWNED_KEY]);
-  } catch {
-    cachedOwned = {};
+  // 작업 탭 map 과 같은 이유로 초기 load promise 를 공유한다 (F4).
+  if (ownedLoad === null) {
+    ownedLoad = (async () => {
+      try {
+        const result = await chrome.storage.session.get([OWNED_KEY]);
+        cachedOwned = normalizeOwned(result[OWNED_KEY]);
+      } catch {
+        cachedOwned = {};
+      }
+      return cachedOwned;
+    })();
   }
-  return cachedOwned;
+  return await ownedLoad;
 }
 
 async function persistOwned(map: OwnedMap): Promise<void> {
@@ -263,7 +362,7 @@ async function persistOwned(map: OwnedMap): Promise<void> {
 }
 
 /** MCP 가 직접 만든 탭을 이 버킷 소유로 등록한다. */
-export async function addOwnedTab(
+async function addOwnedTabImpl(
   tabId: number,
   sessionKey: string = DEFAULT_SESSION_ID,
 ): Promise<void> {
@@ -279,13 +378,44 @@ export async function addOwnedTab(
   await persistOwned({ ...map, [sessionKey]: [...list, { tabId, touchedAt: now }] });
 }
 
+export async function addOwnedTab(
+  tabId: number,
+  sessionKey: string = DEFAULT_SESSION_ID,
+): Promise<void> {
+  return await withStateLock(() => addOwnedTabImpl(tabId, sessionKey));
+}
+
+/**
+ * auto-chrome-mcp fork: 이 세션·레인이 **소유한** 탭 id 목록 + 이 버킷의 작업 탭.
+ *
+ * URL 로 대상 탭을 고르는 도구(web-fetcher · console · inject-script · network capture)가
+ * `chrome.tabs.query({})` 로 전체 탭을 뒤지면 사용자가 보고 있는 다른 창의 탭이 걸린다.
+ * URL 검색 후보를 이 목록으로 좁히면 사용자 탭은 후보에서 아예 빠진다(fail-closed).
+ *
+ * 살아 있는지는 확인하지 않는다 — 호출부가 chrome.tabs.get 으로 검증한다.
+ */
+export async function getSessionScopedTabIds(
+  sessionKey: string = DEFAULT_SESSION_ID,
+): Promise<number[]> {
+  return await withStateLock(async () => {
+    const out: number[] = [];
+    const owned = await loadOwned();
+    for (const entry of owned[sessionKey] ?? []) {
+      if (!out.includes(entry.tabId)) out.push(entry.tabId);
+    }
+    const map = await loadMap();
+    const workTab = map[sessionKey]?.tabId;
+    if (typeof workTab === 'number' && !out.includes(workTab)) out.push(workTab);
+    return out;
+  });
+}
+
 /**
  * auto-chrome-mcp fork(P1): 이 탭을 지금 쓰고 있다고 표시한다 (게이트가 매 도구 호출마다 호출).
  * 정리 로직은 이 시각을 보고 "살아 있는 병렬 작업" 과 "방치된 탭" 을 구분한다.
- * 저장 쓰기는 디바운스한다 — 호출 빈도가 높고, 최대 몇 초 낡아도 판정에 지장이 없다.
+ * 저장 쓰기는 scheduleStateFlush 로 디바운스한다 — 호출 빈도가 높고, 최대 몇 초 낡아도
+ * 판정에 지장이 없다.
  */
-let touchPersistTimer: ReturnType<typeof setTimeout> | null = null;
-
 function applyTouch(map: OwnedMap, tabId: number): void {
   let hit = false;
   const now = Date.now();
@@ -297,25 +427,23 @@ function applyTouch(map: OwnedMap, tabId: number): void {
       }
     }
   }
-  if (!hit || touchPersistTimer !== null) return;
-  touchPersistTimer = setTimeout(() => {
-    touchPersistTimer = null;
-    void persistOwned({ ...map });
-  }, 3000);
+  if (!hit) return;
+  ownedMapDirty = true;
+  scheduleStateFlush();
 }
 
 export function touchOwnedTab(tabId: unknown): void {
   if (typeof tabId !== 'number') return;
-  const map = cachedOwned;
-  if (!map) {
-    // 캐시가 비었으면(service worker 재시작 직후) 먼저 로드한 뒤 반영
-    void loadOwned().then((loaded) => applyTouch(loaded, tabId));
-    return;
-  }
-  applyTouch(map, tabId);
+  // auto-chrome-mcp fork(F4): 표시도 map 변경이므로 같은 큐를 쓴다. 예전에는 공유 map 을
+  // 락 밖에서 직접 고쳐, pruneOwnedTabs 가 chrome API 를 기다리는 사이 끼어들어 이미
+  // 유휴로 판정된 탭을 되살렸다 (정리가 자기 시작 시점의 상태로 끝나지 못했다).
+  // 신호가 몇 밀리초 늦게 반영돼도 판정에는 지장이 없다.
+  void withStateLock(async () => {
+    applyTouch(await loadOwned(), tabId);
+  });
 }
 
-async function forgetOwnedTab(tabId: number): Promise<void> {
+async function forgetOwnedTabImpl(tabId: number): Promise<void> {
   const map = await loadOwned();
   let changed = false;
   const next: OwnedMap = {};
@@ -393,7 +521,7 @@ async function reasonToKeep(
  * 남의 레인 탭은 OWNED_ABANDON_MS 넘게 안 쓰인 "방치" 상태일 때만 청소한다 — 레인을 쓰고
  * 사라진 에이전트의 탭이 영원히 남지 않게 하되, 살아 있는 병렬 작업은 절대 끊지 않는다.
  */
-export async function pruneOwnedTabs(
+async function pruneOwnedTabsImpl(
   sessionKey: string = DEFAULT_SESSION_ID,
   exceptTabId?: number,
 ): Promise<number[]> {
@@ -455,6 +583,15 @@ export async function pruneOwnedTabs(
   return closed;
 }
 
+export async function pruneOwnedTabs(
+  sessionKey: string = DEFAULT_SESSION_ID,
+  exceptTabId?: number,
+): Promise<number[]> {
+  // 판정과 chrome.tabs.remove 가 한 임계 구역 안에 있어야 한다 — 그 사이 다른 레인이
+  // 작업 탭을 등록하면 방금 등록된 탭을 유휴로 오인해 닫을 수 있다 (F4).
+  return await withStateLock(() => pruneOwnedTabsImpl(sessionKey, exceptTabId));
+}
+
 // auto-chrome-mcp fork: 작업 탭이 다른 페이지로 이동하면 표시기 DOM 이 사라지므로 다시 붙인다.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'complete') return;
@@ -466,15 +603,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void forgetOwnedTab(tabId);
-  void (async () => {
+  // auto-chrome-mcp fork(F4): 소유 목록 정리와 작업 탭 기록 정리를 한 임계 구역에서
+  // 처리한다 — 예전엔 두 개의 비동기 흐름이 각자 옛 map 을 복제해 저장했다.
+  void withStateLock(async () => {
+    await forgetOwnedTabImpl(tabId);
     const map = await loadMap();
     const affected = Object.entries(map).filter(([, e]) => e.tabId === tabId);
     if (affected.length === 0) return;
     const next = { ...map };
     for (const [sid] of affected) delete next[sid];
     await persistMap(next);
-  })();
+  });
 });
 
 // 구버전 단일 작업 탭 키 정리 (1.0.38 dev 빌드 잔재)

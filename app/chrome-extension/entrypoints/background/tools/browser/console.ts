@@ -2,10 +2,9 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import {
-  createTab as createTabGuarded,
-  focusWindow as focusWindowIfAllowed,
-} from '@/utils/activation-guard';
+import { focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
+// auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 디버거를 붙이지 않도록 세션 소유 탭으로만 조회한다.
+import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 import {
   consoleBuffer,
   BufferedConsoleMessage,
@@ -227,7 +226,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         targetTab = t;
       } else if (url) {
         // Navigate to the specified URL
-        targetTab = await this.navigateToUrl(url, background === true, windowId);
+        targetTab = await this.navigateToUrl(url, background === true, windowId, args);
       } else {
         // Use current active tab
         const [activeTab] =
@@ -392,22 +391,26 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     url: string,
     background = false,
     windowId?: number,
+    args?: any,
   ): Promise<chrome.tabs.Tab> {
-    // Check if URL is already open
-    const existingTabs = await chrome.tabs.query({ url });
+    // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 이 세션이 소유한 탭에서만 찾는다.
+    // 예전에는 chrome.tabs.query({ url }) 로 모든 창을 뒤져 사용자 탭에 디버거가 붙었다.
+    const existing = await findTabByUrlInSessionScope(url, args);
 
-    if (existingTabs.length > 0 && existingTabs[0]?.id) {
-      const tab = existingTabs[0];
+    if (existing) {
       if (!background) {
         // auto-chrome-mcp fork: 콘솔 수집은 CDP Runtime/Log 도메인으로 동작하므로 탭 활성화는 불필요 — 정책 게이트를 통과한 경우에만 윈도우 포커스.
-        await focusWindowIfAllowed(tab.windowId);
+        await focusWindowIfAllowed(existing.windowId);
       }
-      return tab;
+      return existing;
     } else {
-      // Create new tab with the URL
-      const createInfo: chrome.tabs.CreateProperties = { url, active: background ? false : true };
-      if (typeof windowId === 'number') createInfo.windowId = windowId;
-      const newTab = await createTabGuarded(createInfo, { reason: 'console' });
+      // Create new tab with the URL (지정한 창에 만든다)
+      const newTab = await createTabForUrl(url, {
+        background,
+        windowId,
+        reason: 'console',
+        args,
+      });
       // Wait for tab to be ready
       await this.waitForTabReady(newTab.id!);
       return newTab;

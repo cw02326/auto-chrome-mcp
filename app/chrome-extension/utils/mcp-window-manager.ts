@@ -3,12 +3,12 @@
  *
  * MCP 작업 탭을 "어느 창에" 만들지 결정한다. 두 가지 모드:
  *
- *  - 'dedicated' (v1.9.0 기본) — MCP 작업 탭들을 별도의 "MCP 작업 창" 하나에 모아 사용자 창과
+ *  - 'dedicated' — MCP 작업 탭들을 별도의 "MCP 작업 창" 하나에 모아 사용자 창과
  *    물리적으로 분리한다. 창은 항상 focused:false 로 만들고, 배치 설정(minimized/offscreen)에
  *    따라 사용자 바탕화면에 나타나지 않게 둔다. 탭 활성화는 이 창 안에서만 일어나므로
  *    사용자가 보던 탭·창은 절대 바뀌지 않는다.
  *
- *  - 'current' — 사용자가 이미 열어 둔 일반 크롬 창에 **새 탭**을 만든다.
+ *  - 'current' (기본) — 사용자가 이미 열어 둔 일반 크롬 창에 **새 탭**을 만든다.
  *    탭은 항상 비활성(백그라운드)으로 생성해 사용자가 보던 탭을 뺏지 않는다.
  *    스크린샷·읽기는 CDP 경로라 탭이 보이지 않아도 정상 동작한다.
  *
@@ -58,7 +58,11 @@ const WARMUP_OWNER = 'work-window-warmup';
  */
 const WARMUP_TIMEOUT_MS = 1500;
 
-export const DEFAULT_WORK_WINDOW_MODE: WorkWindowMode = 'dedicated';
+/**
+ * 기본 모드는 'current' — 사용자가 열어 둔 창에 백그라운드 탭을 만든다(2026-09-04 사용자 지시).
+ * v1.9.0 에서 잠시 'dedicated' 였으나 작업마다 새 창이 생기는 것이 더 방해가 됐다.
+ */
+export const DEFAULT_WORK_WINDOW_MODE: WorkWindowMode = 'current';
 
 /**
  * 기본 배치. 2026-09-02 실기 측정으로 확정했다 — 근거는 docs/CHANGELOG.md v1.9.0 과
@@ -70,15 +74,15 @@ export const DEFAULT_WORK_WINDOW_PLACEMENT: WorkWindowPlacement = 'minimized';
  * 현재 작업 창 모드.
  *
  * **확정된 우선순위 (설계 J)**: 신규 키 `mcpWorkWindowMode` > 구버전 키
- * `dedicatedWorkWindow` > 기본값 `'dedicated'`.
+ * `dedicatedWorkWindow` > 기본값 `'current'`.
  *
  *   1. `mcpWorkWindowMode` 가 'current' | 'dedicated' 이면 그 값.
  *   2. 없으면 구버전 boolean `dedicatedWorkWindow` 를 해석한다 (true → 'dedicated',
  *      false → 'current'). 예전에 토글을 껐던 사용자는 여기서 'current' 로 남는다.
- *   3. **두 키가 모두 없을 때만** v1.9.0 의 새 기본값 'dedicated' 가 적용된다.
+ *   3. **두 키가 모두 없을 때만** 기본값 'current' 가 적용된다.
  *
- * 즉 저장값은 언제나 새 기본값보다 우선한다. 예전 설정을 새 기본값으로 옮기는 통로는
- * 팝업의 "무간섭 권장 설정으로 되돌리기" 버튼 하나뿐이다.
+ * 즉 저장값은 언제나 기본값보다 우선한다. 저장된 설정을 권장값(current)으로 되돌리는 통로는
+ * 팝업의 "무간섭 권장 설정으로 되돌리기" 버튼이다.
  */
 export async function getWorkWindowMode(): Promise<WorkWindowMode> {
   try {
@@ -182,16 +186,44 @@ function normalizeMarker(raw: unknown): WorkWindowMarker | null {
   return null;
 }
 
+/**
+ * auto-chrome-mcp fork(F4): 표지 변경을 한 줄로 세운다.
+ *
+ * registerWorkWindowTab 은 표지를 읽어 복제한 뒤 저장하는 read-modify-write 였다. 두 레인이
+ * 동시에 작업 탭을 등록하면 둘 다 옛 표지를 복제하므로 마지막 write 만 남고, 살아남지 못한
+ * 탭은 표지에서 사라졌다. 표지에 남은 탭이 먼저 닫히면 "우리가 만든 창" 증명이 깨져
+ * 멀쩡한 전용 작업 창을 버리고 새 창을 만든다.
+ */
+let markerQueue: Promise<unknown> = Promise.resolve();
+
+function withMarkerLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = markerQueue.then(fn, fn);
+  // 큐는 실패로 멈추지 않는다.
+  markerQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+let markerLoad: Promise<WorkWindowMarker | null> | null = null;
+
 async function loadMarker(): Promise<WorkWindowMarker | null> {
   if (cacheLoaded) return cachedMarker;
-  try {
-    const result = await chrome.storage.session.get([SESSION_KEY]);
-    cachedMarker = normalizeMarker(result[SESSION_KEY]);
-  } catch {
-    cachedMarker = null;
+  // 동시 첫 접근이 storage 를 각자 읽지 않게 promise 를 공유한다 (F4).
+  if (markerLoad === null) {
+    markerLoad = (async () => {
+      try {
+        const result = await chrome.storage.session.get([SESSION_KEY]);
+        cachedMarker = normalizeMarker(result[SESSION_KEY]);
+      } catch {
+        cachedMarker = null;
+      }
+      cacheLoaded = true;
+      return cachedMarker;
+    })();
   }
-  cacheLoaded = true;
-  return cachedMarker;
+  return await markerLoad;
 }
 
 /** 기록된 창 id (표지 검증 없이 id 만). 'current' 모드의 후보 제외용. */
@@ -199,7 +231,8 @@ async function loadCache(): Promise<number | null> {
   return (await loadMarker())?.id ?? null;
 }
 
-async function persistMarker(marker: WorkWindowMarker | null): Promise<void> {
+/** 표지를 그대로 덮어쓴다. 락을 잡지 않으므로 임계 구역 안에서만 부를 것. */
+async function writeMarker(marker: WorkWindowMarker | null): Promise<void> {
   cachedMarker = marker;
   cacheLoaded = true;
   try {
@@ -214,17 +247,38 @@ async function persistMarker(marker: WorkWindowMarker | null): Promise<void> {
 }
 
 /**
+ * 두 표지가 같은 기록인가 (compare-and-clear 의 비교 기준).
+ *
+ * 무효화는 "내가 읽은 그 표지" 에만 해야 한다. 판정이 크롬 API 를 기다리는 사이 다른
+ * 레인이 새 작업 탭을 등록했거나 창을 다시 만들었으면, 그 새 표지는 지우면 안 된다.
+ */
+function sameMarker(a: WorkWindowMarker | null, b: WorkWindowMarker | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.id === b.id &&
+    a.createdAt === b.createdAt &&
+    a.type === b.type &&
+    a.tabIds.length === b.tabIds.length &&
+    a.tabIds.every((id, i) => id === b.tabIds[i])
+  );
+}
+
+/**
  * 전용 작업 창에 우리가 만든 탭을 표지에 등록한다.
  * 창 생성 시 함께 생긴 about:blank 탭은 곧 정리되므로, 작업 탭을 만들 때마다 불러야
  * 표지가 살아 있는 탭을 가리킨다.
  */
 export async function registerWorkWindowTab(windowId: number, tabId?: number): Promise<void> {
   if (typeof tabId !== 'number') return;
-  const marker = await loadMarker();
-  if (!marker || marker.id !== windowId) return;
-  if (marker.tabIds.includes(tabId)) return;
-  const tabIds = [...marker.tabIds, tabId].slice(-MARKER_MAX_TAB_IDS);
-  await persistMarker({ ...marker, tabIds });
+  // auto-chrome-mcp fork(F4): 읽기·판정·저장이 한 임계 구역이어야 한다. 락을 잡은 안에서는
+  // 락을 다시 잡지 않는 writeMarker 를 쓴다 (재진입 = 교착).
+  return await withMarkerLock(async () => {
+    const marker = await loadMarker();
+    if (!marker || marker.id !== windowId) return;
+    if (marker.tabIds.includes(tabId)) return;
+    const tabIds = [...marker.tabIds, tabId].slice(-MARKER_MAX_TAB_IDS);
+    await writeMarker({ ...marker, tabIds });
+  });
 }
 
 export interface ManagedWindowOptions {
@@ -524,31 +578,37 @@ async function tryPushOffscreen(windowId: number): Promise<boolean> {
  */
 export async function getOrCreateMcpWindow(): Promise<number | null> {
   try {
-    const stored = await loadCache();
+    const stored = await loadMarker();
     if (stored !== null) {
       // id 생존만 보면 크롬이 그 id 를 재사용했을 때 사용자 창을 작업 창으로 쓰게 된다.
       // isMcpWindow 와 **같은 완전 검증**을 거친다(표지 완전성 + type + 우리 탭 존재).
-      if (await verifyWorkWindowMarker(stored)) return stored;
-      // 어긋났으면 기록은 verifyWorkWindowMarker 가 이미 지웠거나(불일치),
-      // 창이 사라진 경우다 — 어느 쪽이든 여기서 확실히 비우고 새로 만든다.
-      await persistMarker(null);
+      // 어긋났으면 verifyWorkWindowMarker 가 compare-and-clear 로 이미 처리했다.
+      if (await verifyWorkWindowMarker(stored.id)) return stored.id;
     }
 
     if (creating) return await creating;
 
-    creating = (async () => {
+    // 무효화·생성·기록을 한 임계 구역에서 끝낸다. 예전에는 판정 밖에서 persistMarker(null)
+    // 을 한 번 더 불러, 그 사이 다른 레인이 만든 새 표지까지 지워 버렸다.
+    creating = withMarkerLock(async () => {
+      const current = await loadMarker();
+      // 락을 기다리는 사이 다른 호출이 창을 만들었으면 그 표지를 믿고 그대로 쓴다.
+      if (current !== null && !sameMarker(current, stored)) return current.id;
+      // 여기까지 왔으면 표지는 (a) 판정이 이미 지웠거나 (b) stored 그대로다.
+      if (current !== null) await writeMarker(null);
+
       // 배치(최소화)는 작업 탭이 만들어진 뒤에 적용한다 — 위 deferPlacement 주석 참조.
       const created = await createManagedWindow({ url: 'about:blank', deferPlacement: true });
       if (!created || typeof created.id !== 'number') return null;
       const firstTabId = created.tabs?.[0]?.id;
-      await persistMarker({
+      await writeMarker({
         id: created.id,
         createdAt: Date.now(),
         type: created.type ?? 'normal',
         tabIds: typeof firstTabId === 'number' ? [firstTabId] : [],
       });
       return created.id;
-    })();
+    });
 
     try {
       return await creating;
@@ -601,7 +661,7 @@ export async function getCurrentUserWindowId(): Promise<number | null> {
 }
 
 /**
- * 표지를 끝까지 대조한다. 하나라도 어긋나면 **기록을 지우고** false.
+ * 표지를 끝까지 대조한다 — **기록은 고치지 않고** 판정만 돌려준다.
  *
  * 대조 항목:
  *   1. 표지가 완전한가 — 구버전(숫자만 저장) 형식이거나 우리가 만든 탭 기록이 없으면
@@ -610,18 +670,23 @@ export async function getCurrentUserWindowId(): Promise<number | null> {
  *   3. 창 type 이 만들 때와 같은가 — 크롬이 id 를 다른 창에 재사용했는지 본다.
  *   4. 우리가 만든 탭이 그 창에 아직 하나라도 있는가 — 탭 목록을 못 읽으면(populate 실패)
  *      증명 불가로 보고 false.
+ *
+ * 크롬 API 를 기다리는 구간이라 **락을 쥐지 않는다.** 무효화(clear)는 락 안에서
+ * compare-and-clear 로 처리한다 — 판정 도중 다른 레인이 심은 새 표지를 지우지 않기 위해서다.
  */
-async function verifyWorkWindowMarker(windowId: number): Promise<boolean> {
-  const marker = await loadMarker();
-  if (marker === null || marker.id !== windowId) return false;
+async function judgeMarker(
+  windowId: number,
+  marker: WorkWindowMarker,
+): Promise<{ ok: boolean; clear: boolean; reason?: string }> {
+  if (marker.id !== windowId) return { ok: false, clear: false };
 
   // (1) 불완전한 표지는 신뢰하지 않는다.
   if (marker.createdAt <= 0 || !marker.type || marker.tabIds.length === 0) {
-    console.warn(
-      '[mcp-window-manager] 작업 창 표지가 불완전하다(구버전 형식·탭 기록 없음) — 기록을 지우고 새로 만든다.',
-    );
-    await persistMarker(null);
-    return false;
+    return {
+      ok: false,
+      clear: true,
+      reason: '작업 창 표지가 불완전하다(구버전 형식·탭 기록 없음)',
+    };
   }
 
   let win: chrome.windows.Window | undefined;
@@ -630,35 +695,66 @@ async function verifyWorkWindowMarker(windowId: number): Promise<boolean> {
     win = await chrome.windows.get(windowId, { populate: true });
   } catch {
     // 창이 이미 닫혔다. 기록 정리는 onRemoved 리스너와 호출부가 한다.
-    return false;
+    return { ok: false, clear: false };
   }
-  if (!win) return false;
+  if (!win) return { ok: false, clear: false };
 
   // (3) type 일치
   if (typeof win.type === 'string' && win.type !== marker.type) {
-    console.warn(
-      '[mcp-window-manager] 기록된 작업 창과 type 이 다르다 — id 재사용으로 보고 기록을 지운다.',
-    );
-    await persistMarker(null);
-    return false;
+    return { ok: false, clear: true, reason: '기록된 작업 창과 type 이 다르다(창 id 재사용)' };
   }
 
   // (4) 우리가 만든 탭이 아직 그 창에 있는가
   if (!Array.isArray(win.tabs)) {
-    console.warn('[mcp-window-manager] 작업 창의 탭 목록을 읽지 못했다 — 표지를 확인할 수 없다.');
-    await persistMarker(null);
-    return false;
+    return { ok: false, clear: true, reason: '작업 창의 탭 목록을 읽지 못했다' };
   }
   const liveTabIds = new Set(win.tabs.map((t) => t.id));
   if (!marker.tabIds.some((id) => liveTabIds.has(id))) {
-    console.warn(
-      '[mcp-window-manager] 기록된 작업 탭이 그 창에 하나도 없다 — 기록을 지우고 새로 만든다.',
-    );
-    await persistMarker(null);
-    return false;
+    return { ok: false, clear: true, reason: '기록된 작업 탭이 그 창에 하나도 없다' };
   }
 
-  return true;
+  return { ok: true, clear: false };
+}
+
+/**
+ * 판정에서 읽었던 표지와 지금 표지가 같을 때만 지운다 (compare-and-clear).
+ *
+ * 예전에는 판정과 무효화가 따로 놀았다. verifyWorkWindowMarker 가 chrome.windows.get 을
+ * 기다리는 사이 registerWorkWindowTab 이 살아 있는 새 작업 탭을 표지에 등록해도, 판정이
+ * 끝나면 그 새 표지를 통째로 지웠다. 멀쩡한 전용 작업 창을 버리고 새 창을 만들 뿐 아니라,
+ * 그 사이 isMcpWindow 가 false 를 답해 activation-guard 가 작업 창을 사용자 창으로 오인했다.
+ */
+async function clearMarkerIfUnchanged(
+  snapshot: WorkWindowMarker,
+  reason: string,
+): Promise<boolean> {
+  return await withMarkerLock(async () => {
+    const current = await loadMarker();
+    if (!sameMarker(current, snapshot)) {
+      console.warn(
+        '[mcp-window-manager] 판정 도중 표지가 갱신됐다 — 새 표지는 지우지 않는다: ' + reason,
+      );
+      return false;
+    }
+    console.warn(`[mcp-window-manager] ${reason} — 기록을 지우고 새로 만든다.`);
+    await writeMarker(null);
+    return true;
+  });
+}
+
+/**
+ * 표지를 대조하고, 어긋났으면 compare-and-clear 로 기록을 비운다.
+ */
+async function verifyWorkWindowMarker(windowId: number): Promise<boolean> {
+  const snapshot = await loadMarker();
+  if (snapshot === null || snapshot.id !== windowId) return false;
+
+  const verdict = await judgeMarker(windowId, snapshot);
+  if (verdict.ok) return true;
+  if (verdict.clear) {
+    await clearMarkerIfUnchanged(snapshot, verdict.reason ?? '작업 창 표지가 어긋났다');
+  }
+  return false;
 }
 
 /**
@@ -687,21 +783,83 @@ export async function getMcpWindowId(): Promise<number | null> {
   }
 }
 
+/**
+ * onRemoved 처리 본체 (테스트에서 직접 부를 수 있게 분리).
+ *
+ * 크롬은 창 id 를 재사용한다. 이전 작업 창의 지연된 onRemoved(id) 가 marker lock 뒤에서
+ * 대기하는 동안 **같은 id 로 새 작업 창**이 생기면, id 만 비교하는 예전 코드는 새 표지를
+ * 지웠다. 그러면 isMcpWindow() 가 false 가 되어 새 작업 창을 사용자 창으로 오인하고,
+ * activation-guard 가 사용자 탭 활성화를 허용한다.
+ *
+ * 판정 기준은 **창 생존**이다 (2026-09-04 Codex 3차 검토로 순서 교체):
+ *   1. **창 생존 확인이 먼저** — 그 id 의 창이 지금도 존재하면(chrome.windows.get 성공)
+ *      크롬이 id 를 재사용한 **새 작업 창**이다. onRemoved 는 옛 창의 소멸이므로 지우지 않는다.
+ *   2. 창이 없으면 진짜 닫힌 것이다 — 스냅샷(snapshotAtEvent) 일치 여부와 무관하게 지운다.
+ *      예전에는 스냅샷 대조가 먼저였는데, 이벤트 이후 registerWorkWindowTab() 이 tabIds 만
+ *      갱신하면 sameMarker() 가 false 가 되어 생존 확인도 못 하고 반환했고, 창이 닫혔는데
+ *      표지가 남았다(stale marker → isMcpWindow 가 닫힌 창을 계속 작업 창으로 봤다).
+ */
+async function handleWindowRemoved(
+  windowId: number,
+  snapshotAtEvent: WorkWindowMarker | null,
+): Promise<void> {
+  await withMarkerLock(async () => {
+    try {
+      const marker = await loadMarker();
+      if (marker === null || marker.id !== windowId) return;
+
+      // (1) **창 생존 확인이 먼저다.** 그 id 의 창이 지금도 살아 있으면 재사용된 새 작업
+      //     창이다 — 지우지 않는다. 없으면 창이 실제로 닫힌 것이므로 이 id 의 표지는
+      //     어떤 스냅샷과도 무관하게 무효다.
+      let stillExists = false;
+      try {
+        const win = await chrome.windows.get(windowId);
+        stillExists = !!win;
+      } catch {
+        stillExists = false; // 창이 실제로 닫혔다.
+      }
+      if (stillExists) {
+        console.warn(
+          '[mcp-window-manager] onRemoved 된 id 로 창이 다시 존재한다(id 재사용) — 표지를 지우지 않는다.',
+        );
+        return;
+      }
+
+      // (2) 스냅샷 대조는 이제 **로그용**이다. 예전에는 이 판정이 (1) 보다 앞에 있어서,
+      //     스냅샷 이후 registerWorkWindowTab() 이 tabIds 만 갱신하면(=sameMarker false)
+      //     창이 진짜 닫혔는데도 표지가 남았다(stale marker). 창이 없다는 사실이
+      //     스냅샷 일치 여부보다 강한 신호이므로 여기서는 지운다.
+      if (snapshotAtEvent !== null && !sameMarker(marker, snapshotAtEvent)) {
+        console.warn(
+          '[mcp-window-manager] onRemoved 처리 중 표지가 갱신됐지만 창이 닫혀 있다 — 낡은 표지를 지운다.',
+        );
+      }
+
+      await writeMarker(null);
+    } catch {
+      // ignore
+    }
+  });
+}
+
 // 사용자가 "MCP 작업 창"을 직접 닫으면 기록을 비운다 → 다음 요청 때 새 창 생성.
 // (popup 등 chrome.windows 를 못 쓰는 컨텍스트에서 import 돼도 죽지 않도록 가드)
 try {
   chrome.windows?.onRemoved?.addListener((windowId) => {
-    void (async () => {
-      try {
-        const stored = await loadCache();
-        if (stored === windowId) {
-          await persistMarker(null);
-        }
-      } catch {
-        // ignore
-      }
-    })();
+    // 이벤트 시점의 표지를 **동기로** 스냅샷 잡아 둔다. 임계 구역에 들어갈 때쯤이면 다른
+    // 레인이 같은 id 로 새 작업 창을 만들어 표지를 갈아 끼웠을 수 있기 때문이다.
+    const snapshotAtEvent = cachedMarker;
+    void handleWindowRemoved(windowId, snapshotAtEvent);
   });
 } catch {
   // ignore
 }
+
+/**
+ * 테스트 전용 훅 — 프로덕션 경로는 위 addListener 를 쓴다. onRemoved 리스너는 모듈
+ * import 시점에 등록되므로 테스트에서 그 콜백을 직접 잡기 어렵다. 재사용 경합을 결정적으로
+ * 재현하기 위해 본체를 이렇게 노출한다.
+ */
+export const __testing = {
+  handleWindowRemoved,
+};

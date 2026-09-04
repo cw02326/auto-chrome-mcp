@@ -2,10 +2,9 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { ExecutionWorld } from '@/common/constants';
-import {
-  createTab as createTabGuarded,
-  focusWindow as focusWindowIfAllowed,
-} from '@/utils/activation-guard';
+import { focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
+// auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 스크립트를 주입하지 않도록 세션 소유 탭으로만 조회한다.
+import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
 
 interface InjectScriptParam {
   url?: string;
@@ -39,33 +38,21 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
       if (typeof tabId === 'number') {
         tab = await chrome.tabs.get(tabId);
       } else if (url) {
-        // If URL is provided, check if it's already open
-        console.log(`Checking if URL is already open: ${url}`);
-        const allTabs = await chrome.tabs.query({});
-
-        // Find tab with matching URL
-        const matchingTabs = allTabs.filter((t) => {
-          // Normalize URLs for comparison (remove trailing slashes)
-          const tabUrl = t.url?.endsWith('/') ? t.url.slice(0, -1) : t.url;
-          const targetUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-          return tabUrl === targetUrl;
-        });
-
-        if (matchingTabs.length > 0) {
-          // Use existing tab
-          tab = matchingTabs[0];
-          console.log(`Found existing tab with URL: ${url}, tab ID: ${tab.id}`);
+        // auto-chrome-mcp fork: 백그라운드 작업 모드에서는 이 세션이 소유한 탭에서만 찾는다.
+        // 예전에는 chrome.tabs.query({}) 로 모든 창을 뒤져 사용자 탭에 스크립트가 주입됐다.
+        const existing = await findTabByUrlInSessionScope(url, args);
+        if (existing) {
+          tab = existing;
+          console.log(`Found session tab with URL: ${url}, tab ID: ${tab.id}`);
         } else {
           // Create new tab with the URL
-          console.log(`No existing tab found with URL: ${url}, creating new tab`);
-          tab = await createTabGuarded(
-            {
-              url,
-              active: background === true ? false : true,
-              windowId,
-            },
-            { reason: 'inject-script' },
-          );
+          console.log(`No session tab found with URL: ${url}, creating new tab`);
+          tab = await createTabForUrl(url, {
+            background: background === true,
+            windowId,
+            reason: 'inject-script',
+            args,
+          });
 
           // Wait for page to load
           console.log('Waiting for page to load...');

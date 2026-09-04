@@ -16,6 +16,12 @@
  * Stage C (Chrome restart) 다이얼로그 후속.
  */
 
+import {
+  BRIDGE_AUTH_MISMATCH_MESSAGE,
+  getBridgeAuthHeaders,
+  isBridgeAuthFailure,
+} from '@/utils/bridge-auth';
+
 export type StageStep =
   | 'process_kill'
   | 'port_free'
@@ -77,11 +83,18 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const probeHealth = async (
   url: string,
   controllerTimeoutMs = 1500,
-): Promise<{ alive: boolean; pid?: number; payload?: any }> => {
+): Promise<{ alive: boolean; authFailed?: boolean; pid?: number; payload?: any }> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
   try {
-    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    // 토큰은 단계마다 다시 읽는다 — 이 흐름 도중 브리지가 재시작하면서 새 토큰을 준다.
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: await getBridgeAuthHeaders(),
+      signal: controller.signal,
+    });
+    // 인증 거절은 "죽었다" 가 아니다. 브리지는 살아서 우리를 밀어내고 있다.
+    if (isBridgeAuthFailure(res.status)) return { alive: false, authFailed: true };
     if (!res.ok) return { alive: false };
     const payload = await res.json().catch(() => undefined);
     return { alive: true, pid: payload?.bridge?.pid, payload };
@@ -125,15 +138,22 @@ export async function forceReconnect(
     const t0 = now();
     emit(cb, step, { status: 'running', message: 'POST /admin/drain + /admin/kill-self' });
 
-    const tryEndpoint = async (path: string): Promise<{ ok: boolean; note: string }> => {
+    const tryEndpoint = async (
+      path: string,
+    ): Promise<{ ok: boolean; note: string; authFailed: boolean }> => {
       try {
         const res = await fetch(`${base}${path}`, {
           method: 'POST',
+          headers: await getBridgeAuthHeaders(),
           signal: AbortSignal.timeout(2000),
         });
-        return { ok: res.ok, note: `${path}=${res.status}` };
+        return {
+          ok: res.ok,
+          note: `${path}=${res.status}`,
+          authFailed: isBridgeAuthFailure(res.status),
+        };
       } catch (e: any) {
-        return { ok: false, note: `${path}=err:${e?.name || 'unknown'}` };
+        return { ok: false, note: `${path}=err:${e?.name || 'unknown'}`, authFailed: false };
       }
     };
 
@@ -145,6 +165,17 @@ export async function forceReconnect(
     const duration = now() - t0;
     const anyOk = drainRes.ok || killRes.ok;
     const allFailed = !drainRes.ok && !killRes.ok;
+
+    if (drainRes.authFailed || killRes.authFailed) {
+      // 토큰이 맞지 않으면 아무리 눌러도 브리지가 받아 주지 않는다. 여기서 끝낸다.
+      const r = emit(cb, step, {
+        status: 'fail',
+        message: `${BRIDGE_AUTH_MISMATCH_MESSAGE} (${drainRes.note}, ${killRes.note})`,
+        durationMs: duration,
+      });
+      stages.push(r);
+      return { ok: false, stages, failedAt: step };
+    }
 
     if (anyOk) {
       const r = emit(cb, step, {
@@ -171,8 +202,14 @@ export async function forceReconnect(
     emit(cb, step, { status: 'running', message: 'waiting for /health to fail' });
     const deadline = t0 + timeouts[step];
     let confirmedDead = false;
+    let authFailed = false;
     while (now() < deadline) {
       const probe = await probeHealth(`${base}/health`, 800);
+      if (probe.authFailed) {
+        // 401/403 을 "죽었다" 로 읽으면 살아 있는 브리지를 죽었다고 보고한다.
+        authFailed = true;
+        break;
+      }
       if (!probe.alive) {
         confirmedDead = true;
         break;
@@ -180,6 +217,15 @@ export async function forceReconnect(
       await sleep(300);
     }
     const duration = now() - t0;
+    if (authFailed) {
+      const r = emit(cb, step, {
+        status: 'fail',
+        message: BRIDGE_AUTH_MISMATCH_MESSAGE,
+        durationMs: duration,
+      });
+      stages.push(r);
+      return { ok: false, stages, failedAt: step };
+    }
     if (confirmedDead) {
       const r = emit(cb, step, {
         status: 'success',
@@ -247,8 +293,13 @@ export async function forceReconnect(
     emit(cb, step, { status: 'running', message: 'waiting for /health to return 200' });
     const deadline = t0 + timeouts[step];
     let alive = false;
+    let authFailed = false;
     while (now() < deadline) {
       const probe = await probeHealth(`${base}/health`, 1500);
+      if (probe.authFailed) {
+        authFailed = true;
+        break;
+      }
       if (probe.alive) {
         alive = true;
         finalBridgePid = probe.pid;
@@ -257,6 +308,15 @@ export async function forceReconnect(
       await sleep(500);
     }
     const duration = now() - t0;
+    if (authFailed) {
+      const r = emit(cb, step, {
+        status: 'fail',
+        message: BRIDGE_AUTH_MISMATCH_MESSAGE,
+        durationMs: duration,
+      });
+      stages.push(r);
+      return { ok: false, stages, failedAt: step };
+    }
     if (alive) {
       const r = emit(cb, step, {
         status: 'success',
@@ -305,8 +365,13 @@ export async function forceReconnect(
       // ack 받았으니 짧게 /health 재검증 — spawn + listen 까지 시간 확보
       const probeDeadline = t0 + timeouts[step];
       let healthOk = false;
+      let authFailed = false;
       while (now() < probeDeadline) {
         const probe = await probeHealth(`${base}/health`, 1000);
+        if (probe.authFailed) {
+          authFailed = true;
+          break;
+        }
         if (probe.alive) {
           healthOk = true;
           finalBridgePid = probe.pid ?? finalBridgePid;
@@ -316,6 +381,15 @@ export async function forceReconnect(
       }
 
       const duration = now() - t0;
+      if (authFailed) {
+        const r = emit(cb, step, {
+          status: 'fail',
+          message: BRIDGE_AUTH_MISMATCH_MESSAGE,
+          durationMs: duration,
+        });
+        stages.push(r);
+        return { ok: false, stages, failedAt: step, finalBridgePid };
+      }
       if (healthOk) {
         const r = emit(cb, step, {
           status: 'success',
@@ -355,6 +429,7 @@ export async function forceReconnect(
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
+          ...(await getBridgeAuthHeaders()),
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
@@ -380,7 +455,9 @@ export async function forceReconnect(
       } else {
         const r = emit(cb, step, {
           status: 'fail',
-          message: `MCP initialize failed (HTTP ${res.status}, sid=${finalSessionId})`,
+          message: isBridgeAuthFailure(res.status)
+            ? `${BRIDGE_AUTH_MISMATCH_MESSAGE} (HTTP ${res.status})`
+            : `MCP initialize failed (HTTP ${res.status}, sid=${finalSessionId})`,
           durationMs: duration,
         });
         stages.push(r);
