@@ -22,6 +22,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 도구 레지스트리 전체를 불러오는 스위트라 vite 캐시가 식었을 때 5초를 넘긴다(2026-09-05 실측 최대 6.3초). 로직 실패와 구분하기 위해 상한을 올린다.
+vi.setConfig({ testTimeout: 20000 });
+
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 
 const B = TOOL_NAMES.BROWSER;

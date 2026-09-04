@@ -75,7 +75,7 @@ describe('doctor / extension token support', () => {
     // 12320 은 아무도 안 듣고, 사용자가 .mcp.json 으로 지정한 12345 에만 브리지가 있다.
     const seen = mockBridges({ 12345: { staleClientRejections: 3 } });
 
-    const ports = resolveExtensionAuthPorts({ configuredPort: 12345, responsivePorts: [] });
+    const ports = resolveExtensionAuthPorts({ configuredPort: 12345 });
     const result = await checkExtensionAuth(ports);
 
     expect(seen).toContain('http://127.0.0.1:12345/health');
@@ -119,18 +119,15 @@ describe('doctor / extension token support', () => {
     expect(result.check.message).toContain('not checked');
   });
 
-  test('resolveExtensionAuthPorts 는 env · 설정 · 기본 · 응답 포트를 중복 없이 모은다', () => {
-    expect(
-      resolveExtensionAuthPorts({
-        envPort: '12345',
-        configuredPort: 12320,
-        responsivePorts: [12317, 12320],
-      }),
-    ).toEqual([12345, 12320, 12317]);
+  // 보안 회귀 (Codex 리뷰 1번): 예전에는 탐색으로 찾은 포트(responsivePorts)까지 후보에
+  // 넣어서, 12300번대의 아무 서비스나 200 만 돌려주면 그쪽으로 브리지 토큰이 나갔다.
+  // 토큰이 붙는 조회는 사용자가 지정한 포트(env·설정)와 포크 기본 포트로만 간다.
+  test('resolveExtensionAuthPorts 는 env·설정·기본 포트만 모은다', () => {
+    expect(resolveExtensionAuthPorts({ envPort: '12345', configuredPort: 12320 })).toEqual([
+      12345, 12320,
+    ]);
 
     // 값이 없거나 포트가 될 수 없으면 버린다. 기본 포트는 언제나 후보에 남는다.
-    expect(
-      resolveExtensionAuthPorts({ envPort: 'abc', configuredPort: 0, responsivePorts: [70000] }),
-    ).toEqual([12320]);
+    expect(resolveExtensionAuthPorts({ envPort: 'abc', configuredPort: 0 })).toEqual([12320]);
   });
 });

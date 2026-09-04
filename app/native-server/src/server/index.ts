@@ -26,6 +26,7 @@ import { createMcpServer } from '../mcp/mcp-server';
 import { registerAdminRoutes } from './routes';
 import { registerAuthGuard } from './auth-guard';
 import { ensureAuthToken, readAuthToken } from '../security/auth-token';
+import { startupArtifactCleanup } from '../artifacts/cleanup';
 import {
   collectExtensionOriginsFromArgv,
   isAllowedCorsOrigin,
@@ -446,6 +447,9 @@ export class Server {
 
       this.isRunning = true;
       this.listeningPort = port;
+
+      // 산출물 정리는 listen 이 끝난 뒤에 비동기로 돈다. 실패해도 서버에는 영향이 없다.
+      startupArtifactCleanup();
     } catch (err) {
       this.isRunning = false;
       this.listeningPort = null;

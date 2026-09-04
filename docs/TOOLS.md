@@ -279,8 +279,12 @@ Take advanced screenshots with various options.
 
 - `savePng` (boolean, optional, default `true`): also save a PNG file. To _see_ the page, set
   `savePng: false` and `storeBase64: true`.
-- `saveToDownloads` (boolean, optional, default `false`): auto-save into `Downloads/mcp-screenshots/`
-- `filename` (string, optional): filename for `saveToDownloads` (kept under `mcp-screenshots/`)
+- `saveToDownloads` (boolean, optional, default `false`): auto-save the capture as a file
+- `filename` (string, optional): name for `saveToDownloads` (path separators are stripped)
+
+Saved files always land in `Downloads/mcp-screenshots/<YYYY-MM-DD>/screenshot_<name>_<HHmmss>.png`
+(local date and time). See "산출물 저장 위치와 자동 정리" in the README for the retention settings.
+
 - `fullResolution` (boolean, optional, default `false`): skip the ≤1568px downscale of the returned image
 - `windowId` (number, optional)
 
@@ -328,7 +332,8 @@ Two modes:
 - `maxFrames` (number, optional): default 50 (fixed) / 100 (auto), max 300
 - `width` / `height` (number, optional, default `800` / `600`)
 - `maxColors` (number, optional, default `256`): lower = smaller file
-- `filename` (string, optional): output name without extension
+- `filename` (string, optional): output name without extension. The file is written to
+  `Downloads/mcp-screenshots/<YYYY-MM-DD>/gif_<name>_<HHmmss>.gif`
 - `captureDelayMs` (number, optional, default `150`): auto mode — settle time before the frame
 - `frameDelayCs` (number, optional, default `20`): auto mode — frame duration in centiseconds
 - `annotation` (string, optional): auto mode with `action="capture"` — label drawn on the frame
@@ -436,8 +441,9 @@ Stop the active trace.
 
 **Parameters**:
 
-- `saveToDownloads` (boolean, optional, default `true`): save the trace JSON to Downloads
-- `filenamePrefix` (string, optional): filename prefix for the saved trace
+- `saveToDownloads` (boolean, optional, default `true`): save the trace JSON to
+  `Downloads/mcp-screenshots/<YYYY-MM-DD>/trace_<name>_<HHmmss>.json`
+- `filenamePrefix` (string, optional): name to put in the saved filename
 - `tabId` (number, optional): target tab
 
 ### `performance_analyze_insight`
@@ -1219,7 +1225,7 @@ cookie in the browser.
 
 ### `chrome_save_pdf`
 
-Save the current page as a PDF into `Downloads/mcp-pdf/`.
+Save the current page as a PDF into `Downloads/mcp-screenshots/<YYYY-MM-DD>/pdf_<name>_<HHmmss>.pdf`.
 
 **Parameters**:
 

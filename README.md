@@ -117,6 +117,43 @@ claude mcp add --scope user --transport stdio chrome-mcp-stdio `
 않는다: `chrome_switch_tab`(탭을 앞으로 가져오라는 요청 자체), `chrome_request_element_selection`
 (화면에서 요소를 고르게 함), `chrome_request_user_consent`(동의 창).
 
+## 산출물 저장 위치와 자동 정리
+
+스크린샷·GIF·PDF·성능 트레이스는 전부 한 곳에만 쌓인다.
+
+```
+Downloads/mcp-screenshots/YYYY-MM-DD/<종류>_<이름>_<HHmmss>.<확장자>
+```
+
+날짜와 시각은 로컬 시간이다. 사용자가 `filename` 에 폴더 경로를 넣어도 마지막 이름만 쓰므로
+이 폴더 밖으로는 저장되지 않는다. 같은 이름이 겹치면 크롬이 알아서 번호를 붙인다.
+
+보관 기간이 지난 날짜 폴더는 **브리지가 시작할 때** 자동으로 정리된다. 기본값은 7일이 지나면
+보관 폴더로 옮기는 것이고, 설정은 `~/.auto-chrome-mcp/config.json` 에 둔다(파일이 없으면 기본값).
+
+```json
+{
+  "artifactArchiveDir": "C:/PROJECTS/_작업물",
+  "artifactRetentionDays": 7,
+  "artifactCleanup": "archive"
+}
+```
+
+- `artifactCleanup`: `archive`(기본, 보관 폴더로 이동) · `delete`(삭제) · `off`(정리 안 함)
+- `artifactRetentionDays`: 며칠이 지나면 정리할지. 기본 7. 정확히 7일 된 폴더도 대상이다.
+- `artifactArchiveDir`: 옮겨 둘 곳. 기본은 `~/auto-chrome-mcp-archive`.
+  실제 이동 위치는 `<보관 폴더>/YYYY-MM/YYYY-MM-DD/` 이고, 같은 이름이 있으면 접미사가 붙는다.
+
+정리 대상은 `mcp-screenshots` 아래 **날짜 이름 폴더 안의 일반 파일** 뿐이다. 그 밖의 파일,
+하위 폴더, 심볼릭 링크는 건드리지 않는다. 직접 돌려 보려면:
+
+```bash
+auto-chrome-mcp-bridge artifacts            # 무엇이 정리될지만 보여준다 (변경 없음)
+auto-chrome-mcp-bridge artifacts --now      # 실제로 정리한다
+```
+
+마지막 실행 결과는 `~/.auto-chrome-mcp/artifacts-last-run.json` 에 남는다.
+
 ## ⚠️ 사이트 권한 자동 허용 — 알아두세요
 
 auto-chrome-mcp 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 prompt 를 **자동으로 처리**합니다 (v1.0.32+). 두 갈래로 동작:

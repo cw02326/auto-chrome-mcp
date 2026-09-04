@@ -14,6 +14,14 @@ import { COMMAND_NAME } from './scripts/constant';
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
 import { runDoctor } from './scripts/doctor';
 import { runReport } from './scripts/report';
+import {
+  describeCleanupResult,
+  runArtifactCleanup,
+  writeLastRunFile,
+  LAST_RUN_FILE_NAME,
+} from './artifacts/cleanup';
+import { getConfigFilePath, loadBridgeConfig } from './artifacts/config';
+import { getStateDir } from './security/auth-token';
 
 program
   .version(require('../package.json').version)
@@ -224,6 +232,53 @@ program
       process.exit(exitCode);
     } catch (error: any) {
       console.error(colorText(`Report failed: ${error.message}`, 'red'));
+      process.exit(1);
+    }
+  });
+
+// Artifact housekeeping (Downloads/mcp-screenshots)
+program
+  .command('artifacts')
+  .description('Archive or delete old artifact folders under Downloads/mcp-screenshots')
+  .option('--dry-run', 'Show what would be cleaned up without touching any file (default)')
+  .option('--now', 'Actually run the cleanup now')
+  .action(async (options) => {
+    try {
+      const loaded = loadBridgeConfig();
+      for (const warning of loaded.warnings) {
+        console.log(colorText(`Warning: ${warning}`, 'yellow'));
+      }
+
+      const dryRun = options.now !== true;
+      console.log(colorText(`Config: ${getConfigFilePath()}`, 'blue'));
+      console.log(
+        colorText(
+          `Mode: ${loaded.config.artifactCleanup} · retention: ${loaded.config.artifactRetentionDays} day(s) · archive: ${loaded.config.artifactArchiveDir}`,
+          'blue',
+        ),
+      );
+
+      const result = runArtifactCleanup({ config: loaded.config, dryRun });
+      console.log(colorText(`Downloads: ${result.downloadsDir}`, 'blue'));
+      console.log(describeCleanupResult(result));
+
+      for (const folder of result.folders) console.log(`  folder: ${folder}`);
+      for (const skipped of result.skipped)
+        console.log(colorText(`  skipped: ${skipped}`, 'yellow'));
+      for (const error of result.errors) console.log(colorText(`  error: ${error}`, 'red'));
+
+      if (dryRun) {
+        console.log(colorText('Nothing was changed. Re-run with --now to apply.', 'yellow'));
+      } else {
+        writeLastRunFile(result);
+        console.log(
+          colorText(`Last run written to ${path.join(getStateDir(), LAST_RUN_FILE_NAME)}`, 'green'),
+        );
+      }
+
+      process.exit(result.errors.length > 0 ? 1 : 0);
+    } catch (error: any) {
+      console.error(colorText(`Artifact cleanup failed: ${error.message}`, 'red'));
       process.exit(1);
     }
   });

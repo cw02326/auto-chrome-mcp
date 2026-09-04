@@ -382,11 +382,12 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         saveToDownloads: {
           type: 'boolean',
-          description: 'Save the trace as a JSON file in Downloads (default true).',
+          description:
+            'Save the trace as a JSON file under Downloads/mcp-screenshots/<date>/ (default true).',
         },
         filenamePrefix: {
           type: 'string',
-          description: 'Optional filename prefix for the downloaded trace JSON.',
+          description: 'Optional name to put in the saved trace filename.',
         },
         tabId: tabIdProp,
       },
@@ -688,11 +689,12 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         saveToDownloads: {
           type: 'boolean',
-          description: 'Also auto-save to Downloads/mcp-screenshots/ (default: false)',
+          description: 'Also auto-save to Downloads/mcp-screenshots/<date>/ (default: false)',
         },
         filename: {
           type: 'string',
-          description: 'Filename for saveToDownloads (sanitized, under mcp-screenshots/).',
+          description:
+            'Name for saveToDownloads (sanitized; always kept under mcp-screenshots/<date>/).',
         },
       },
       required: [],
@@ -1405,7 +1407,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         filename: {
           type: 'string',
-          description: 'Output filename (no extension). Defaults to a timestamped name.',
+          description: 'Output name (no extension). Saved under Downloads/mcp-screenshots/<date>/.',
         },
         captureDelayMs: {
           type: 'number',
@@ -1572,7 +1574,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         windowId: windowIdProp,
         filename: {
           type: 'string',
-          description: 'File name (".pdf" added). Saved under Downloads/mcp-pdf/.',
+          description: 'File name (".pdf" added). Saved under Downloads/mcp-screenshots/<date>/.',
         },
         paperFormat: {
           type: 'string',

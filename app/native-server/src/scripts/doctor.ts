@@ -26,16 +26,21 @@ import {
 } from './utils';
 import { NATIVE_SERVER_PORT } from '../constant';
 import { inspectTokenFile, readAuthToken } from '../security/auth-token';
+import {
+  probeBridgePorts,
+  DEFAULT_PORT_RANGE,
+  type ProbeBridgePortsResult,
+  readBridgeIdentity,
+  type BridgeIdentity,
+} from './port-probe';
 
 const EXPECTED_PORT = 12320;
 const SCHEMA_VERSION = 1;
 // v1.0.37: 옛날 hangwin (2025-10-09 이전, >=14) 의 install 경험을 그대로 복원.
 // 사용자 명시 요청 — engines.node 와 doctor MIN 모두 14 로 통일.
-// 주의: bridge 의 transitive dep (@modelcontextprotocol/sdk, commander, playwright)
-// 는 자체 engines 로 >=18 을 선언함. Node 14/16 사용자는 install 은 통과하지만
-// 일부 dep 가 runtime 에서 Node 18+ API (native fetch 등) 호출 시 crash 가능성 있음.
-// doctor 에서 WARN 으로 안내. ERROR 아님 (사용자가 강제로 14/16 으로 갈 수 있게).
-const MIN_NODE_MAJOR_VERSION = 14;
+// package.json engines 와 README 가 선언한 최소 버전(Node 20). 그 아래는 native fetch,
+// 트러스티드 퍼블리싱 등 런타임 전제가 깨지므로 doctor 가 WARN 으로 안내한다.
+const MIN_NODE_MAJOR_VERSION = 20;
 
 // ============================================================================
 // Types
@@ -571,87 +576,16 @@ function resolveFetch(): FetchFn | null {
   }
 }
 
-/**
- * auto-chrome-mcp fork v1.0.30+: bridge 의 actual listen port 들을 탐색.
- *
- * 동작:
- * 1. `ps aux` 로 auto-chrome-mcp-bridge process (`dist/index.js`) 의 pid 들 수집.
- * 2. 각 pid 에 `lsof -aPi -p <pid>` 호출 → LISTEN 라인의 port 파싱.
- * 3. 그 port 들에 /ping 시도 → 응답 있는 port 만 responsivePorts 에 포함.
- *
- * Unix only (lsof + ps 사용). Windows 는 빈 결과 반환.
- */
-async function probeActiveBridgePorts(): Promise<{
-  ports: number[];
-  responsivePorts: number[];
-}> {
-  const empty = { ports: [], responsivePorts: [] };
-  if (process.platform === 'win32') return empty;
+// 브리지의 실제 listen port 탐색은 port-probe.ts 의 probeBridgePorts() 가 맡는다
+// (옛 구현은 ps/lsof 기반이라 Windows 에서 항상 빈 결과였다 — 그 함수는 삭제됨).
 
-  try {
-    const psOut = execFileSync('ps', ['-eo', 'pid,command'], { encoding: 'utf8' });
-    const pids: number[] = [];
-    for (const line of psOut.split('\n')) {
-      // bridge native messaging host 는 `<...>/<pkg>/dist/index.js` 패턴.
-      // 현재 패키지명 기준으로 찾는다.
-      if (
-        line.includes('auto-chrome-mcp-bridge') &&
-        line.includes('/dist/index.js') &&
-        !line.includes('grep')
-      ) {
-        const pid = parseInt(line.trim().split(/\s+/)[0], 10);
-        if (!isNaN(pid)) pids.push(pid);
-      }
-    }
-    if (pids.length === 0) return empty;
-
-    const portSet = new Set<number>();
-    for (const pid of pids) {
-      try {
-        const lsofOut = execFileSync('lsof', ['-aPi', '-p', String(pid)], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        });
-        for (const line of lsofOut.split('\n')) {
-          if (!line.includes('LISTEN')) continue;
-          // 예: node 4054 ... TCP localhost:12317 (LISTEN)
-          const m = line.match(/:(\d{2,5})\s+\(LISTEN\)/);
-          if (m) portSet.add(parseInt(m[1], 10));
-        }
-      } catch {
-        // lsof 실패 (permission, process 죽음 등) — skip
-      }
-    }
-    const ports = Array.from(portSet).sort((a, b) => a - b);
-
-    // 각 port 에 /ping
-    const fetchFn = resolveFetch();
-    const responsivePorts: number[] = [];
-    if (fetchFn) {
-      for (const port of ports) {
-        try {
-          const url = `http://127.0.0.1:${port}/ping`;
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1000);
-          const res = await fetchFn(url, { method: 'GET', signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (res && res.ok) responsivePorts.push(port);
-        } catch {
-          // skip
-        }
-      }
-    }
-
-    return { ports, responsivePorts };
-  } catch {
-    return empty;
-  }
+export interface ConnectivityResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
 }
 
-async function checkConnectivity(
-  url: string,
-  timeoutMs: number,
-): Promise<{ ok: boolean; status?: number; error?: string }> {
+async function checkConnectivity(url: string, timeoutMs: number): Promise<ConnectivityResult> {
   const fetchFn = resolveFetch();
   if (!fetchFn) {
     return { ok: false, error: 'fetch is not available (requires Node.js >=18 or node-fetch)' };
@@ -688,19 +622,24 @@ export function parsePortValue(value: unknown): number | null {
 }
 
 /**
- * stale-extension 검사에 쓸 포트 후보를 모은다.
+ * stale-extension 검사에 쓸 포트 후보를 모은다. 이 목록으로 가는 요청에는 브리지 토큰이
+ * 붙으므로, **사용자가 지정한 포트와 포크 기본 포트만** 담는다.
  *
- * 고정 포트 하나만 보면 안 된다. `.mcp.json` 의 `env.CHROME_PORT` 로 포트를 바꿔 쓰거나
- * 팝업에서 동적 포트를 고른 설치에서는 그 포트에 브리지가 있고, 12320 에는 아무도 없다.
- * 그러면 401 카운트를 읽지 못한 채 "확장이 토큰을 보낸다" 고 답하게 된다.
+ * 고정 포트 하나만 보면 안 된다. `.mcp.json` 의 `env.CHROME_PORT` 로 포트를 바꿔 쓰는
+ * 설치에서는 그 포트에 브리지가 있고, 12320 에는 아무도 없다. 그러면 401 카운트를 읽지
+ * 못한 채 "확장이 토큰을 보낸다" 고 답하게 된다.
  *
- * 순서: env CHROME_PORT(stdio 프록시의 loadConfig 와 같은 우선순위) → stdio-config.json 의
- * url 포트 → 포크 기본 포트 → 실제로 /ping 에 응답한 브리지 포트.
+ * 순서: env CHROME_PORT(stdio 프록시의 loadConfig 와 같은 우선순위) -> stdio-config.json 의
+ * url 포트 -> 포크 기본 포트.
+ *
+ * 탐색(port-probe)으로 찾은 포트는 **넣지 않는다**. 12300~12399 에서 LISTEN 중인 것이 우리
+ * 브리지라는 보장이 없어서, 아무 서비스나 /ping 에 200 만 돌려주면 그쪽으로 토큰이 나갔다.
+ * 탐색 결과는 port.activeBridges 의 보고용으로만 쓴다. 그래서 설정 포트와 다른 동적 포트만
+ * 살아 있는 설치에서는 이 검사가 "not checked" 로 남는다 - 없는 검사를 통과했다고 하지 않는다.
  */
 export function resolveExtensionAuthPorts(input: {
   configuredPort?: number | null;
   envPort?: unknown;
-  responsivePorts?: number[];
 }): number[] {
   const ports: number[] = [];
   const push = (value: unknown) => {
@@ -710,7 +649,6 @@ export function resolveExtensionAuthPorts(input: {
   push(input.envPort);
   push(input.configuredPort);
   push(EXPECTED_PORT);
-  for (const port of input.responsivePorts ?? []) push(port);
   return ports;
 }
 
@@ -858,6 +796,227 @@ function statusBadge(status: DoctorStatus): string {
   if (status === 'ok') return colorText('[OK]', 'green');
   if (status === 'warn') return colorText('[WARN]', 'yellow');
   return colorText('[ERROR]', 'red');
+}
+
+// ============================================================================
+// Port checks (Check 7 / 7b)
+// ============================================================================
+
+export interface PortChecksInput {
+  /** dist/mcp/stdio-config.json 경로. 없거나 깨져 있어도 포트 탐색은 돈다. */
+  stdioConfigPath: string;
+  /** env CHROME_PORT (stdio 프록시의 loadConfig 와 같은 우선순위). */
+  envPort?: unknown;
+  probe?: () => Promise<ProbeBridgePortsResult>;
+  connectivity?: (url: string, timeoutMs: number) => Promise<ConnectivityResult>;
+  /** 설정 포트가 /ping 에 답했을 때 무인증 /health 로 브리지인지 확인한다(토큰 없음). */
+  identify?: (port: number) => Promise<BridgeIdentity | null>;
+}
+
+export interface PortChecksResult {
+  checks: DoctorCheckResult[];
+  nextSteps: string[];
+  configuredPort: number | null;
+  /** 토큰을 붙여 조회해도 되는 포트. 탐색으로 찾은 포트는 절대 들어가지 않는다. */
+  tokenPorts: number[];
+}
+
+/**
+ * 포트 설정(Check 7)과 이 PC 의 다른 브리지(Check 7b)를 함께 점검한다.
+ *
+ * 두 가지를 못 박는다:
+ *   1. 포트 탐색은 stdio-config.json 의 상태와 무관하게 **언제나 한 번** 돈다. 예전에는
+ *      파싱 성공 블록 안에 있어서, 파일이 없거나 깨지면 port.activeBridges 자체가 사라졌다.
+ *   2. 탐색 결과는 보고용일 뿐이다. 토큰이 붙는 조회 대상(tokenPorts)에는 사용자가 지정한
+ *      포트와 포크 기본 포트만 들어간다.
+ */
+/** 무인증 GET /health 의 fork·version 으로 브리지인지 판정한다. 토큰은 절대 붙이지 않는다. */
+async function identifyBridgeAtPort(port: number): Promise<BridgeIdentity | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
+    if (!res.ok) return null;
+    return readBridgeIdentity(await res.json());
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function buildPortChecks(input: PortChecksInput): Promise<PortChecksResult> {
+  const checks: DoctorCheckResult[] = [];
+  const nextSteps: string[] = [];
+  const probe = input.probe ?? ((): Promise<ProbeBridgePortsResult> => probeBridgePorts());
+  const connectivity = input.connectivity ?? checkConnectivity;
+  const identify = input.identify ?? identifyBridgeAtPort;
+
+  // 항상 먼저 탐색한다 (읽기 전용, 토큰 없음).
+  const active = await probe();
+
+  let configuredPort: number | null = null;
+  let configuredPortAlive = false;
+
+  // Check 7: Port configuration
+  // 설정 파일이 아예 없으면 여기서는 아무 항목도 만들지 않는다 - Check 2(host.files)가
+  // 이미 "필수 파일 없음" 으로 보고했다.
+  if (fs.existsSync(input.stdioConfigPath)) {
+    const cfg = readJsonFile(input.stdioConfigPath);
+    if (!cfg.ok) {
+      checks.push({
+        id: 'port.config',
+        title: 'Port config',
+        status: 'error',
+        message: `Failed to parse stdio-config.json: ${cfg.error}`,
+      });
+    } else {
+      try {
+        const configValue = cfg.value as Record<string, unknown>;
+        const url = new URL(configValue.url as string);
+        const port = Number(url.port);
+        configuredPort = parsePortValue(port);
+        const portOk = port === EXPECTED_PORT;
+        checks.push({
+          id: 'port.config',
+          title: 'Port config',
+          status: portOk ? 'ok' : 'error',
+          message: configValue.url as string,
+          details: {
+            expectedPort: EXPECTED_PORT,
+            actualPort: port,
+            fix: portOk ? undefined : [`${COMMAND_NAME} update-port ${EXPECTED_PORT}`],
+          },
+        });
+        if (!portOk) nextSteps.push(`${COMMAND_NAME} update-port ${EXPECTED_PORT}`);
+
+        // Check constant consistency
+        const nativePortOk = NATIVE_SERVER_PORT === EXPECTED_PORT;
+        checks.push({
+          id: 'port.constant',
+          title: 'Port constant',
+          status: nativePortOk ? 'ok' : 'warn',
+          message: `NATIVE_SERVER_PORT=${NATIVE_SERVER_PORT}`,
+          details: { expectedPort: EXPECTED_PORT },
+        });
+
+        // Connectivity check
+        // auto-chrome-mcp fork v1.0.30+: hardcoded port 만 ping 하면 false WARN 가능 - bridge 가
+        // v1.0.19+ dynamic port 로 popup 의 사용자 입력 port 에서 listen 하므로. configured
+        // port 의 /ping 성공 여부와 무관하게 이 PC 의 실제 listen port 들도 함께 본다.
+        const pingUrl = new URL('/ping', url);
+        const ping = await connectivity(pingUrl.toString(), 1500);
+        configuredPortAlive = ping.ok;
+        const primaryPort = configuredPort ?? EXPECTED_PORT;
+        // /ping 200 만으로는 우리 브리지인지 알 수 없다. 탐색이 식별하지 못했으면 무인증
+        // /health 로 한 번 더 확인하고, 확인된 경우에만 식별 목록에 올린다.
+        if (ping.ok && !active.identityByPort[primaryPort]) {
+          const identity = await identify(primaryPort);
+          if (identity) active.identityByPort[primaryPort] = identity;
+        }
+        const liveAlt = active.bridgePorts.filter((p) => p !== primaryPort);
+
+        let connectivityStatus: DoctorStatus;
+        let connectivityMessage: string;
+        if (ping.ok) {
+          connectivityStatus = 'ok';
+          connectivityMessage = `GET ${pingUrl} -> ${ping.status}`;
+        } else if (liveAlt.length > 0) {
+          connectivityStatus = 'ok';
+          connectivityMessage = `GET ${pingUrl} failed, but an active bridge was found on port(s) ${liveAlt.join(
+            ', ',
+          )} (dynamic port via popup); this may differ from the configured port ${primaryPort}.`;
+        } else {
+          connectivityStatus = 'warn';
+          connectivityMessage = `GET ${pingUrl} failed (${ping.error || 'unknown error'})`;
+        }
+
+        checks.push({
+          id: 'connectivity',
+          title: 'Connectivity',
+          status: connectivityStatus,
+          message: connectivityMessage,
+          details: {
+            hint: 'If the server is not running, click "Connect" in the extension and retry.',
+            activeBridgePorts: active.ports,
+            responsivePorts: active.responsivePorts,
+            identifiedBridgePorts: active.bridgePorts,
+          },
+        });
+        if (connectivityStatus === 'warn') {
+          nextSteps.push('Click "Connect" in the extension, then re-run doctor');
+        }
+      } catch (e) {
+        checks.push({
+          id: 'port.config',
+          title: 'Port config',
+          status: 'error',
+          message: `Invalid URL in stdio-config.json: ${stringifyError(e)}`,
+        });
+      }
+    }
+  }
+
+  // Check 7b: 이 PC 에 설정 포트 말고 다른 브리지가 더 떠 있는가.
+  // 설정 포트가 살아 있어도, 설정 파일이 없거나 깨져 있어도 언제나 실행한다 - 그래야
+  // "기본 포트에도 브리지가 있고 팝업이 고른 동적 포트에 옛 확장이 붙은" 경우를 놓치지 않는다.
+  //
+  // 브리지 여부는 무인증 응답의 식별 필드로만 판정한다. 12300번대에서 200 만 돌려주는
+  // 서비스는 우리 브리지가 아니므로 개수에 넣지 않고 unidentifiedPorts 로만 보고한다.
+  //
+  // 개수는 언제나 탐색 결과 전체(identifiedBridgePorts)를 센다. "설정 포트는 빼고 센다" 는
+  // 설정을 실제로 읽어 냈을 때만 뜻이 있다. 예전에는 설정이 없거나 깨졌을 때도 기본 포트를
+  // 설정 포트로 쳐서 빼 버렸고, 그래서 브리지를 2개 찾고도 ok 로 보고했다.
+  const configResolved = configuredPort !== null;
+  const primaryPort = configuredPort ?? EXPECTED_PORT;
+  // 설정 포트는 /ping 이 성공했는데 탐색이 못 볼 수 있다(권한 부족으로 목록이 비는 경우).
+  // 설정 포트를 개수에 넣는 것도 탐색이 브리지로 식별했을 때만이다. /ping 200 만으로는
+  // 우리 브리지인지 알 수 없다(같은 포트에 다른 서비스가 앉아 있을 수 있다).
+  const primaryIdentified = Boolean(active.identityByPort?.[primaryPort]);
+  const liveBridgePorts = Array.from(
+    new Set(
+      configResolved && configuredPortAlive && primaryIdentified
+        ? [...active.bridgePorts, primaryPort]
+        : active.bridgePorts,
+    ),
+  ).sort((a, b) => a - b);
+  const otherLivePorts = configResolved
+    ? liveBridgePorts.filter((p) => p !== primaryPort)
+    : liveBridgePorts;
+  const totalLiveCount = liveBridgePorts.length;
+  const activeBridgesStatus: DoctorStatus = totalLiveCount >= 2 ? 'warn' : 'ok';
+  const activeBridgesMessage = configResolved
+    ? otherLivePorts.length > 0
+      ? `found ${otherLivePorts.length} bridge port(s) besides the configured port ${primaryPort}: ${otherLivePorts.join(', ')}`
+      : `no bridge ports found besides the configured port ${primaryPort}`
+    : otherLivePorts.length > 0
+      ? `port configuration was not read; found ${otherLivePorts.length} bridge port(s) on this machine: ${otherLivePorts.join(', ')}`
+      : 'port configuration was not read; no bridge ports were found on this machine';
+  checks.push({
+    id: 'port.activeBridges',
+    title: 'Active bridge ports',
+    status: activeBridgesStatus,
+    message: activeBridgesMessage,
+    details: {
+      scannedRange: DEFAULT_PORT_RANGE,
+      candidatePorts: active.ports,
+      responsivePorts: active.responsivePorts,
+      identifiedBridgePorts: active.bridgePorts,
+      liveBridgePorts,
+      liveBridgeCount: totalLiveCount,
+      unidentifiedPorts: active.otherPorts,
+      identityByPort: active.identityByPort,
+      pidByPort: active.pidByPort,
+      note: 'Scanned ports are probed without a token. A port that answers but does not identify itself as a bridge is listed under unidentifiedPorts and is never queried with the bridge token.',
+      ...(activeBridgesStatus === 'warn' && {
+        hint: 'Two or more bridges are listening on this machine. Use chrome_list_browsers to see them, or reload a stale extension at chrome://extensions.',
+      }),
+    },
+  });
+
+  const tokenPorts = resolveExtensionAuthPorts({ configuredPort, envPort: input.envPort });
+
+  return { checks, nextSteps, configuredPort, tokenPorts };
 }
 
 // ============================================================================
@@ -1203,105 +1362,15 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     }
   }
 
-  // 확장 토큰 검사(8b)가 쓸 포트. 고정 포트만 보면 CHROME_PORT 커스텀·동적 포트 설치에서
-  // 401 카운트를 못 본다. Check 7 이 이미 해석한 설정 포트와 응답한 브리지 포트를 물려받는다.
-  let configuredPort: number | null = null;
-  let responsiveBridgePorts: number[] = [];
-
-  // Check 7: Port configuration
-  if (fs.existsSync(stdioConfigPath)) {
-    const cfg = readJsonFile(stdioConfigPath);
-    if (!cfg.ok) {
-      checks.push({
-        id: 'port.config',
-        title: 'Port config',
-        status: 'error',
-        message: `Failed to parse stdio-config.json: ${cfg.error}`,
-      });
-    } else {
-      try {
-        const configValue = cfg.value as Record<string, unknown>;
-        const url = new URL(configValue.url as string);
-        const port = Number(url.port);
-        configuredPort = parsePortValue(port);
-        const portOk = port === EXPECTED_PORT;
-        checks.push({
-          id: 'port.config',
-          title: 'Port config',
-          status: portOk ? 'ok' : 'error',
-          message: configValue.url as string,
-          details: {
-            expectedPort: EXPECTED_PORT,
-            actualPort: port,
-            fix: portOk ? undefined : [`${COMMAND_NAME} update-port ${EXPECTED_PORT}`],
-          },
-        });
-        if (!portOk) nextSteps.push(`${COMMAND_NAME} update-port ${EXPECTED_PORT}`);
-
-        // Check constant consistency
-        const nativePortOk = NATIVE_SERVER_PORT === EXPECTED_PORT;
-        checks.push({
-          id: 'port.constant',
-          title: 'Port constant',
-          status: nativePortOk ? 'ok' : 'warn',
-          message: `NATIVE_SERVER_PORT=${NATIVE_SERVER_PORT}`,
-          details: { expectedPort: EXPECTED_PORT },
-        });
-
-        // Connectivity check
-        // auto-chrome-mcp fork v1.0.30+: hardcoded port 만 ping 하면 false WARN 가능 — bridge 가
-        // v1.0.19+ dynamic port 로 popup 의 사용자 입력 port 에서 listen 하므로. configured
-        // port ping 실패 시 active bridge process 들의 actual listen port 도 같이 점검.
-        const pingUrl = new URL('/ping', url);
-        const ping = await checkConnectivity(pingUrl.toString(), 1500);
-        let activePortsHint: { ports: number[]; responsivePorts: number[] } | null = null;
-        if (!ping.ok) {
-          activePortsHint = await probeActiveBridgePorts();
-        }
-        const liveAlt = activePortsHint?.responsivePorts ?? [];
-        responsiveBridgePorts = liveAlt;
-
-        let connectivityStatus: DoctorStatus;
-        let connectivityMessage: string;
-        if (ping.ok) {
-          connectivityStatus = 'ok';
-          connectivityMessage = `GET ${pingUrl} -> ${ping.status}`;
-        } else if (liveAlt.length > 0) {
-          connectivityStatus = 'ok';
-          connectivityMessage = `GET ${pingUrl} failed — but active bridge found on port(s) ${liveAlt.join(
-            ', ',
-          )} (dynamic port via popup). configured port ${EXPECTED_PORT} 이/가 사용자 설정과 다를 수 있음.`;
-        } else {
-          connectivityStatus = 'warn';
-          connectivityMessage = `GET ${pingUrl} failed (${ping.error || 'unknown error'})`;
-        }
-
-        checks.push({
-          id: 'connectivity',
-          title: 'Connectivity',
-          status: connectivityStatus,
-          message: connectivityMessage,
-          details: {
-            hint: 'If the server is not running, click "Connect" in the extension and retry.',
-            ...(activePortsHint && {
-              activeBridgePorts: activePortsHint.ports,
-              responsivePorts: activePortsHint.responsivePorts,
-            }),
-          },
-        });
-        if (connectivityStatus === 'warn') {
-          nextSteps.push('Click "Connect" in the extension, then re-run doctor');
-        }
-      } catch (e) {
-        checks.push({
-          id: 'port.config',
-          title: 'Port config',
-          status: 'error',
-          message: `Invalid URL in stdio-config.json: ${stringifyError(e)}`,
-        });
-      }
-    }
-  }
+  // Check 7 / 7b: 포트 설정과 이 PC 의 다른 브리지.
+  // 포트 탐색은 stdio-config.json 상태와 무관하게 언제나 한 번 돌고, 탐색으로 찾은 포트에는
+  // 토큰을 보내지 않는다. 토큰이 붙는 조회 대상은 portChecks.tokenPorts 뿐이다.
+  const portChecks = await buildPortChecks({
+    stdioConfigPath,
+    envPort: process.env.CHROME_PORT,
+  });
+  checks.push(...portChecks.checks);
+  nextSteps.push(...portChecks.nextSteps);
 
   // Check 8: Bridge auth token (auto-chrome-mcp fork)
   // 브리지는 listen 전에 무작위 bearer 토큰을 이 파일에 남기고, stdio 프록시가 그걸 읽어
@@ -1372,14 +1441,9 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
   // 받고도 안 쓰는 옛 확장"을 구분할 수 없다. 대신 브리지가 세어 둔 값을 읽는다:
   // 확장 origin 이 붙은 요청이 토큰 없이 들어와 401 을 받으면 브리지가 기록한다.
   // 그 값은 /health 의 상세에 실리고, 상세는 토큰이 있어야 나오므로 여기서 토큰을 붙인다.
-  // 조회 대상은 고정 포트 하나가 아니라 설정된 포트와 응답한 브리지 포트 전부다.
-  const extensionAuthCheck = await checkExtensionAuth(
-    resolveExtensionAuthPorts({
-      configuredPort,
-      envPort: process.env.CHROME_PORT,
-      responsivePorts: responsiveBridgePorts,
-    }),
-  );
+  // 조회 대상은 사용자가 지정한 포트(env·설정)와 포크 기본 포트뿐이다 - 탐색으로 찾은
+  // 포트는 우리 브리지라는 보장이 없어서 토큰을 보내지 않는다.
+  const extensionAuthCheck = await checkExtensionAuth(portChecks.tokenPorts);
   checks.push(extensionAuthCheck.check);
   if (extensionAuthCheck.nextStep) nextSteps.push(extensionAuthCheck.nextStep);
 

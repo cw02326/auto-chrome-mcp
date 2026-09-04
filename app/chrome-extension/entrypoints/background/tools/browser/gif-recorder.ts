@@ -26,6 +26,7 @@ import {
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
+import { saveArtifactToDownloads } from '@/utils/artifact-path';
 import {
   startAutoCapture,
   stopAutoCapture,
@@ -540,29 +541,13 @@ async function stopRecording(): Promise<GifResult> {
       const blob = new Blob([gifBytes], { type: 'image/gif' });
       const dataUrl = await blobToDataUrl(blob);
 
-      // Save GIF file
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const outputFilename = filename?.replace(/[^a-z0-9_-]/gi, '_') || `recording_${timestamp}`;
-      const fullFilename = outputFilename.endsWith('.gif')
-        ? outputFilename
-        : `${outputFilename}.gif`;
-
-      const downloadId = await chrome.downloads.download({
+      // Save GIF file — 경로는 utils/artifact-path.ts 가 만든다 (mcp-screenshots/YYYY-MM-DD/)
+      const saved = await saveArtifactToDownloads({
         url: dataUrl,
-        filename: fullFilename,
-        saveAs: false,
+        kind: 'gif',
+        name: filename,
+        ext: 'gif',
       });
-
-      // Wait briefly to get download info
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      let fullPath: string | undefined;
-      try {
-        const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-        fullPath = downloadItem?.filename;
-      } catch {
-        // Ignore path lookup errors
-      }
 
       return {
         success: true,
@@ -571,9 +556,9 @@ async function stopRecording(): Promise<GifResult> {
         frameCount,
         durationMs,
         byteLength: response.byteLength ?? gifBytes.byteLength,
-        downloadId,
-        filename: fullFilename,
-        fullPath,
+        downloadId: saved.downloadId,
+        filename: saved.filename,
+        fullPath: saved.fullPath,
       };
     } catch (error) {
       return {
@@ -898,28 +883,12 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             const blob = new Blob([stopResult.gifData], { type: 'image/gif' });
             const dataUrl = await blobToDataUrl(blob);
 
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const outputFilename =
-              filename?.replace(/[^a-z0-9_-]/gi, '_') || `recording_${timestamp}`;
-            const fullFilename = outputFilename.endsWith('.gif')
-              ? outputFilename
-              : `${outputFilename}.gif`;
-
-            const downloadId = await chrome.downloads.download({
+            const saved = await saveArtifactToDownloads({
               url: dataUrl,
-              filename: fullFilename,
-              saveAs: false,
+              kind: 'gif',
+              name: filename,
+              ext: 'gif',
             });
-
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            let fullPath: string | undefined;
-            try {
-              const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-              fullPath = downloadItem?.filename;
-            } catch {
-              // Ignore
-            }
 
             return this.buildResponse({
               success: true,
@@ -930,9 +899,9 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               durationMs: stopResult.durationMs,
               byteLength: stopResult.gifData.byteLength,
               actionsCount: stopResult.actions?.length,
-              downloadId,
-              filename: fullFilename,
-              fullPath,
+              downloadId: saved.downloadId,
+              filename: saved.filename,
+              fullPath: saved.fullPath,
             });
           }
 
@@ -1055,28 +1024,13 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             const blob = new Blob([lastRecordedGif.gifData], { type: 'image/gif' });
             const dataUrl = await blobToDataUrl(blob);
 
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const filename = args.filename ?? lastRecordedGif.filename;
-            const outputFilename = filename?.replace(/[^a-z0-9_-]/gi, '_') || `export_${timestamp}`;
-            const fullFilename = outputFilename.endsWith('.gif')
-              ? outputFilename
-              : `${outputFilename}.gif`;
-
-            const downloadId = await chrome.downloads.download({
+            const saved = await saveArtifactToDownloads({
               url: dataUrl,
-              filename: fullFilename,
-              saveAs: false,
+              kind: 'gif',
+              name: filename,
+              ext: 'gif',
             });
-
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            let fullPath: string | undefined;
-            try {
-              const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-              fullPath = downloadItem?.filename;
-            } catch {
-              // Ignore
-            }
 
             return this.buildResponse({
               success: true,
@@ -1085,9 +1039,9 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               frameCount: lastRecordedGif.frameCount,
               durationMs: lastRecordedGif.durationMs,
               byteLength: lastRecordedGif.gifData.byteLength,
-              downloadId,
-              filename: fullFilename,
-              fullPath,
+              downloadId: saved.downloadId,
+              filename: saved.filename,
+              fullPath: saved.fullPath,
             });
           } else {
             // Drag&drop upload mode

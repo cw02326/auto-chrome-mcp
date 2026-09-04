@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { saveArtifactToDownloads } from '@/utils/artifact-path';
 
 type OwnerTag = 'performance';
 
@@ -15,7 +16,7 @@ interface StartTraceParams {
 interface StopTraceParams {
   tabId?: number; // Explicit tab to stop tracing on. Falls back to the active tab.
   saveToDownloads?: boolean; // save trace to Downloads as JSON (default true)
-  filenamePrefix?: string; // filename prefix (default 'performance_trace')
+  filenamePrefix?: string; // 파일명에 끼울 이름 (생략 시 trace_<HHmmss>.json)
 }
 
 interface AnalyzeInsightParams {
@@ -87,21 +88,19 @@ async function enablePerformanceMetrics(tabId: number): Promise<Record<string, n
 
 async function saveTraceToDownloads(
   json: string,
-  filenamePrefix = 'performance_trace',
+  filenamePrefix?: string,
 ): Promise<{ downloadId?: number; filename?: string; fullPath?: string }> {
   try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `${filenamePrefix}_${timestamp}.json`;
     const dataUrl = `data:application/json;base64,${btoa(unescape(encodeURIComponent(json)))}`;
-    const downloadId = await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
-    // Attempt to resolve full path
-    try {
-      await new Promise((r) => setTimeout(r, 120));
-      const [item] = await chrome.downloads.search({ id: downloadId });
-      return { downloadId, filename, fullPath: item?.filename };
-    } catch {
-      return { downloadId, filename };
-    }
+    // 경로는 utils/artifact-path.ts 가 만든다 — mcp-screenshots/YYYY-MM-DD/ 아래.
+    const saved = await saveArtifactToDownloads({
+      url: dataUrl,
+      kind: 'trace',
+      name: filenamePrefix,
+      ext: 'json',
+      resolvePathDelayMs: 120,
+    });
+    return { downloadId: saved.downloadId, filename: saved.filename, fullPath: saved.fullPath };
   } catch {
     return {};
   }
@@ -373,7 +372,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
 
       let saved: { downloadId?: number; filename?: string; fullPath?: string } | undefined;
       if (saveToDownloads) {
-        saved = await saveTraceToDownloads(json, filenamePrefix || 'performance_trace');
+        saved = await saveTraceToDownloads(json, filenamePrefix);
       } else {
         // Persist to native temp directory so that analysis can run without Downloads permission
         const tempSaved = await saveTraceToNativeTemp(json, filenamePrefix || 'performance_trace');

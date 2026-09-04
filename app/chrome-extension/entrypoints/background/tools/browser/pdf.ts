@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { saveArtifactToDownloads } from '@/utils/artifact-path';
 
 /**
  * auto-chrome-mcp fork(B2): chrome_save_pdf — 현재 페이지를 PDF 로 저장한다.
@@ -37,7 +38,6 @@ const PAPER_SIZES: Record<string, { width: number; height: number }> = {
   legal: { width: 8.5, height: 14 },
 };
 
-const DOWNLOAD_SUBDIR = 'mcp-pdf';
 const MAX_SCALE = 2;
 const MIN_SCALE = 0.1;
 
@@ -52,23 +52,12 @@ function isRestrictedUrl(url?: string): boolean {
   );
 }
 
-/** 파일명 정리 — 경로 탈출·금지문자 제거, .pdf 보장 */
-function sanitizePdfFilename(raw: string | undefined, fallbackTitle?: string): string {
-  let base =
-    typeof raw === 'string' && raw.trim()
-      ? raw.trim()
-      : `${(fallbackTitle || 'page').slice(0, 60)}-${Date.now()}`;
-  base = base.replace(/[\\/]+/g, '-'); // 경로 구분자 제거 (디렉터리 탈출 방지)
-  // Windows 금지문자 제거 (공백/하이픈은 유지)
-  base = base.replace(/[<>:"|?*]/g, '');
-  // 제어문자 제거 — 정규식 대신 코드포인트로 거른다 (eslint no-control-regex)
-  base = Array.from(base)
-    .filter((ch) => ch.charCodeAt(0) >= 32)
-    .join('')
-    .trim();
-  base = base.replace(/^\.+/, '') || 'page';
-  if (!/\.pdf$/i.test(base)) base += '.pdf';
-  return `${DOWNLOAD_SUBDIR}/${base}`;
+/**
+ * 저장 이름의 뿌리만 고른다 — 경로 탈출·금지문자·날짜 폴더 처리는
+ * utils/artifact-path.ts 가 맡는다(모든 산출물이 mcp-screenshots/YYYY-MM-DD/ 아래로 간다).
+ */
+function pdfArtifactName(raw: string | undefined, fallbackTitle?: string): string {
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : fallbackTitle || 'page';
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -140,13 +129,13 @@ class SavePdfTool extends BaseBrowserToolExecutor {
         return createErrorResponse('Page.printToPDF returned no data');
       }
 
-      const filename = sanitizePdfFilename(params.filename, tab.title);
-      let downloadId: number;
+      let saved: { downloadId: number; filename: string; fullPath?: string };
       try {
-        downloadId = await chrome.downloads.download({
+        saved = await saveArtifactToDownloads({
           url: `data:application/pdf;base64,${base64}`,
-          filename,
-          saveAs: false,
+          kind: 'pdf',
+          name: pdfArtifactName(params.filename, tab.title),
+          ext: 'pdf',
         });
       } catch (error) {
         return createErrorResponse(
@@ -165,9 +154,10 @@ class SavePdfTool extends BaseBrowserToolExecutor {
               tabId,
               url: tab.url,
               title: tab.title,
-              downloadId,
-              savedAs: filename,
-              note: 'Saved under your Downloads folder. Use chrome_handle_download for the absolute path once the download completes.',
+              downloadId: saved.downloadId,
+              savedAs: saved.filename,
+              ...(saved.fullPath ? { fullPath: saved.fullPath } : {}),
+              note: 'Saved under Downloads/mcp-screenshots/<date>/. The bridge archives folders older than the retention window at startup.',
               approxBytes,
               settings: {
                 paperFormat: params.paperFormat || 'a4',

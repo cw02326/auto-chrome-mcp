@@ -17,6 +17,7 @@ import { activateTab } from '@/utils/activation-guard';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
 import { waitForFramePaint, waitForHelperReady } from '@/utils/adaptive-wait';
 import { redactedArgsForLog } from '@/utils/log-redact';
+import { saveArtifactToDownloads } from '@/utils/artifact-path';
 
 /**
  * auto-chrome-mcp fork v1.9.0: 전용 작업 창(기본 배치 minimized) 안의 비활성 탭은 캡처할 수
@@ -130,52 +131,39 @@ async function captureVisibleTabFallback(tabId: number, windowId?: number): Prom
 }
 
 /**
- * auto-chrome-mcp fork: 사용자 지정 filename 을 안전하게 정규화한다.
- * - 경로 순회('..'), 선행 슬래시, 허용되지 않는 문자를 제거한다.
- * - 항상 mcp-screenshots/ 폴더 하위에 저장되도록 강제한다(사용자가 이미 폴더를 포함해도 접두사 유지).
+ * auto-chrome-mcp fork: 사용자 지정 filename 에서 확장자만 골라낸다.
+ * 경로·금지문자 처리는 utils/artifact-path.ts 가 맡는다(항상 날짜 폴더 안으로 들어간다).
  */
-function sanitizeDownloadFilename(userFilename?: string): string {
-  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); // yyyyMMdd-HHmmss
-  const defaultName = `screenshot-${timestamp}.png`;
-
-  if (!userFilename || typeof userFilename !== 'string' || !userFilename.trim()) {
-    return `mcp-screenshots/${defaultName}`;
-  }
-
-  // 경로 순회 방지: '..' 세그먼트 제거, 역슬래시를 슬래시로 통일
-  let cleaned = userFilename.trim().replace(/\\/g, '/');
-  cleaned = cleaned
-    .split('/')
-    .filter((seg) => seg !== '' && seg !== '.' && seg !== '..')
-    .join('/');
-  // 선행 슬래시 제거 후, 허용되지 않는 문자는 밑줄로 치환 (영숫자, ., _, -, / 만 허용)
-  cleaned = cleaned.replace(/^\/+/, '').replace(/[^a-zA-Z0-9._\-/]/g, '_');
-
-  if (!cleaned) cleaned = defaultName;
-  if (!/\.(png|jpe?g)$/i.test(cleaned)) cleaned += '.png';
-
-  return `mcp-screenshots/${cleaned}`;
+function screenshotExtension(userFilename?: string): 'jpg' | 'png' {
+  return typeof userFilename === 'string' && /\.jpe?g\s*$/i.test(userFilename) ? 'jpg' : 'png';
 }
 
 /**
  * auto-chrome-mcp fork: 캡처된 이미지를 chrome.downloads 로 저장한다.
  * saveToDownloads 요청 시 모든 캡처 경로(CDP viewport/fullPage/element, captureVisibleTab 폴백) 이후
  * 공통으로 호출되며, 실패해도 스크린샷 자체는 성공으로 유지한다(호출부에서 saveError 만 첨부).
+ * 저장 위치는 `mcp-screenshots/YYYY-MM-DD/` 하나로 통일된다.
  */
 async function saveScreenshotToDownloads(
   dataUrl: string,
   filename?: string,
 ): Promise<
-  { saved: true; downloadId: number; savedFilename: string } | { saved: false; saveError: string }
+  | { saved: true; downloadId: number; savedFilename: string; fullPath?: string }
+  | { saved: false; saveError: string }
 > {
   try {
-    const savedFilename = sanitizeDownloadFilename(filename);
-    const downloadId = await chrome.downloads.download({
+    const saved = await saveArtifactToDownloads({
       url: dataUrl,
-      filename: savedFilename,
-      saveAs: false,
+      kind: 'screenshot',
+      name: filename,
+      ext: screenshotExtension(filename),
     });
-    return { saved: true, downloadId, savedFilename };
+    return {
+      saved: true,
+      downloadId: saved.downloadId,
+      savedFilename: saved.filename,
+      ...(saved.fullPath ? { fullPath: saved.fullPath } : {}),
+    };
   } catch (error) {
     return {
       saved: false,
@@ -640,35 +628,18 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         // Save PNG file to downloads
         this.logInfo('Saving PNG...');
         try {
-          // Generate filename
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const filename = `${name.replace(/[^a-z0-9_-]/gi, '_') || 'screenshot'}_${timestamp}.png`;
-
-          // Use Chrome's download API to save the file
-          const downloadId = await chrome.downloads.download({
+          // 저장 경로는 utils/artifact-path.ts 가 만든다 — mcp-screenshots/YYYY-MM-DD/ 아래.
+          const saved = await saveArtifactToDownloads({
             url: finalImageDataUrl,
-            filename: filename,
-            saveAs: false,
+            kind: 'screenshot',
+            name,
+            ext: 'png',
           });
 
-          results.downloadId = downloadId;
-          results.filename = filename;
+          results.downloadId = saved.downloadId;
+          results.filename = saved.filename;
           results.fileSaved = true;
-
-          // Try to get the full file path
-          try {
-            // Wait a moment to ensure download info is updated
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            // Search for download item to get full path
-            const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-            if (downloadItem && downloadItem.filename) {
-              // Add full path to response
-              results.fullPath = downloadItem.filename;
-            }
-          } catch (pathError) {
-            console.warn('Could not get full file path:', pathError);
-          }
+          if (saved.fullPath) results.fullPath = saved.fullPath;
         } catch (error) {
           console.error('Error saving PNG file:', error);
           results.saveError = String(error instanceof Error ? error.message : error);
