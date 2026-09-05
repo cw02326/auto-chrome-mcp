@@ -16,7 +16,8 @@
  *   - 저장 직전에 secret 을 가린다(원문과 JSON escaped 형태 둘 다). 비밀번호가 이력에
  *     남으면 저장소 덤프가 곧 유출이다.
  *   - 상한 셋(shortcut 당 100건, 전체 1,000건, 전체 3MiB) 중 하나라도 넘으면 전체에서
- *     가장 오래된 레코드부터 지운다. quota 오류가 나면 한 번 더 지우고 1회만 재시도한다.
+ *     가장 오래된 레코드부터 지운다. 용량 초과 오류일 때만 가장 오래된 1건씩 최대 3회
+ *     지우고 다시 시도한다(다른 오류는 그대로 던진다).
  *     `chrome.storage.local` 은 `unlimitedStorage` 없이 10MB 이고 shortcut·userscript
  *     저장소와 그 공간을 나눠 쓴다.
  */
@@ -116,6 +117,11 @@ export interface RunRecord {
   warnings?: string[];
   /** 예약 레코드의 revision. 실행 중 예약이 바뀌었는지 판정한다. */
   revision?: number;
+  /**
+   * 시작할 때 본 예약 레코드의 `generation` (저장소 전역 단조 값). revision 은 예약을
+   * 지웠다 다시 걸면 같은 값으로 돌아올 수 있어(ABA) 이 값으로 함께 판정한다.
+   */
+  generation?: number;
   /** 실행 중 예약이 바뀌어 재무장·상태 갱신을 건너뛴 실행. */
   superseded?: boolean;
 }
@@ -548,28 +554,70 @@ async function loadHistoryMap(): Promise<HistoryMap> {
   }
 }
 
+/** 저장 실패가 용량 초과인가. 이 판정이 맞을 때만 기록을 지운다. */
+export function isQuotaExceededError(error: unknown): boolean {
+  const text =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? `${error.name} ${error.message}`
+        : typeof (error as any)?.message === 'string'
+          ? (error as any).message
+          : '';
+  return /quota|QUOTA_BYTES|exceed|storage is full|too (?:large|big)/i.test(text);
+}
+
 /**
- * 상한을 맞춰 저장한다. quota 오류가 나면 가장 오래된 것부터 한 번 더 지우고 1회만
- * 재시도한다. 두 번째도 실패하면 던진다 - 조용히 삼키면 아침에 "왜 기록이 없지" 가 된다.
+ * 전체에서 가장 오래된 레코드 하나만 지운 사본. 지울 것이 없으면 null.
+ * `protectRunId` 는 지금 쓰고 있는 레코드다 - 그것을 지우면 저장하는 의미가 없다.
  */
-async function persistHistoryMap(map: HistoryMap): Promise<void> {
-  const pruned = pruneHistory(map);
-  try {
-    await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: pruned });
-    return;
-  } catch (error) {
-    // quota 초과가 가장 흔한 원인이다. 절반으로 줄여 한 번만 더 시도한다.
-    const half = Math.max(1, Math.floor(MAX_RECORDS_TOTAL / 2));
-    const retry = pruneHistory(pruned, {
-      perShortcut: Math.max(1, Math.floor(MAX_RECORDS_PER_SHORTCUT / 2)),
-      total: half,
-      bytes: Math.floor(MAX_HISTORY_BYTES / 2),
-    });
-    console.warn(
-      '[shortcut-history] storage.set 실패, 오래된 기록을 지우고 1회 재시도합니다:',
-      error,
-    );
-    await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: retry });
+export function dropOldestRecord(map: HistoryMap, protectRunId?: string): HistoryMap | null {
+  let oldest: { name: string; index: number; startedAt: number } | null = null;
+  for (const name of Object.keys(map)) {
+    const list = Array.isArray(map[name]) ? map[name] : [];
+    for (let index = 0; index < list.length; index++) {
+      if (protectRunId !== undefined && list[index]?.runId === protectRunId) continue;
+      const startedAt = list[index]?.startedAt ?? 0;
+      if (oldest === null || startedAt < oldest.startedAt) oldest = { name, index, startedAt };
+    }
+  }
+  if (oldest === null) return null;
+  const out: HistoryMap = {};
+  for (const name of Object.keys(map)) out[name] = [...(map[name] ?? [])];
+  out[oldest.name].splice(oldest.index, 1);
+  if (out[oldest.name].length === 0) delete out[oldest.name];
+  return out;
+}
+
+/** quota 오류로 재시도하는 최대 횟수 (매번 가장 오래된 1건만 지운다). */
+export const QUOTA_RETRY_LIMIT = 3;
+
+/**
+ * 상한을 맞춰 저장한다.
+ *
+ * 2026-09-05 Codex 리뷰 9: 예전에는 `set` 이 **어떤 이유로 실패하든** 보관량을 절반으로
+ * 잘라 다시 썼다. 확장 컨텍스트 무효화·직렬화 실패처럼 용량과 무관한 오류에도 밤새 쌓인
+ * 이력의 절반이 사라졌다. 이제 용량 초과로 보일 때만, 가장 오래된 1건씩 최대 3회 지운다.
+ * 용량 문제가 아니면 그대로 던진다 - 조용히 삼키면 아침에 "왜 기록이 없지" 가 된다.
+ */
+async function persistHistoryMap(map: HistoryMap, protectRunId?: string): Promise<void> {
+  let payload = pruneHistory(map);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: payload });
+      return;
+    } catch (error) {
+      if (!isQuotaExceededError(error) || attempt >= QUOTA_RETRY_LIMIT) throw error;
+      const smaller = dropOldestRecord(payload, protectRunId);
+      if (smaller === null) throw error;
+      console.warn(
+        `[shortcut-history] 저장소 용량 초과, 가장 오래된 기록 1건을 지우고 다시 시도합니다 (${
+          attempt + 1
+        }/${QUOTA_RETRY_LIMIT}):`,
+        error,
+      );
+      payload = smaller;
+    }
   }
 }
 
@@ -584,6 +632,8 @@ export interface StartRunInput {
   trigger: RunTrigger;
   startedAt?: number;
   revision?: number;
+  /** 예약 레코드의 저장소 전역 단조 값 (예약 실행만 싣는다). */
+  generation?: number;
   secrets?: readonly string[];
 }
 
@@ -600,6 +650,7 @@ export async function startRunRecord(input: StartRunInput): Promise<RunRecord> {
     startedAt: input.startedAt ?? Date.now(),
   };
   if (input.revision !== undefined) record.revision = input.revision;
+  if (input.generation !== undefined) record.generation = input.generation;
 
   const masked = maskRecordSecrets(record, input.secrets ?? []);
   markRunActive(masked.runId);
@@ -607,7 +658,7 @@ export async function startRunRecord(input: StartRunInput): Promise<RunRecord> {
     const map = await loadHistoryMap();
     const list = Array.isArray(map[masked.name]) ? [...map[masked.name]] : [];
     map[masked.name] = [masked, ...list.filter((r) => r?.runId !== masked.runId)];
-    await persistHistoryMap(map);
+    await persistHistoryMap(map, masked.runId);
   });
   return masked;
 }
@@ -649,7 +700,7 @@ export async function finishRunRecord(
     if (index >= 0) list[index] = merged;
     else list.unshift(merged);
     map[name] = list;
-    await persistHistoryMap(map);
+    await persistHistoryMap(map, runId);
     return merged;
   });
 }
@@ -661,7 +712,11 @@ export async function finishRunRecord(
  * 종료 처리를 못 한 실행이 영원히 "실행 중" 으로 남으면 아침에 판단할 수 없고, 예약
  * 재실행의 이중 실행 방지(`runId` claim)도 흔들린다.
  */
-export async function markRunningAsInterrupted(now: number = Date.now()): Promise<RunRecord[]> {
+export async function markRunningAsInterrupted(
+  now: number = Date.now(),
+  protectedRunIds: readonly string[] = [],
+): Promise<RunRecord[]> {
+  const protectedSet = new Set(protectedRunIds);
   return await enqueue(async () => {
     const map = await loadHistoryMap();
     const changed: RunRecord[] = [];
@@ -671,6 +726,8 @@ export async function markRunningAsInterrupted(now: number = Date.now()): Promis
         if (!record || record.status !== 'running') return record;
         // 이 워커가 지금 돌리고 있는 실행은 죽은 것이 아니다.
         if (activeRunIds.has(record.runId)) return record;
+        // 다른 워커가 잠금을 쥐고 하트비트를 갱신 중인 실행도 살아 있다 (리뷰 4).
+        if (protectedSet.has(record.runId)) return record;
         const updated: RunRecord = {
           ...record,
           status: 'interrupted',

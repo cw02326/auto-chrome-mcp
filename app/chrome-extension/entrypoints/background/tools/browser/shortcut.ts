@@ -898,6 +898,8 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       nextAt: now,
       anchorAt: now,
       revision: 0,
+      // 실제 값은 putSchedule 이 저장소 전역 카운터에서 받아 채운다.
+      generation: 0,
       createdAt: now,
       updatedAt: now,
       timeZone: signature.timeZone,

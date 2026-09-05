@@ -786,6 +786,11 @@ export interface ActionExecutionContext {
   /** Tab the run started on; stays addressable after the run moves tabs. */
   entryTabId?: number;
   /**
+   * Tabs this run took an extra lease on (shared by reference with the run
+   * context) so the lock follows the run when it opens or moves to a tab.
+   */
+  leasedTabIds?: Set<number>;
+  /**
    * Owner token of the run's tab lease. Passed to `handleCallTool` as
    * `_leaseToken` so the pipeline can tell the lease owner's own calls from
    * another session competing for the same tab.

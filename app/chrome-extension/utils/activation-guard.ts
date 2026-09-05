@@ -14,6 +14,8 @@
  *
  * 예외로 남겨 둔 직접 호출부(의도적):
  *   - 이 모듈 자신과 utils/window-focus-guard.ts(비포커스 전용), utils/mcp-window-manager.ts
+ *   - utils/spawned-tab-tracker.ts 의 사용자 창 복귀(windows.update({focused:true}) 만,
+ *     대상이 사용자 창일 때. 탭 활성화는 이 모듈의 force 경로를 쓴다)
  *   - 사용자 UI 진입점: entrypoints/popup, entrypoints/sidepanel, quick-panel
  *   - 예외 도구 chrome_request_user_consent(사용자 대면 창)
  *

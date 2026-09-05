@@ -212,6 +212,25 @@ export interface RunStepsOptions {
    */
   beforeStep?: () => Promise<void> | void;
   /**
+   * auto-chrome-mcp fork(2026-09-05 Codex 리뷰 5): 이 실행의 **절대 마감 시각**.
+   * 예약 러너의 end-to-end 상한이 batch 자체 상한(100초)보다 앞설 수 있어, 러너가 준
+   * 마감을 그대로 쓴다. 주지 않으면 지금처럼 `MAX_BATCH_MS` 로 계산한다.
+   */
+  deadlineAt?: number;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 Codex 리뷰 5): 바깥에서 실행을 취소하는 신호.
+   * 예전에는 러너가 `Promise.race` 로 타임아웃 응답만 돌려주고 실행 자체는 계속 돌았다 -
+   * 도구 호출이 끝나면 취소된 실행이 탭을 더 열었다. 신호가 서면 진행 중인 도구 호출이
+   * 끝나는 대로 멈추고 `aborted` 를 실어 돌려준다.
+   */
+  signal?: { readonly aborted: boolean; readonly reason?: unknown };
+  /**
+   * auto-chrome-mcp fork(2026-09-05 Codex 리뷰 10): report 파일용 `return` 페이로드를
+   * 이 byte 상한으로 한 벌 더 만든다. 이력용 `returned` 는 24,000자에서 잘리므로 그것만
+   * 가지고는 설계가 약속한 256KiB report 를 끝까지 만들 수 없다.
+   */
+  reportLimitBytes?: number;
+  /**
    * 실행하는 동안 MCP 탭 그룹에 붙일 제목. 끝나면 "MCP" 로 돌아간다.
    * 무간섭 모드에서는 탭이 배경에 조용히 열리므로, 사용자가 무엇이 도는지 알 수 있는
    * 유일한 표시가 그룹 라벨이다.
@@ -227,6 +246,10 @@ export interface RunStepsOutcome {
   stoppedBy?: { step: number; reason: BatchStopReason };
   returned?: Record<string, unknown>;
   resultsTruncated?: string[];
+  /** `reportLimitBytes` 를 준 실행에서만. report 파일에 담을 더 큰 `return` 페이로드. */
+  reportReturned?: Record<string, unknown>;
+  /** 그 큰 상한에서도 빠진 이름들. */
+  reportTruncated?: string[];
   /** `beforeStep` 훅이 실행을 끊었을 때의 사유 (예: user_took_over_tab). */
   aborted?: { reason: string; message: string };
 }
@@ -559,6 +582,7 @@ interface RunContext {
   backgroundModeOn: boolean;
   forceBackground: boolean;
   beforeStep?: () => Promise<void> | void;
+  signal?: { readonly aborted: boolean; readonly reason?: unknown };
   aborted?: { reason: string; message: string };
   continueOnError: boolean;
   lane?: string;
@@ -588,6 +612,17 @@ function clearCapture(ctx: RunContext, name: string): void {
   if (!previous) return;
   ctx.capturedBytes -= previous.bytes;
   ctx.scope.named.delete(name);
+}
+
+/**
+ * 바깥에서 실행이 취소됐는가 (2026-09-05 Codex 리뷰 5). 취소됐으면 이력 status 로 쓸
+ * 사유와 문구를, 아니면 null 을 돌려준다.
+ */
+function abortSignalReason(ctx: RunContext): { reason: string; message: string } | null {
+  if (ctx.signal?.aborted !== true) return null;
+  const raw = ctx.signal.reason;
+  const reason = typeof raw === 'string' && /^[a-z][a-z0-9_]*$/.test(raw) ? raw : 'aborted';
+  return { reason, message: `${reason}: the run was cancelled before this step` };
 }
 
 /** 호출 직전 상한 검사. 넘었으면 그 이유를, 아니면 null 을 돌려준다. */
@@ -648,6 +683,16 @@ async function runSingleStep(
     return {
       result: { index, tool: toolName, ok: true, status: 'skipped' },
       stop: { reason: limit },
+    };
+  }
+
+  // 바깥이 실행을 취소했으면 도구를 더 부르지 않는다 (탭이 더 열리는 것을 막는다).
+  const cancelled = abortSignalReason(ctx);
+  if (cancelled) {
+    if (ctx.aborted === undefined) ctx.aborted = cancelled;
+    return {
+      result: { index, tool: toolName, ok: true, status: 'stopped', error: cancelled.message },
+      stop: { reason: 'aborted' },
     };
   }
 
@@ -981,6 +1026,9 @@ export async function runSteps(options: RunStepsOptions): Promise<RunStepsOutcom
     params,
     forceBackground,
     beforeStep,
+    deadlineAt,
+    signal,
+    reportLimitBytes,
     taskTitle,
   } = options;
 
@@ -1009,6 +1057,7 @@ export async function runSteps(options: RunStepsOptions): Promise<RunStepsOutcom
       backgroundModeOn,
       forceBackground: forceBackground === true,
       beforeStep,
+      signal,
       continueOnError: continueOnError === true,
       lane,
       mcpSessionId,
@@ -1016,7 +1065,14 @@ export async function runSteps(options: RunStepsOptions): Promise<RunStepsOutcom
       capturedBytes: 0,
       totalRuns: 0,
       // 상한은 흐름 제어가 켜진 호출에만 적용한다. v1 호출의 실행 의미를 바꾸지 않기 위해서다.
-      deadline: templatesEnabled ? Date.now() + MAX_BATCH_MS : null,
+      // 바깥이 더 이른 마감을 줬으면(예약 러너의 end-to-end 예산) 그쪽을 따른다.
+      deadline: templatesEnabled
+        ? typeof deadlineAt === 'number'
+          ? Math.min(deadlineAt, Date.now() + MAX_BATCH_MS)
+          : Date.now() + MAX_BATCH_MS
+        : typeof deadlineAt === 'number'
+          ? deadlineAt
+          : null,
     };
 
     let stoppedAtStep: number | undefined;
@@ -1066,6 +1122,11 @@ export async function runSteps(options: RunStepsOptions): Promise<RunStepsOutcom
       const { returned, truncated } = buildReturnPayload(returnNames, scope.named);
       outcome.returned = returned;
       if (truncated.length > 0) outcome.resultsTruncated = truncated;
+      if (typeof reportLimitBytes === 'number' && reportLimitBytes > 0) {
+        const report = buildReportPayload(returnNames, scope.named, reportLimitBytes);
+        outcome.reportReturned = report.returned;
+        if (report.truncated.length > 0) outcome.reportTruncated = report.truncated;
+      }
     }
     if (ctx.aborted !== undefined) outcome.aborted = ctx.aborted;
 
@@ -1208,6 +1269,45 @@ function buildReturnPayload(
       continue;
     }
     total += serialized.length;
+    returned[name] = capture.value;
+  }
+
+  return { returned, truncated };
+}
+
+/**
+ * report 파일용 `return` 페이로드 (2026-09-05 Codex 리뷰 10).
+ *
+ * 이력용 페이로드와 상한만 다르다: 항목 하나도 전체도 `limitBytes`(UTF-8 byte) 안에
+ * 담기며, 넘는 항목은 자르지 않고 통째로 뺀다. 잘린 JSON 은 파싱이 안 되기 때문이다.
+ */
+const reportEncoder = new TextEncoder();
+
+export function buildReportPayload(
+  names: string[],
+  named: Map<string, StepCapture>,
+  limitBytes: number,
+): { returned: Record<string, unknown>; truncated: string[] } {
+  const returned: Record<string, unknown> = {};
+  const truncated: string[] = [];
+  let total = 0;
+
+  for (const name of names) {
+    const capture = named.get(name);
+    if (!capture || capture.value === undefined) continue;
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(capture.value) ?? '';
+    } catch {
+      truncated.push(name);
+      continue;
+    }
+    const size = reportEncoder.encode(serialized).length;
+    if (size > limitBytes || total + size > limitBytes) {
+      truncated.push(name);
+      continue;
+    }
+    total += size;
     returned[name] = capture.value;
   }
 

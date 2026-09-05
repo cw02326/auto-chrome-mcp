@@ -9,6 +9,7 @@ import {
 import type { Edge as DagEdge, NodeBase as DagNode, Step } from './types';
 import { handleCallTool } from '../tools';
 import { createTab as createTabGuarded } from '@/utils/activation-guard';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 import { EDGE_LABELS } from 'auto-chrome-mcp-shared';
 import {
   RunTabError,
@@ -62,6 +63,21 @@ export function expandTemplatesDeep<T = any>(value: T, scope: Record<string, any
   return walk(value);
 }
 
+/**
+ * 취소되면 남은 시간을 기다리지 않고 곧바로 끝나는 sleep (2026-09-05 Codex 재확인 항목 3).
+ *
+ * 아래 폴링 루프들은 이미 매 바퀴 `signal.aborted` 를 확인한다. 문제는 확인과 확인 사이의
+ * 고정 sleep 이었다 — abort 가 와도 그 sleep 이 끝나야 루프가 다시 돌았다. 루프 쪽 계약은
+ * 그대로 두려고 던지지 않고 조용히 끝낸다.
+ */
+async function sleepOrAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  try {
+    await sleepWithSignal(ms, signal);
+  } catch {
+    // 취소됐다 — 호출한 루프가 다음 바퀴에서 곧바로 끝난다.
+  }
+}
+
 /** How long prepareRunTab waits for a navigation it started to settle. */
 const PREPARE_TAB_TIMEOUT_MS = 15_000;
 
@@ -90,7 +106,7 @@ async function waitForTabSettled(
     }
     if (!tab || tab.status !== 'loading') return;
     if (Date.now() >= deadline) return;
-    await new Promise((r) => setTimeout(r, 100));
+    await sleepOrAbort(100, signal);
   }
 }
 
@@ -183,7 +199,7 @@ export async function waitForNetworkIdle(
         inactivityTimeout: 0,
       }),
     });
-    await new Promise((r) => setTimeout(r, threshold + 200));
+    await sleepOrAbort(threshold + 200, tab.signal);
     const stopRes = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP,
       args: runToolArgs(tab, {}),
@@ -204,7 +220,7 @@ export async function waitForNetworkIdle(
     } catch {
       // ignore parse errors
     }
-    await new Promise((r) => setTimeout(r, Math.min(500, threshold)));
+    await sleepOrAbort(Math.min(500, threshold), tab.signal);
   }
   throw new Error('wait for network idle timed out');
 }

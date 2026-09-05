@@ -3,6 +3,7 @@ import { waitForNetworkIdle, waitForNavigation } from '../rr-utils';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { resolveRunTab } from '../engine/tab-context';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 export const waitNode: NodeRuntime<StepWait> = {
   validate: (step) => {
@@ -44,7 +45,9 @@ export const waitNode: NodeRuntime<StepWait> = {
       await waitForNavigation(ctx, (s as any).timeoutMs);
     } else if ('sleep' in cond) {
       const ms = Math.max(0, Number(cond.sleep ?? 0));
-      await new Promise((r) => setTimeout(r, ms));
+      // 취소를 무시하는 고정 sleep 이었다 — 60초 sleep 하나면 abort 뒤에도 60초를 더 돌았다
+      // (2026-09-05 Codex 재확인 항목 3).
+      await sleepWithSignal(ms, ctx.signal);
     } else if ('selector' in cond) {
       const tabId = await resolveRunTab(ctx);
       const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;

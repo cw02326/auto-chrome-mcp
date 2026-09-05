@@ -144,11 +144,27 @@ function screenshotExtension(userFilename?: string): 'jpg' | 'png' {
  * 공통으로 호출되며, 실패해도 스크린샷 자체는 성공으로 유지한다(호출부에서 saveError 만 첨부).
  * 저장 위치는 `mcp-screenshots/YYYY-MM-DD/` 하나로 통일된다.
  */
+/**
+ * data: URL 이 담고 있는 실제 바이트 수.
+ *
+ * auto-chrome-mcp fork(2026-09-05 Codex 재확인 항목 7): 저장된 파일 크기를 알려면 예전에는
+ * 호출자가 base64 문자열 자체를 돌려받아 길이를 재야 했다(record-replay 스크린샷 노드가
+ * 그랬다). 크기 하나 때문에 이미지 바이트를 통째로 나르는 셈이라, 여기서 크기만 계산해
+ * 응답에 싣는다.
+ */
+function dataUrlByteLength(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',');
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : '';
+  if (!base64) return 0;
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
 async function saveScreenshotToDownloads(
   dataUrl: string,
   filename?: string,
 ): Promise<
-  | { saved: true; downloadId: number; savedFilename: string; fullPath?: string }
+  | { saved: true; downloadId: number; savedFilename: string; fullPath?: string; bytes: number }
   | { saved: false; saveError: string }
 > {
   try {
@@ -162,6 +178,7 @@ async function saveScreenshotToDownloads(
       saved: true,
       downloadId: saved.downloadId,
       savedFilename: saved.filename,
+      bytes: dataUrlByteLength(dataUrl),
       ...(saved.fullPath ? { fullPath: saved.fullPath } : {}),
     };
   } catch (error) {
@@ -515,7 +532,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       // auto-chrome-mcp fork: 캡처 성공 후(모든 경로 공통) saveToDownloads 요청 시 다운로드로 저장.
       // 실패해도 스크린샷 자체는 성공 처리하고 saveError 만 응답에 첨부한다.
       let downloadsSaveResult:
-        | { saved: true; downloadId: number; savedFilename: string }
+        | {
+            saved: true;
+            downloadId: number;
+            savedFilename: string;
+            fullPath?: string;
+            /** 저장된 파일 크기. 호출자가 base64 를 되받지 않고도 크기를 알 수 있게 싣는다. */
+            bytes: number;
+          }
         | { saved: false; saveError: string }
         | undefined;
       if (saveToDownloads === true) {

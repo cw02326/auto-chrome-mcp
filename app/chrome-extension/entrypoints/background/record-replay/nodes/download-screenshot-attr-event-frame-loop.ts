@@ -40,14 +40,30 @@ export interface ScreenshotArtifactRef {
   bytes: number;
 }
 
-function toScreenshotRef(payload: any): ScreenshotArtifactRef {
-  const base64 = typeof payload?.base64Data === 'string' ? payload.base64Data : '';
+/** 저장된 파일의 크기를 다운로드 항목에서 읽는다. 못 읽으면 0. */
+async function downloadFileBytes(downloadId: unknown): Promise<number> {
+  if (typeof downloadId !== 'number' || !Number.isFinite(downloadId)) return 0;
+  try {
+    const items: any[] = (await chrome.downloads?.search?.({ id: downloadId })) ?? [];
+    const item = items[0];
+    const bytes = Number(item?.fileSize ?? item?.totalBytes ?? 0);
+    return Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function toScreenshotRef(payload: any): Promise<ScreenshotArtifactRef> {
+  const reported = Number(payload?.bytes);
+  const bytes =
+    Number.isFinite(reported) && reported > 0
+      ? reported
+      : await downloadFileBytes(payload?.downloadId);
   return {
     kind: 'screenshot',
     filename: payload?.filename || payload?.savedFilename || undefined,
     fullPath: payload?.fullPath || undefined,
-    // base64 4자 = 3바이트. 문자열 자체는 버리고 크기만 남긴다.
-    bytes: Math.floor((base64.length * 3) / 4),
+    bytes,
   };
 }
 
@@ -55,13 +71,14 @@ export const screenshotNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     // saveToDownloads: 참조로 남기려면 파일이 실제로 있어야 한다.
-    // includeBase64InText 는 확장 내부 전용 플래그다. 여기서는 크기(bytes)를 계산하는
-    // 데만 쓰고 문자열은 변수에 넣지 않는다.
+    // base64 는 받지 않는다 (2026-09-05 Codex 재확인 항목 7). 예전에는 크기 계산 하나 때문에
+    // includeBase64InText 로 이미지 바이트를 통째로 돌려받았다 — 스크린샷 한 장에 수 MB 를
+    // 확장 내부에서 나르고 곧바로 버리는 낭비였다. 이제 도구 응답의 bytes 를 쓰고, 그것이
+    // 없으면 chrome.downloads 로 저장된 파일 크기를 조회한다.
     const args: any = {
       name: 'workflow',
       storeBase64: true,
       saveToDownloads: true,
-      includeBase64InText: true,
     };
     if (s.fullPage) args.fullPage = true;
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
@@ -73,7 +90,7 @@ export const screenshotNode: NodeRuntime<any> = {
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
       const payload = text ? JSON.parse(text) : null;
-      if (s.saveAs && payload) ctx.vars[s.saveAs] = toScreenshotRef(payload);
+      if (s.saveAs && payload) ctx.vars[s.saveAs] = await toScreenshotRef(payload);
     } catch {}
     return {} as ExecResult;
   },

@@ -1,5 +1,6 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { getRunTabInfo } from '../engine/tab-context';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -57,7 +58,8 @@ export const executeFlowNode: NodeRuntime<any> = {
               ? baseInterval * Math.pow(2, i)
               : baseInterval
             : 0;
-        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+        // 재시도 간격도 취소를 본다 (2026-09-05 Codex 재확인 항목 3).
+        if (delay > 0) await sleepWithSignal(delay, ctx.signal);
       };
       while (true) {
         try {

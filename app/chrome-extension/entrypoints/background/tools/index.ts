@@ -15,7 +15,7 @@ import {
   EFFECTIVE_BACKGROUND_MODE_ARG,
   stripEffectiveBackgroundMode,
 } from '@/utils/background-mode';
-import { withTabLock } from '@/utils/tab-lock';
+import { LEASE_TOKEN_ARG, withTabLock } from '@/utils/tab-lock';
 import { applyAutomationGuard } from '@/utils/automation-guard';
 import {
   FlowDeadlineExceededError,
@@ -305,6 +305,21 @@ export const handleCallTool = async (param: ToolCallParam) => {
     ]);
     const lockTabId = REENTRANT_TOOLS.has(param.name) ? undefined : trackedTabId;
 
+    // auto-chrome-mcp fork(2026-09-05 Codex 재확인 항목 1): 흐름 실행이 쥔 탭 리스의 토큰.
+    //
+    // 노드가 부르는 도구 호출에는 `_leaseToken` 이 실려 온다. 그 토큰을 잠금에 넘겨야
+    // "이 탭을 이미 쥔 run 이 다시 들어온 것" 과 "다른 세션이 같은 탭을 원하는 것" 이
+    // 구분된다. 이게 없으면 run 이 자기 리스에 막혀 첫 노드에서 교착하므로, 예전에는
+    // 리스 차단 모드를 아예 끄고 살았다.
+    //
+    // 토큰은 **도구에 넘기지 않는다.** 내부 식별자일 뿐이고, 도구 인자로 흘러가면 스키마에
+    // 없는 키가 구현부와 로그에 그대로 노출된다.
+    const leaseToken =
+      args !== null && typeof args === 'object' && typeof args[LEASE_TOKEN_ARG] === 'string'
+        ? (args[LEASE_TOKEN_ARG] as string)
+        : undefined;
+    if (leaseToken !== undefined) delete args[LEASE_TOKEN_ARG];
+
     // auto-chrome-mcp fork: 팝업·새 창 인지 — 이 호출이 대상 탭(또는 세션 작업 탭)에서
     // 새 탭/팝업 창을 열었으면 결과에 알림을 첨부한다. 이게 없으면 모델은 팝업이
     // 열린 사실을 모르고 원래 탭에만 명령을 보내다 실패한다.
@@ -334,19 +349,23 @@ export const handleCallTool = async (param: ToolCallParam) => {
     // 병렬 작업 탭을 유휴로 오인해 닫지 않게 한다.
     touchOwnedTab(trackedTabId);
 
-    const result = (await withTabLock(lockTabId, () => {
-      // 락 대기가 가장 긴 구간이다 — 락을 잡은 직후 다시 확인하고, 워치독에는 그 시점의
-      // 남은 시간을 넘긴다(예전에는 step 시작 시점의 낡은 값이 들어갔다).
-      assertWithinFlowDeadline(param.name, param.deadlineAt, 'after acquiring the tab lock');
-      return runWithWatchdog<ToolResult>(
-        param.name,
-        args,
-        () => tool.execute(args),
-        (message) => createErrorResponse(message),
-        WATCHDOG_OVERRIDES,
-        remainingFlowBudgetMs(param.deadlineAt),
-      );
-    })) as ToolResult;
+    const result = (await withTabLock(
+      lockTabId,
+      () => {
+        // 락 대기가 가장 긴 구간이다 — 락을 잡은 직후 다시 확인하고, 워치독에는 그 시점의
+        // 남은 시간을 넘긴다(예전에는 step 시작 시점의 낡은 값이 들어갔다).
+        assertWithinFlowDeadline(param.name, param.deadlineAt, 'after acquiring the tab lock');
+        return runWithWatchdog<ToolResult>(
+          param.name,
+          args,
+          () => tool.execute(args),
+          (message) => createErrorResponse(message),
+          WATCHDOG_OVERRIDES,
+          remainingFlowBudgetMs(param.deadlineAt),
+        );
+      },
+      { token: leaseToken },
+    )) as ToolResult;
 
     if (openerCandidates.length > 0 && result && Array.isArray(result.content)) {
       const spawned = getSpawnedTabsSince(spawnWatchStart, openerCandidates);

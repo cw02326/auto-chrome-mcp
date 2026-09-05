@@ -16,6 +16,10 @@ import {
   firstInstantAtOrAfterWall,
   nextDailyAt,
   nextEveryAt,
+  patchSchedule,
+  putSchedule,
+  readSchedule,
+  removeSchedule,
   scheduleNameFromAlarm,
   scheduleRunId,
   validateLoginCheck,
@@ -67,6 +71,21 @@ async function saveShortcut(extra: Record<string, unknown> = {}) {
     ],
     ...extra,
   } as any);
+}
+
+/** putSchedule 에 넣을 최소 레코드. */
+function baseRecord(over: Partial<ScheduleRecord> & { name: string }) {
+  const now = Date.now();
+  return {
+    schedule: { every: '1h' },
+    notify: true,
+    report: false,
+    nextAt: now + 60_000,
+    anchorAt: now,
+    timeZone: 'Asia/Seoul',
+    offsetMinutes: -540,
+    ...over,
+  } as Parameters<typeof putSchedule>[0];
 }
 
 let ctx: ReturnType<typeof stubChrome>;
@@ -388,6 +407,22 @@ describe('15. 시각 계산과 DST', () => {
     expect(d.getTimezoneOffset()).toBe(240);
   });
 
+  it('fall-back 날의 01:45 도 앞선(여름시간) 쪽 1회다', () => {
+    // 2026-09-05 Codex 리뷰 8: 예전 구현은 이분 탐색이었다. fall-back 날의 벽시계는
+    // 01:59 다음에 01:00 으로 되돌아가 "01:45 이상" 조건이 참 -> 거짓 -> 참으로 갈리고,
+    // 탐색이 뒤엣것(표준시 01:45)을 골랐다. 01:30 은 우연히 통과해 드러나지 않았다.
+    process.env.TZ = 'America/New_York';
+    const dayStart = new Date(2026, 10, 1, 0, 0, 0, 0);
+    expect(dayStart.getTimezoneOffset()).toBe(240);
+    const due = firstInstantAtOrAfterWall(dayStart.getTime(), 60 + 45);
+    expect(due).not.toBeNull();
+    const d = new Date(due as number);
+    expect(d.getHours()).toBe(1);
+    expect(d.getMinutes()).toBe(45);
+    // 앞선(EDT, -4) 쪽이다. 뒤엣것이면 오프셋이 300 이 된다.
+    expect(d.getTimezoneOffset()).toBe(240);
+  });
+
   it('daily 는 days 로 요일을 거른다', () => {
     // 2026-09-05 는 토요일이다. 평일만 도는 예약의 다음 due 는 월요일 08:00.
     const from = new Date(2026, 8, 5, 12, 0, 0, 0).getTime();
@@ -422,6 +457,44 @@ describe('15. 시각 계산과 DST', () => {
   it('runId 는 이름과 due 시각으로 결정된다 (두 경로가 같은 키를 만든다)', () => {
     const due = Date.UTC(2026, 8, 5, 8, 0, 0);
     expect(scheduleRunId('a', due)).toBe('a:2026-09-05T08:00:00.000Z');
+  });
+});
+
+describe('3(리뷰). 저장소 전역 generation 과 CAS', () => {
+  it('예약을 지웠다 다시 걸면 revision 은 돌아와도 generation 은 오른다', async () => {
+    const first = await putSchedule(baseRecord({ name: 'a' }));
+    expect(first.ok).toBe(true);
+    const firstRecord = (first as { ok: true; record: ScheduleRecord }).record;
+    expect(firstRecord.revision).toBe(1);
+
+    await removeSchedule('a');
+    const second = await putSchedule(baseRecord({ name: 'a' }));
+    const secondRecord = (second as { ok: true; record: ScheduleRecord }).record;
+    // revision 은 1 로 돌아온다(ABA). generation 은 절대 돌아오지 않는다.
+    expect(secondRecord.revision).toBe(1);
+    expect(secondRecord.generation).toBeGreaterThan(firstRecord.generation);
+  });
+
+  it('generation 이 다르면 patchSchedule 이 아무것도 쓰지 않는다', async () => {
+    const saved = await putSchedule(baseRecord({ name: 'b' }));
+    const record = (saved as { ok: true; record: ScheduleRecord }).record;
+
+    const stale = await patchSchedule(
+      'b',
+      { lastStatus: 'failed' },
+      { generation: record.generation - 1 },
+    );
+    expect(stale).toBeNull();
+    expect((await readSchedule('b'))?.lastStatus).toBeUndefined();
+
+    const fresh = await patchSchedule(
+      'b',
+      { lastStatus: 'failed' },
+      { generation: record.generation },
+    );
+    expect(fresh?.lastStatus).toBe('failed');
+    // 살림살이 갱신은 generation 을 올리지 않는다 (러너의 결과 기록이 밀려나지 않게).
+    expect(fresh?.generation).toBe(record.generation);
   });
 });
 

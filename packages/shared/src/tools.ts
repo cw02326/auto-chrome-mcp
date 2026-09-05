@@ -210,19 +210,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         steps: {
           type: 'array',
           description:
-            'action="save": chrome_batch steps, max 20. Each: { tool: string, args?: object }, or a repeat group',
-          items: {
-            type: 'object',
-            properties: {
-              tool: { type: 'string' },
-              args: { type: 'object' },
-              as: { type: 'string', description: P_STEP_AS },
-              when: { type: 'object', description: P_WHEN },
-              stopIf: { type: 'object', description: P_STOP_IF },
-              repeat: { type: 'object', description: P_REPEAT },
-              steps: { type: 'array', description: P_GROUP_STEPS },
-            },
-          },
+            'action="save": same shape as chrome_batch.steps (max 20, tool/args, or a repeat group).',
+          items: { type: 'object' },
         },
         description: { type: 'string', description: 'action="save": what this shortcut does' },
         continueOnError: {
@@ -719,7 +708,9 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      '[Prefer chrome_read_page, or chrome_computer action="screenshot"] Take a screenshot of the page or an element. Use this tool only when you need its advanced options.',
+      '[Prefer chrome_read_page, or chrome_computer action="screenshot"] Take a screenshot of the page or an element. Use this tool only when you need its advanced options. ' +
+      'With storeBase64, the image arrives as a separate MCP image content block in image pixels (chrome_computer converts coordinates via imageScale automatically), not base64 in this text; ' +
+      'a saved file path (savePng/saveToDownloads) is included in the response.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1085,7 +1076,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:
-      'Execute JavaScript in a tab and return the result. Uses CDP Runtime.evaluate (awaitPromise, returnByValue) and falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+      'Execute JavaScript in a tab and return the result, falling back automatically to a different execution path if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1359,7 +1350,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-    description: 'Upload files to file-input form elements using Chrome DevTools Protocol',
+    description: 'Upload files to file-input form elements.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1399,7 +1390,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
-    description: 'Handle JavaScript dialogs (alert/confirm/prompt) via CDP',
+    description: 'Handle JavaScript dialogs (alert/confirm/prompt).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1587,7 +1578,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.STORAGE,
     description:
-      'Read or modify cookies, localStorage, or sessionStorage. Use it to save/restore a login session, test the logged-out state, pre-seed a consent cookie, or inspect front-end state. VALUES are masked by default (names/domains/expiry still returned); pass includeValues:true only when you need the secrets.',
+      'Read or modify cookies, localStorage, or sessionStorage. VALUES are masked by default (names/domains/expiry still returned); pass includeValues:true only when you need the secrets.',
     inputSchema: {
       type: 'object',
       properties: {

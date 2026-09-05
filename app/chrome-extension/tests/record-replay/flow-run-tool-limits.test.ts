@@ -172,7 +172,12 @@ describe('record_replay_flow_run 의 실행 경계', () => {
             {
               type: 'text',
               text: JSON.stringify({
+                // 옛 응답에 섞여 있던 base64 는 무시하고, 크기는 bytes 로만 읽는다
+                // (2026-09-05 재확인 항목 7).
                 base64Data: base64,
+                // base64 길이(120_000자 = 90_000바이트)와 일부러 다른 값이다. 옛 코드처럼
+                // base64 로 크기를 재면 90_000 이 나와 바로 드러난다.
+                bytes: 4_096,
                 filename: 'mcp-screenshots/2026-09-05/workflow.png',
                 fullPath: 'C:/Users/u/Downloads/mcp-screenshots/2026-09-05/workflow.png',
               }),
@@ -192,7 +197,7 @@ describe('record_replay_flow_run 의 실행 경계', () => {
       kind: 'screenshot',
       filename: 'mcp-screenshots/2026-09-05/workflow.png',
     });
-    expect(payload.outputs.shot.bytes).toBeGreaterThan(0);
+    expect(payload.outputs.shot.bytes).toBe(4_096);
   });
 });
 

@@ -212,6 +212,8 @@ export class StepRunner {
           count: Math.max(0, step.retry?.count ?? 0),
           intervalMs: Math.max(0, step.retry?.intervalMs ?? 0),
           backoff: step.retry?.backoff || 'none',
+          // 재시도 백오프도 취소를 본다 (2026-09-05 Codex 재확인 항목 3).
+          signal: ctx.signal,
         },
       );
     } catch (e: unknown) {

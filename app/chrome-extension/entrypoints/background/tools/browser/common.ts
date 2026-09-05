@@ -559,7 +559,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: 'Successfully refreshed current tab',
                 tabId: updatedTab.id,
                 windowId: updatedTab.windowId,
                 url: updatedTab.url,
@@ -622,7 +621,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: `Successfully navigated ${url} in browser history`,
                 tabId: updatedTab.id,
                 windowId: updatedTab.windowId,
                 url: updatedTab.url,
@@ -745,7 +743,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: navigatedExplicitTab ? 'Navigated existing tab' : 'Activated existing tab',
+                // 옛 message 프로즈("Navigated existing tab" / "Activated existing tab")를
+                // 구조화 필드로 대체 — url 이 바뀌어 갱신했는지, 이미 맞는 탭을 활성화만
+                // 했는지는 이 플래그로 판별한다.
+                navigatedExplicitTab,
                 tabId: updatedTab.id,
                 windowId: updatedTab.windowId,
                 url: updatedTab.url,
@@ -793,7 +794,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 type: 'text',
                 text: JSON.stringify({
                   success: true,
-                  message: 'Opened URL in new window',
                   windowId: createdWindow.id,
                   tabs: createdWindow.tabs
                     ? createdWindow.tabs.map((tab) => ({
@@ -851,7 +851,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   type: 'text',
                   text: JSON.stringify({
                     success: true,
-                    message: 'Reused MCP work tab',
                     tabId: ownedTabId,
                     windowId: reusedTab.windowId,
                     url,
@@ -932,9 +931,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 type: 'text',
                 text: JSON.stringify({
                   success: true,
-                  message: dedicated
-                    ? 'Opened URL in new tab in MCP work window'
-                    : 'Opened URL in new background tab in current window',
+                  // 옛 message 프로즈가 나르던 신호(전용 MCP 작업 창 vs 현재 창)를 구조화
+                  // 필드로 대체.
+                  dedicated,
                   tabId: mcpTab.id,
                   windowId: workWindow.id,
                   url: mcpTab.url,
@@ -989,7 +988,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 type: 'text',
                 text: JSON.stringify({
                   success: true,
-                  message: 'Opened URL in new tab in existing window',
                   tabId: newTab.id,
                   windowId: targetWindow.id,
                   url: newTab.url,
@@ -1029,7 +1027,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   type: 'text',
                   text: JSON.stringify({
                     success: true,
-                    message: 'Opened URL in new window',
                     windowId: fallbackWindow.id,
                     tabs: fallbackWindow.tabs
                       ? fallbackWindow.tabs.map((tab) => ({

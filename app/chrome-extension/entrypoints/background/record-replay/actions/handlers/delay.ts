@@ -7,6 +7,7 @@
 
 import { failed, invalid, ok, tryResolveNumber } from '../registry';
 import type { ActionHandler } from '../types';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 /** Maximum delay time to prevent integer overflow in setTimeout */
 const MAX_DELAY_MS = 2_147_483_647;
@@ -35,7 +36,12 @@ export const delayHandler: ActionHandler<'delay'> = {
     const ms = Math.max(0, Math.min(MAX_DELAY_MS, Math.floor(resolved.value)));
 
     if (ms > 0) {
-      await new Promise((resolve) => setTimeout(resolve, ms));
+      // run 이 취소되면 남은 시간을 기다리지 않는다 (2026-09-05 Codex 재확인 항목 3).
+      try {
+        await sleepWithSignal(ms, ctx.signal);
+      } catch (e) {
+        return failed('TIMEOUT', e instanceof Error ? e.message : String(e));
+      }
     }
 
     return { status: 'success' };

@@ -55,11 +55,19 @@ export async function maybeQuickWaitForNav(
         try {
           chrome.tabs.onUpdated.removeListener(onUpdated);
         } catch {}
+        try {
+          tab.signal?.removeEventListener('abort', onAbort);
+        } catch {}
         if (timer) {
           try {
             clearTimeout(timer);
           } catch {}
         }
+      };
+      // 취소되면 짧은 정찰 대기도 곧바로 끝낸다 (2026-09-05 Codex 재확인 항목 3).
+      const onAbort = () => {
+        cleanup();
+        resolve();
       };
       const finish = async () => {
         cleanup();
@@ -98,6 +106,13 @@ export async function maybeQuickWaitForNav(
         (chrome.webNavigation as any).onHistoryStateUpdated?.addListener?.(onHistoryStateUpdated);
       } catch {}
       chrome.tabs.onUpdated.addListener(onUpdated);
+      try {
+        tab.signal?.addEventListener('abort', onAbort, { once: true });
+      } catch {}
+      if (tab.signal?.aborted) {
+        onAbort();
+        return;
+      }
       timer = setTimeout(finish, sniffMs);
     });
   } catch {}

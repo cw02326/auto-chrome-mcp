@@ -243,6 +243,9 @@ class ExecutionOrchestrator {
     // The run context is the caller's object, augmented in place. Tabs the run
     // opens are tracked here so tab steps and cleanup share one set.
     if (!this.tab.ownedTabIds) this.tab.ownedTabIds = new Set<number>();
+    // 흐름이 옮겨가거나 새로 여는 탭의 리스를 담을 자리. 여기서 미리 만들어야 액션 경로의
+    // 파생 컨텍스트가 같은 Set 을 참조한다 (2026-09-05 Codex 재확인 항목 2).
+    if (!this.tab.leasedTabIds) this.tab.leasedTabIds = new Set<number>();
     // 시작 탭은 계속 사정권에 둔다(돌아올 수 있어야 한다). 소유 집합에는 넣지 않는다 —
     // run 이 만든 탭이 아니므로 abort 정리가 닫으면 안 된다.
     if (this.tab.entryTabId === undefined) this.tab.entryTabId = this.tab.tabId;
@@ -1041,7 +1044,12 @@ class ExecutionOrchestrator {
       }
     } catch {}
     // 마지막에 닫는다: 오버레이 종료·네트워크 캡처 정리가 아직 탭을 쓰기 때문이다.
-    if (this.aborted) await this.closeOwnedTabs();
+    //
+    // 판단은 `aborted` 플래그가 아니라 신호를 직접 본다 (2026-09-05 Codex 재확인 항목 6).
+    // 스텝 한가운데서 취소되면 그 스텝은 실패로 닫히고 순회가 거기서 끝나, 플래그를 세우는
+    // `checkAbort()` 를 다시 지나지 않는다. 그래서 예전에는 취소된 run 이 자기가 연 탭을
+    // 그대로 남겼다.
+    if (this.aborted || this.abortRequested()) await this.closeOwnedTabs();
   }
 }
 

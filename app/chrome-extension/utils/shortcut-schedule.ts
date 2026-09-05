@@ -27,6 +27,16 @@ import type { FinalRunStatus } from './shortcut-history';
 /** 예약 레코드 저장소 키. */
 export const SCHEDULE_STORAGE_KEY = 'mcpShortcutSchedules';
 
+/**
+ * 저장소 전역 단조 증가 카운터 키 (2026-09-05 Codex 리뷰 3).
+ *
+ * `revision` 은 레코드마다 1부터 다시 시작한다. 그래서 실행 도중 사용자가 예약을 지웠다가
+ * 같은 이름으로 다시 걸면 revision 이 옛 값과 같아질 수 있고(ABA), 끝난 실행이 "내 예약이
+ * 그대로다" 로 오판해 지워졌던 예약을 다시 무장한다. 이 카운터는 예약 저장소 전체에서
+ * 한 번 쓴 값을 다시 쓰지 않으므로 그 오판을 없앤다.
+ */
+export const SCHEDULE_GENERATION_KEY = 'mcpShortcutScheduleGeneration';
+
 /** 예약 최대 개수. shortcut 50개 중 매일 돌 것은 소수이고, 알람 20개는 크롬 상한 안이다. */
 export const MAX_SCHEDULES = 20;
 
@@ -72,6 +82,11 @@ export interface ScheduleRecord {
   /** `every` 격자의 기준점. 실행이 밀려도 격자는 이 값에서 센다. */
   anchorAt: number;
   revision: number;
+  /**
+   * 저장소 전역 단조 값. 레코드가 바뀔 때마다 새 값을 받고 같은 값을 다시 쓰지 않는다.
+   * 실행 중이던 run 은 이 값으로 "내가 시작할 때의 그 예약이 맞는가" 를 판정한다.
+   */
+  generation: number;
   createdAt: number;
   updatedAt: number;
   /** 레코드를 만들 때의 타임존. 달라지면 `nextAt` 을 전부 다시 계산한다. */
@@ -301,36 +316,47 @@ function startOfLocalDay(year: number, month: number, day: number): number {
   return new Date(year, month, day, 0, 0, 0, 0).getTime();
 }
 
+/** 되돌아가는 벽시계(fall-back)를 덮기 위해 목표 시각 앞뒤로 훑는 폭. */
+const WALL_SCAN_MARGIN_MS = 3 * 60 * MINUTE_MS;
+
 /**
  * `dayStart` 가 속한 로컬 날짜에서 벽시계가 `minutes` 이상이 되는 **가장 이른 순간**.
  * 그 날 안에 그런 순간이 없으면 null (하루가 통째로 건너뛰어진 극단적 존 변경).
  *
  * 이 한 규칙이 DST 두 경우를 모두 덮는다:
  *   - spring-forward 로 02:30 이 없는 날 -> 03:00 (건너뛴 직후 첫 존재하는 순간) 1회
- *   - fall-back 으로 01:30 이 두 번 오는 날 -> 앞선 01:30 1회
+ *   - fall-back 으로 01:45 가 두 번 오는 날 -> 앞선(아직 여름시간인) 01:45 1회
+ *
+ * 2026-09-05 Codex 리뷰 8: 예전에는 이분 탐색이었다. 이분 탐색은 벽시계가 시간이 흐를수록
+ * 줄지 않는다고 전제하는데, fall-back 날의 벽시계는 01:59 다음에 01:00 으로 되돌아간다.
+ * 그래서 "01:45 이상" 이라는 조건이 참 -> 거짓 -> 참으로 두 번 갈리고, 탐색이 **뒤엣것**
+ * (표준시로 넘어간 01:45)을 골랐다. 실제 instant 를 분 단위로 훑어 첫 발생을 찾는다.
+ * 훑는 구간은 목표 시각 앞뒤 3시간이라 어떤 존의 전환 폭(최대 2시간)보다 넓다.
  */
 export function firstInstantAtOrAfterWall(dayStart: number, minutes: number): number | null {
   const key = dayKeyOf(dayStart);
-  const satisfied = (t: number): boolean => {
+  const base = new Date(dayStart);
+  // 순진한 후보(존재하지 않는 시각이면 크롬이 뒤로 밀어 준다)를 훑기의 중심으로 삼는다.
+  const guess = new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate(),
+    Math.floor(minutes / 60),
+    minutes % 60,
+    0,
+    0,
+  ).getTime();
+
+  const from = Math.max(dayStart, guess - WALL_SCAN_MARGIN_MS);
+  const until = Math.min(dayStart + 27 * 60 * MINUTE_MS, guess + WALL_SCAN_MARGIN_MS);
+
+  for (let t = from; t <= until; t += MINUTE_MS) {
     const k = dayKeyOf(t);
-    if (k > key) return true;
-    if (k < key) return false;
-    return wallMinutesOf(t) >= minutes;
-  };
-
-  // 로컬 벽시계는 시간이 흐를수록 줄지 않으므로(앞으로 뛰거나 제자리걸음) 이분 탐색이 된다.
-  let lo = dayStart;
-  let hi = dayStart + 26 * 60 * MINUTE_MS;
-  if (satisfied(lo)) return dayKeyOf(lo) === key ? lo : null;
-  if (!satisfied(hi)) return null;
-
-  while (hi - lo > MINUTE_MS) {
-    const mid = lo + Math.floor((hi - lo) / (2 * MINUTE_MS)) * MINUTE_MS;
-    if (mid === lo) break;
-    if (satisfied(mid)) hi = mid;
-    else lo = mid;
+    if (k > key) return null;
+    if (k < key) continue;
+    if (wallMinutesOf(t) >= minutes) return t;
   }
-  return dayKeyOf(hi) === key ? hi : null;
+  return null;
 }
 
 /**
@@ -484,7 +510,17 @@ async function loadMap(): Promise<ScheduleMap> {
   try {
     const result = await chrome.storage.local.get([SCHEDULE_STORAGE_KEY]);
     const raw = (result as any)?.[SCHEDULE_STORAGE_KEY];
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as ScheduleMap) : {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const map = raw as ScheduleMap;
+    // 이 필드가 생기기 전에 저장된 레코드는 generation 이 없다. 0 으로 채워야 CAS 가
+    // "값이 없으니 검사도 생략" 으로 흘러가지 않는다.
+    for (const name of Object.keys(map)) {
+      const record = map[name];
+      if (record && typeof record === 'object' && typeof record.generation !== 'number') {
+        record.generation = 0;
+      }
+    }
+    return map;
   } catch {
     return {};
   }
@@ -492,6 +528,44 @@ async function loadMap(): Promise<ScheduleMap> {
 
 async function persistMap(map: ScheduleMap): Promise<void> {
   await chrome.storage.local.set({ [SCHEDULE_STORAGE_KEY]: map });
+}
+
+/**
+ * 다음 generation 값. **직렬 큐 안에서만** 부른다 - 큐가 read-modify-write 를 하나로
+ * 세우므로 값이 겹치지 않는다. 저장에 실패해도 메모리 값은 올려, 같은 워커가 같은 값을
+ * 두 번 쓰는 일은 없게 한다.
+ */
+let cachedGeneration = 0;
+async function nextGeneration(): Promise<number> {
+  let stored = 0;
+  try {
+    const result = await chrome.storage.local.get([SCHEDULE_GENERATION_KEY]);
+    const raw = (result as any)?.[SCHEDULE_GENERATION_KEY];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) stored = Math.floor(raw);
+  } catch {
+    stored = 0;
+  }
+  const next = Math.max(stored, cachedGeneration) + 1;
+  cachedGeneration = next;
+  try {
+    await chrome.storage.local.set({ [SCHEDULE_GENERATION_KEY]: next });
+  } catch {
+    // 저장 실패는 다음 호출이 메모리 값에서 이어 간다.
+  }
+  return next;
+}
+
+/** 갱신 전에 확인할 값. 하나라도 어긋나면 아무것도 쓰지 않는다. */
+export interface ScheduleExpectation {
+  revision?: number;
+  generation?: number;
+}
+
+function matchesExpectation(record: ScheduleRecord, expect?: ScheduleExpectation): boolean {
+  if (!expect) return true;
+  if (expect.revision !== undefined && record.revision !== expect.revision) return false;
+  if (expect.generation !== undefined && record.generation !== expect.generation) return false;
+  return true;
 }
 
 /** 예약 전체. */
@@ -510,7 +584,10 @@ export async function readSchedule(name: string): Promise<ScheduleRecord | null>
  * (`replaced: true`). 새 이름이면 상한을 검사한다.
  */
 export async function putSchedule(
-  record: Omit<ScheduleRecord, 'revision' | 'createdAt' | 'updatedAt' | 'failStreak'> &
+  record: Omit<
+    ScheduleRecord,
+    'revision' | 'generation' | 'createdAt' | 'updatedAt' | 'failStreak'
+  > &
     Partial<Pick<ScheduleRecord, 'failStreak'>>,
   now: number = Date.now(),
 ): Promise<{ ok: true; record: ScheduleRecord; replaced: boolean } | { ok: false; error: string }> {
@@ -527,6 +604,7 @@ export async function putSchedule(
       ...record,
       failStreak: record.failStreak ?? 0,
       revision: (existing?.revision ?? 0) + 1,
+      generation: await nextGeneration(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -558,6 +636,7 @@ export async function bumpScheduleRevision(name: string): Promise<ScheduleRecord
     const updated: ScheduleRecord = {
       ...map[name],
       revision: map[name].revision + 1,
+      generation: await nextGeneration(),
       updatedAt: Date.now(),
     };
     map[name] = updated;
@@ -567,19 +646,23 @@ export async function bumpScheduleRevision(name: string): Promise<ScheduleRecord
 }
 
 /**
- * 레코드 일부를 갱신한다. `expectRevision` 을 주면 revision 이 다를 때 아무것도 하지 않고
- * null 을 돌려준다 (실행 도중 예약이 바뀐 경우 - `superseded`).
+ * 레코드 일부를 갱신한다. `expect` 를 주면 그 값이 다를 때 아무것도 하지 않고 null 을
+ * 돌려준다 (실행 도중 예약이 바뀐 경우 - `superseded`).
+ *
+ * `generation` 은 여기서 올리지 않는다. 이 함수가 쓰는 것은 `nextAt`·`lastStatus` 같은
+ * 살림살이이고, generation 은 "사용자가 예약을 새로 만들었다" 를 뜻하는 값이기 때문이다.
+ * 살림살이 갱신마다 올리면 러너의 결과 기록이 reconcile 의 nextAt 갱신에 밀려 사라진다.
  */
 export async function patchSchedule(
   name: string,
-  patch: Partial<Omit<ScheduleRecord, 'name' | 'revision'>>,
-  expectRevision?: number,
+  patch: Partial<Omit<ScheduleRecord, 'name' | 'revision' | 'generation'>>,
+  expect?: ScheduleExpectation,
 ): Promise<ScheduleRecord | null> {
   return await enqueue(async () => {
     const map = await loadMap();
     if (!Object.hasOwn(map, name)) return null;
     const current = map[name];
-    if (expectRevision !== undefined && current.revision !== expectRevision) return null;
+    if (!matchesExpectation(current, expect)) return null;
     const updated: ScheduleRecord = { ...current, ...patch, updatedAt: Date.now() };
     map[name] = updated;
     await persistMap(map);

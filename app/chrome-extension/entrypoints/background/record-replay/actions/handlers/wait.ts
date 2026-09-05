@@ -15,6 +15,7 @@ import { failed, invalid, ok, tryResolveNumber } from '../registry';
 import type { ActionHandler } from '../types';
 import { clampInt, resolveString, sendMessageToTab } from './common';
 import { runTabFromId } from '../../engine/tab-context';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 export const waitHandler: ActionHandler<'wait'> = {
   type: 'wait',
@@ -77,7 +78,12 @@ export const waitHandler: ActionHandler<'wait'> = {
         return failed('VALIDATION_ERROR', msResolved.error);
       }
       const ms = Math.max(0, Number(msResolved.value ?? 0));
-      await new Promise((resolve) => setTimeout(resolve, ms));
+      // 취소되면 남은 시간을 기다리지 않는다 (2026-09-05 Codex 재확인 항목 3).
+      try {
+        await sleepWithSignal(ms, ctx.signal);
+      } catch (e) {
+        return failed('TIMEOUT', e instanceof Error ? e.message : String(e));
+      }
       return { status: 'success' };
     }
 

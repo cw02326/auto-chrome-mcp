@@ -91,8 +91,17 @@ function isAutoRunTab(tabId: number | undefined): boolean {
 
 interface AutoRunTab {
   tab: RunTabContext;
-  /** 실행 후 닫아야 하는 탭인지. */
-  disposable: boolean;
+  /**
+   * 실행 후 닫아야 하는 탭의 id — **생성 직후 캡처한 불변 값**
+   * (2026-09-05 Codex 재확인 항목 5).
+   *
+   * 예전에는 정리가 `target.tab.tabId` 를 봤다. 그런데 그 필드는 흐름이 실행 중 자기가 연
+   * 탭으로 옮겨가면 바뀐다(setRunTab). 그래서 정리는 엉뚱하게 새 탭을 닫고, 정작 자기가
+   * 만든 부트스트랩 탭과 재귀 가드 항목(autoRunTabIds)은 그대로 남았다.
+   *
+   * 사용자 탭을 빌려 도는 경우(runInTriggeringTab)에는 닫을 탭이 없으므로 undefined 다.
+   */
+  disposableTabId?: number;
 }
 
 /**
@@ -127,7 +136,7 @@ async function openAutoRunTab(
   autoRunTabIds.add(created.id);
   return {
     tab: runTabFromId(created.id, 'explicit', created.windowId),
-    disposable: true,
+    disposableTabId: created.id,
   };
 }
 
@@ -139,26 +148,34 @@ async function runFlowFromTrigger(
 ): Promise<void> {
   let target: AutoRunTab;
   if (wantsTriggeringTab(flow, trigger) && typeof source.tabId === 'number') {
-    target = {
-      tab: runTabFromId(source.tabId, 'explicit', source.windowId),
-      disposable: false,
-    };
+    target = { tab: runTabFromId(source.tabId, 'explicit', source.windowId) };
   } else {
     target = await openAutoRunTab(source.tabId, source.windowId, source.url);
   }
 
+  const { disposableTabId } = target;
   try {
     await runFlow(flow, target.tab, { args: trigger?.args || {}, returnLogs: false });
   } finally {
-    if (target.disposable) {
+    // run 이 실행 중 스스로 연 탭도 자동 실행이 남긴 흔적이다 — 함께 치운다. 사용자 탭은
+    // ownedTabIds 에 들어가지 않으므로 여기에 걸리지 않는다.
+    for (const openedTabId of target.tab.ownedTabIds ?? []) {
+      if (openedTabId === disposableTabId) continue;
       try {
-        await chrome.tabs.remove(target.tab.tabId);
+        await chrome.tabs.remove(openedTabId);
+      } catch {
+        // 흐름이 이미 닫았을 수 있다.
+      }
+    }
+    if (disposableTabId !== undefined) {
+      try {
+        await chrome.tabs.remove(disposableTabId);
       } catch {
         // 흐름이 이미 닫았을 수 있다.
       }
       // 탭을 닫은 뒤에 등록을 지운다. 순서를 바꾸면 그 사이에 도착한 이동 이벤트가
       // 트리거를 한 번 더 켠다.
-      autoRunTabIds.delete(target.tab.tabId);
+      autoRunTabIds.delete(disposableTabId);
     }
   }
 }

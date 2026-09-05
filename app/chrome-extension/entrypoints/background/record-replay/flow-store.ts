@@ -154,6 +154,32 @@ export interface PublishedFlowInfo {
 }
 
 /**
+ * 발행 저장소에 실제로 들어가는 레코드 (2026-09-05 Codex 재확인 항목 4).
+ *
+ * 발행은 "이 흐름을 도구 표면에 연다" 는 승인이다. 그런데 예전에는 메타데이터만 저장하고
+ * 실행 시점에 **그때의 draft** 를 다시 읽었다. 발행한 뒤 draft 를 고치면(편집은 version 을
+ * 올리지 않는다) 승인받지 않은 내용이 그대로 돌았다. 그래서 발행 시점의 흐름 전문을
+ * 스냅샷으로 함께 저장하고, 실행은 그 스냅샷으로 한다.
+ *
+ * `listPublished()` 는 스냅샷을 떼고 돌려준다 — 목록은 MCP 응답으로 나가므로 흐름 본문이
+ * 실리면 안 된다.
+ */
+interface PublishedRecord extends PublishedFlowInfo {
+  snapshot?: Flow;
+}
+
+/** 저장 레코드에서 목록·응답용 메타데이터만 뽑는다. */
+function toPublishedInfo(record: PublishedRecord): PublishedFlowInfo {
+  return {
+    id: record.id,
+    slug: record.slug,
+    version: record.version,
+    name: record.name,
+    ...(record.description !== undefined ? { description: record.description } : {}),
+  };
+}
+
+/**
  * Check if a flow needs normalization (missing nodes when steps exist).
  */
 function needsNormalization(flow: Flow): boolean {
@@ -268,7 +294,8 @@ export async function appendRun(record: RunRecord): Promise<void> {
 
 export async function listPublished(): Promise<PublishedFlowInfo[]> {
   await ensureMigratedFromLocal();
-  return await IndexedDbStorage.published.list();
+  const records = (await IndexedDbStorage.published.list()) as PublishedRecord[];
+  return records.map(toPublishedInfo);
 }
 
 export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedFlowInfo> {
@@ -280,8 +307,52 @@ export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedF
     name: flow.name,
     description: flow.description,
   };
-  await IndexedDbStorage.published.save(info);
+  // 발행 시점의 흐름 전문을 함께 저장한다. 저장 형식은 saveFlow 와 같게 맞춘다
+  // (steps → nodes 정규화 후 deprecated steps 제거).
+  const snapshot = stripStepsForSave(normalizeFlowForSave(flow));
+  await IndexedDbStorage.published.save({ ...info, snapshot } as PublishedFlowInfo);
   return info;
+}
+
+/**
+ * 도구 표면으로 실행할 흐름을 발행 목록에서 고른다 (2026-09-05 Codex 재확인 항목 4).
+ *
+ * 예전 코드는 `getFlow(flowId)` 를 먼저 부르고, 발행 목록은 허가 확인에만 썼다. 그래서
+ * 흐름 A 의 slug 가 발행되지 않은 흐름 B 의 id 와 겹치면, A 의 허가로 B 가 실행됐다.
+ * 이제 대상은 **발행 레코드**로만 정한다: id 우선, 없으면 slug. 실행할 내용은 그 레코드의
+ * 스냅샷이고, 스냅샷이 없는 옛 레코드만 `entry.id` 로 저장소를 읽되 version 이 발행 당시와
+ * 같은지 확인한다.
+ */
+export type PublishedResolution =
+  | { ok: true; entry: PublishedFlowInfo; flow: Flow }
+  | {
+      ok: false;
+      reason: 'not_published' | 'missing' | 'version_mismatch';
+      entry?: PublishedFlowInfo;
+    };
+
+export async function resolvePublishedFlow(flowId: string): Promise<PublishedResolution> {
+  await ensureMigratedFromLocal();
+  const records = (await IndexedDbStorage.published.list()) as PublishedRecord[];
+  const record = records.find((p) => p.id === flowId) ?? records.find((p) => p.slug === flowId);
+  if (!record) {
+    // 발행되지 않은 것과 아예 없는 것은 호출자에게 다른 이야기다. "저장은 됐으니 발행해라"
+    // 와 "그런 흐름이 없다" 를 한 문장으로 뭉치면 어느 쪽을 고쳐야 할지 알 수 없다.
+    const draft = await getFlow(flowId);
+    return { ok: false, reason: draft ? 'not_published' : 'missing' };
+  }
+
+  const entry = toPublishedInfo(record);
+  if (record.snapshot) return { ok: true, entry, flow: record.snapshot };
+
+  // 스냅샷 이전에 발행된 레코드. 대상은 언제나 entry.id 이고, 내용이 발행 당시와 같을 때만
+  // 실행한다.
+  const flow = await getFlow(record.id);
+  if (!flow) return { ok: false, reason: 'missing', entry };
+  if (Number(flow.version) !== Number(record.version)) {
+    return { ok: false, reason: 'version_mismatch', entry };
+  }
+  return { ok: true, entry, flow };
 }
 
 export async function unpublishFlow(flowId: string): Promise<void> {

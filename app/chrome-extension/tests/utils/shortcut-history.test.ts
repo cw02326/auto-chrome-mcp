@@ -275,7 +275,17 @@ describe('10. results 상한과 보관 상한', () => {
     expect(pruned.daily[0].startedAt).toBe(1_089);
   });
 
-  it('10. quota 오류가 나면 더 지우고 1회만 재시도해 저장에 성공한다', async () => {
+  it('10. quota 오류가 나면 최고령 1건만 지우고 다시 시도해 저장에 성공한다', async () => {
+    // 2026-09-05 Codex 리뷰 9: 예전에는 실패 한 번에 보관량을 절반으로 잘랐다.
+    // 이제는 가장 오래된 1건만 빠지고 나머지는 그대로 남아야 한다.
+    harness.store[HISTORY_STORAGE_KEY] = {
+      daily: [
+        record({ name: 'daily', startedAt: 300, runId: 'old-3' }),
+        record({ name: 'daily', startedAt: 200, runId: 'old-2' }),
+        record({ name: 'daily', startedAt: 100, runId: 'old-1' }),
+      ],
+    } satisfies HistoryMap;
+
     let thrown = 0;
     harness.hooks.onSet = () => {
       if (thrown === 0) {
@@ -285,10 +295,53 @@ describe('10. results 상한과 보관 상한', () => {
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await startRunRecord({ runId: 'r1', name: 'daily', trigger: 'manual', startedAt: 1 });
+    await startRunRecord({ runId: 'r1', name: 'daily', trigger: 'manual', startedAt: 400 });
 
     expect(harness.setSpy).toHaveBeenCalledTimes(2);
-    expect((harness.store[HISTORY_STORAGE_KEY] as HistoryMap).daily[0].runId).toBe('r1');
+    const saved = (harness.store[HISTORY_STORAGE_KEY] as HistoryMap).daily;
+    expect(saved.map((r) => r.runId)).toEqual(['r1', 'old-3', 'old-2']);
+    warn.mockRestore();
+  });
+
+  it('10. quota 가 아닌 오류는 재시도하지 않고 기록도 지우지 않는다', async () => {
+    harness.store[HISTORY_STORAGE_KEY] = {
+      daily: [
+        record({ name: 'daily', startedAt: 200, runId: 'old-2' }),
+        record({ name: 'daily', startedAt: 100, runId: 'old-1' }),
+      ],
+    } satisfies HistoryMap;
+
+    harness.hooks.onSet = () => {
+      throw new Error('Extension context invalidated');
+    };
+
+    await expect(
+      startRunRecord({ runId: 'r1', name: 'daily', trigger: 'manual', startedAt: 400 }),
+    ).rejects.toThrow('Extension context invalidated');
+
+    expect(harness.setSpy).toHaveBeenCalledTimes(1);
+    const saved = (harness.store[HISTORY_STORAGE_KEY] as HistoryMap).daily;
+    expect(saved.map((r) => r.runId)).toEqual(['old-2', 'old-1']);
+  });
+
+  it('10. quota 가 계속 나도 최대 3회까지만 지운다', async () => {
+    harness.store[HISTORY_STORAGE_KEY] = {
+      daily: Array.from({ length: 6 }, (_, i) =>
+        record({ name: 'daily', startedAt: 100 + i * 10, runId: `old-${i}` }),
+      ),
+    } satisfies HistoryMap;
+
+    harness.hooks.onSet = () => {
+      throw new Error('QUOTA_BYTES quota exceeded');
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      startRunRecord({ runId: 'r1', name: 'daily', trigger: 'manual', startedAt: 400 }),
+    ).rejects.toThrow('quota');
+
+    // 첫 시도 + 3회 재시도 = 4회. 그 이상 지우지 않는다.
+    expect(harness.setSpy).toHaveBeenCalledTimes(4);
     warn.mockRestore();
   });
 

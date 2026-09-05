@@ -25,10 +25,14 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import type { RunResult } from '../record-replay/types';
-import { listPublished } from '../record-replay/flow-store';
-import { getFlow } from '../record-replay/flow-store';
+import { listPublished, resolvePublishedFlow } from '../record-replay/flow-store';
 import { runFlow } from '../record-replay/flow-runner';
-import { runTabFromId, type RunTabContext } from '../record-replay/engine/tab-context';
+import {
+  markRunOwnedTab,
+  releaseRunTabLeases,
+  runTabFromId,
+  type RunTabContext,
+} from '../record-replay/engine/tab-context';
 import { createTabLeaseToken, withTabLease } from '@/utils/tab-lock';
 import { createTimeoutAbort, MAX_FLOW_RUN_TIMEOUT_MS } from '@/utils/tool-watchdog';
 // url-target.ts 는 다른 작업이 진행 중인 파일이라 **import 만** 한다 (수정 금지).
@@ -173,18 +177,27 @@ class FlowRunTool {
       );
     }
 
-    // 발행 허용 목록(검토 항목 9): 도구 표면으로 실행할 수 있는 흐름은 사용자가 발행한
-    // 것뿐이다. 예전에는 저장만 된 초안·가져온 흐름도 id 만 알면 돌릴 수 있었다.
-    const published = await listPublished();
-    const entry = published.find((p) => p.id === flowId || p.slug === flowId);
-    const flow = (await getFlow(flowId)) ?? (entry ? await getFlow(entry.id) : undefined);
-    if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
-    if (!entry) {
-      return createErrorResponse(
-        `flow_not_published: "${flowId}" is saved but not published. Publish it in the side panel ` +
-          `(or call record_replay_list_published to see what this browser exposes) before running it from MCP.`,
-      );
+    // 발행 허용 목록(검토 항목 9 · 재확인 항목 4): 도구 표면으로 실행할 수 있는 흐름은
+    // 사용자가 발행한 것뿐이고, 실행되는 내용도 **발행 시점의 스냅샷**이다. 예전에는
+    // 대상 흐름을 `getFlow(flowId)` 로 먼저 찾아서, slug 가 다른 흐름의 draft id 와 겹치면
+    // 그 draft 가 남의 허가로 실행됐고, 발행 뒤 고친 draft 도 그대로 돌았다.
+    const resolution = await resolvePublishedFlow(String(flowId));
+    if (!resolution.ok) {
+      if (resolution.reason === 'not_published') {
+        return createErrorResponse(
+          `flow_not_published: "${flowId}" is saved but not published. Publish it in the side panel ` +
+            `(or call record_replay_list_published to see what this browser exposes) before running it from MCP.`,
+        );
+      }
+      if (resolution.reason === 'version_mismatch') {
+        return createErrorResponse(
+          `flow_version_mismatch: "${flowId}" was published at version ${resolution.entry?.version} ` +
+            `but the saved flow has changed since. Publish it again so the tool surface runs what you approved.`,
+        );
+      }
+      return createErrorResponse(`Flow not found: ${flowId}`);
     }
+    const flow = resolution.flow;
 
     // 작업 탭은 게이트가 정한다. 여기서 활성 탭을 찾아보는 경로는 없다 — 없으면 거절이다.
     if (!isExplicitTabId(tabId)) {
@@ -215,6 +228,9 @@ class FlowRunTool {
           return createErrorResponse('Could not open a new work tab for this flow run.');
         }
         runTab = runTabFromId(created.id, 'mcp', created.windowId, session);
+        // 재확인 항목 6: 이 탭은 **이 도구가** 만든 것이다. run 소유로 등록하지 않으면
+        // abort 정리 대상에서 빠져, 취소된 실행이 빈 탭을 남긴 채 끝났다.
+        markRunOwnedTab(runTab, created.id);
       } else {
         runTab = runTabFromId(tabId, 'mcp', workTab?.windowId, session);
       }
@@ -253,6 +269,9 @@ class FlowRunTool {
         }),
       );
     } finally {
+      // 재확인 항목 2: 흐름이 옮겨가거나 새로 연 탭의 리스를 전부 푼다. 시작 탭의 리스는
+      // 위의 withTabLease 가 자기 finally 에서 푼다.
+      releaseRunTabLeases(runTab);
       abort.dispose();
     }
 

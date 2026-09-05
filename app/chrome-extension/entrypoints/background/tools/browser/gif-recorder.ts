@@ -14,6 +14,7 @@
  */
 
 import { activateTab } from '@/utils/activation-guard';
+import { effectiveBackgroundModeOf } from '@/utils/background-mode';
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
@@ -107,7 +108,7 @@ interface RecordingState {
   filename?: string;
   // auto-chrome-mcp fork: 배경 탭 녹화를 위해 창 안에서만 active로 전환했다면,
   // 녹화 종료 후 원래 활성 탭으로 되돌리기 위한 정보
-  restoreTab?: { windowId: number; tabId: number };
+  restoreTab?: RestoreTabInfo;
 }
 
 interface GifResult {
@@ -321,10 +322,20 @@ async function captureTick(state: RecordingState): Promise<void> {
 
 // v1.9.0: 탭 활성화는 전부 activation-guard 를 거친다 (전용 작업 창 안에서만 허용).
 
+/** 되돌릴 탭. `forced` 는 실행 컨텍스트가 무간섭을 강제하는 호출인가. */
+interface RestoreTabInfo {
+  windowId: number;
+  tabId: number;
+  forced?: boolean;
+}
+
 // auto-chrome-mcp fork: 배경 탭 녹화를 위해 active로 전환했던 탭을 원래대로 되돌린다.
 // 탭이 이미 닫혔거나 창이 사라졌을 수 있으므로 실패는 무시한다(best-effort).
-async function restoreActiveTab(restoreTab?: { windowId: number; tabId: number }): Promise<void> {
+async function restoreActiveTab(restoreTab?: RestoreTabInfo): Promise<void> {
   if (!restoreTab) return;
+  // 2026-09-05 Codex 리뷰 2: 실행 컨텍스트가 무간섭을 강제하는 호출(예약 실행)은 애초에
+  // 탭을 활성화하지 않는다. 그런 호출에서 force 복원까지 하면 게이트를 두 번 우회한다.
+  if (restoreTab.forced === true) return;
   try {
     // 사용자가 보던 탭을 원래대로 되돌리는 복구 동작이므로 게이트를 우회한다.
     await activateTab(restoreTab.tabId, { force: true, reason: 'gif-recorder:restore' });
@@ -342,7 +353,7 @@ async function startRecording(
   height: number,
   maxColors: number,
   filename?: string,
-  restoreTab?: { windowId: number; tabId: number },
+  restoreTab?: RestoreTabInfo,
 ): Promise<GifResult> {
   if (stopPromise || recordingState?.isRecording || recordingState?.isStopping) {
     // auto-chrome-mcp fork: state 생성 전에 실패하므로 여기서도 활성 탭 전환을 되돌린다
@@ -676,8 +687,12 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           // auto-chrome-mcp fork: 배경(hidden) 탭은 requestAnimationFrame이 멈춰 GIF가 정지 이미지로 나온다.
           // "포커스되지 않은 창" 안에서 탭을 active로 만들면 그 창 안에서는 렌더링이 재개되면서도
           // 사용자가 보고 있는 포커스 창은 건드리지 않는다 (windows.update({focused:true})는 호출하지 않음).
-          let restoreTab: { windowId: number; tabId: number } | undefined;
+          let restoreTab: RestoreTabInfo | undefined;
           let warning: string | undefined;
+          // 2026-09-05 Codex 리뷰 2: 활성화 판정은 전역 토글이 아니라 **이 호출의 실행
+          // 컨텍스트**를 먼저 봐야 한다. 전역 토글이 OFF 인 크롬에서 예약 실행이 GIF 를
+          // 찍으면, 예전에는 이 한 줄 때문에 사용자가 보던 탭이 바뀌었다.
+          const forcedContext = effectiveBackgroundModeOf(args) === true;
           try {
             const focusedWindow = await chrome.windows.getLastFocused();
             if (tab.windowId !== focusedWindow.id) {
@@ -685,13 +700,20 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                 active: true,
                 windowId: tab.windowId,
               });
-              const activated = await activateTab(tab.id, { reason: 'gif-recorder' });
+              const activated = await activateTab(tab.id, {
+                reason: 'gif-recorder',
+                contextArgs: args,
+              });
               if (
                 activated &&
                 typeof prevActiveTab?.id === 'number' &&
                 prevActiveTab.id !== tab.id
               ) {
-                restoreTab = { windowId: tab.windowId, tabId: prevActiveTab.id };
+                restoreTab = {
+                  windowId: tab.windowId,
+                  tabId: prevActiveTab.id,
+                  forced: forcedContext,
+                };
               }
               if (!activated) {
                 // 무간섭 모드가 활성화를 막았다 — 정지 이미지가 될 수 있음을 정직하게 알린다.

@@ -17,7 +17,7 @@
  * `tests/record-replay/no-active-tab-query.test.ts` enforces that.
  */
 
-import { LEASE_TOKEN_ARG } from '@/utils/tab-lock';
+import { LEASE_TOKEN_ARG, acquireTabLease, isTabLeasedBy, releaseTabLease } from '@/utils/tab-lock';
 
 /** Where the pinned tab came from. Recorded for diagnostics only. */
 export type RunTabSource = 'mcp' | 'sidepanel' | 'explicit';
@@ -72,6 +72,16 @@ export interface RunTabContext {
    */
   entryTabId?: number;
   /**
+   * Tabs this run took an extra lease on, beyond the tab it started with.
+   *
+   * The lease used to sit only on the entry tab, so the moment a flow moved onto
+   * a tab it opened, that tab had no lock at all and another session could step
+   * in between two nodes (2026-09-05 Codex re-review, item 2). Every tab the run
+   * moves to or opens now gets a lease under the same token, and they are all
+   * released when the run ends.
+   */
+  leasedTabIds?: Set<number>;
+  /**
    * Cancellation signal for the run.
    *
    * Lives here because every node, policy and wait loop already receives this
@@ -79,6 +89,39 @@ export interface RunTabContext {
    * after the caller gave up (2026-09-05 Codex review, item 4).
    */
   signal?: AbortSignal;
+}
+
+/** What `acquireRunTabLease` needs: the run's token and the tabs it already leased. */
+export interface RunLeaseHolder {
+  leaseToken?: string;
+  leasedTabIds?: Set<number>;
+}
+
+/**
+ * Take a lease on one more tab under the run's own token.
+ *
+ * Called whenever the run moves onto a tab or opens one, so the lock follows the
+ * run instead of staying behind on the tab it started with. Re-entrant calls the
+ * run makes carry the same token, so they still pass straight through.
+ */
+export function acquireRunTabLease(holder: RunLeaseHolder, tabId: number): void {
+  const token = holder.leaseToken;
+  if (typeof token !== 'string' || !isUsableTabId(tabId)) return;
+  if (!holder.leasedTabIds) holder.leasedTabIds = new Set<number>();
+  if (holder.leasedTabIds.has(tabId)) return;
+  // The entry tab is already leased by the caller's `withTabLease`; do not stack
+  // a second one on it, or the release counts stop matching.
+  if (isTabLeasedBy(tabId, token)) return;
+  acquireTabLease(tabId, token);
+  holder.leasedTabIds.add(tabId);
+}
+
+/** Release every extra lease this run took. The entry tab's lease is the caller's. */
+export function releaseRunTabLeases(holder: RunLeaseHolder): void {
+  const token = holder.leaseToken;
+  if (typeof token !== 'string' || !holder.leasedTabIds) return;
+  for (const tabId of holder.leasedTabIds) releaseTabLease(tabId, token);
+  holder.leasedTabIds.clear();
 }
 
 /**
@@ -97,6 +140,8 @@ export function markRunOwnedTab(ctx: RunTabContext, tabId: number): void {
   if (!isUsableTabId(tabId)) return;
   if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
   ctx.ownedTabIds.add(tabId);
+  // A tab the run opened is a tab the run drives — it needs the same lease.
+  acquireRunTabLease(ctx, tabId);
 }
 
 /** Is this tab inside the run's scope? */
@@ -191,6 +236,8 @@ export async function resolveRunTab(ctx: RunTabContext | null | undefined): Prom
  */
 export function setRunTab(ctx: RunTabContext, tabId: number, windowId?: number): void {
   if (!isUsableTabId(tabId)) return;
+  // The lease follows the run onto the new tab (2026-09-05 Codex re-review, item 2).
+  acquireRunTabLease(ctx, tabId);
   ctx.tabId = tabId;
   if (isUsableTabId(windowId)) ctx.windowId = windowId;
   // A frame index only means something inside one document. Carrying it over to
@@ -272,6 +319,8 @@ export interface RunSessionContext {
    * it: abort cleanup must not close the caller's work tab.
    */
   entryTabId?: number;
+  /** Extra tab leases this run holds (shared by reference, like `ownedTabIds`). */
+  leasedTabIds?: Set<number>;
   signal?: AbortSignal;
 }
 
@@ -296,6 +345,7 @@ export function runTabFromId(
     // a derived context still belongs to the run that opened it.
     ownedTabIds: session?.ownedTabIds,
     entryTabId: session?.entryTabId,
+    leasedTabIds: session?.leasedTabIds,
     signal: session?.signal,
   };
 }

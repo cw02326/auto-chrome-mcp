@@ -24,6 +24,13 @@
 import { saveArtifactToDownloads } from '@/utils/artifact-path';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
 import {
+  beginSpawnScope,
+  endSpawnScope,
+  isSpawnedPopupWindow,
+  resetSpawnScopes,
+  settleSpawnAdoptions,
+} from '@/utils/spawned-tab-tracker';
+import {
   buildHistoryResults,
   classifyRunOutcome,
   finishRunRecord,
@@ -91,6 +98,8 @@ const KEEPALIVE_MS = 20_000;
 const LOCK_RETRY_MS = 5_000;
 /** report 파일의 `results` 상한 (UTF-8 byte). */
 export const MAX_REPORT_RESULT_BYTES = 256 * 1024;
+/** 상한을 넘겨 실행을 끊은 뒤, 러너가 실제로 멈추기를 기다리는 시간. */
+export const ABORT_GRACE_MS = 15_000;
 
 /** 알림을 보내는 상태 (설계 5절). 성공·stopped·skipped_queue 는 조용하다. */
 const NOTIFY_STATUSES: ReadonlySet<string> = new Set([
@@ -117,6 +126,9 @@ export function setScheduleToolInvoker(fn: ToolInvoker): void {
 
 /** 이 워커 인스턴스의 잠금 소유자 토큰. 워커가 죽으면 하트비트가 멈춘다. */
 const OWNER_TOKEN = `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+/** 지금 쥐고 있는 잠금의 nonce. 하트비트가 남의 잠금을 덮어쓰지 않게 한다. */
+let currentLockNonce: string | null = null;
 
 /* ------------------------------------------------------------------ *
  * 큐
@@ -174,17 +186,19 @@ async function drainQueue(): Promise<void> {
           await recordSkippedQueue(item);
           continue;
         }
-        const locked = await acquireRunLock(item.runId);
-        if (!locked) {
+        const slot = await acquireRunSlot(item);
+        if (slot.kind === 'busy') {
           // 다른 워커가 돌고 있다. 순서를 지키되 바쁜 대기는 하지 않는다.
           queue.push(item);
           await sleep(LOCK_RETRY_MS);
           continue;
         }
+        // 예약이 사라졌거나 다른 워커가 이미 이 due 를 실행했다.
+        if (slot.kind === 'done') continue;
         try {
-          await executeScheduledRun(item);
+          await executeScheduledRun(item, slot);
         } finally {
-          await releaseRunLock(item.runId);
+          await releaseRunLock(slot.nonce);
         }
       } catch (error) {
         console.warn('[schedule-runner] 예약 실행 처리 실패:', error);
@@ -220,6 +234,10 @@ async function recordSkippedQueue(item: QueueItem): Promise<void> {
 interface RunLock {
   runId: string;
   owner: string;
+  /** 이 획득 시도만의 값. 같은 워커가 두 번 시도해도 서로 구별된다. */
+  nonce: string;
+  /** 예약 이름. reconcile 이 살아 있는 lease 의 버킷을 건드리지 않게 한다. */
+  name: string;
   heartbeatAt: number;
 }
 
@@ -235,25 +253,57 @@ async function readRunLock(): Promise<RunLock | null> {
   }
 }
 
-async function acquireRunLock(runId: string, now: number = Date.now()): Promise<boolean> {
-  const current = await readRunLock();
-  if (current && current.owner !== OWNER_TOKEN && now - current.heartbeatAt < STALE_LOCK_MS) {
-    return false;
-  }
-  try {
-    await chrome.storage.session.set({
-      [RUN_LOCK_KEY]: { runId, owner: OWNER_TOKEN, heartbeatAt: now } satisfies RunLock,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+/** 이 lease 가 아직 살아 있는가 (하트비트가 30초 안에 갱신됐는가). */
+function lockIsAlive(lock: RunLock | null, now: number): boolean {
+  return lock !== null && now - lock.heartbeatAt < STALE_LOCK_MS;
 }
 
-async function releaseRunLock(runId: string): Promise<void> {
+let lockNonceSeq = 0;
+function nextLockNonce(): string {
+  lockNonceSeq += 1;
+  return `${OWNER_TOKEN}-${lockNonceSeq}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 잠금을 잡는다. 잡았으면 nonce, 못 잡았으면 null.
+ *
+ * 2026-09-05 Codex 리뷰 4: 예전에는 "읽어서 비어 있으면 쓴다" 였다. 두 워커가 같은 순간에
+ * 읽으면 둘 다 비어 있는 것을 보고 둘 다 썼고, 나중에 쓴 쪽이 먼저 쓴 쪽의 잠금을 덮어
+ * 두 실행이 나란히 돌았다. 이제 **쓰고 나서 다시 읽어**(fenced) 내 nonce 가 남아 있을
+ * 때만 잡은 것으로 본다. 늦게 쓴 쪽이 이기고 먼저 쓴 쪽은 스스로 물러난다.
+ */
+async function acquireRunLock(
+  runId: string,
+  name: string,
+  now: number = Date.now(),
+): Promise<string | null> {
+  const current = await readRunLock();
+  if (current && current.owner !== OWNER_TOKEN && lockIsAlive(current, now)) {
+    return null;
+  }
+  const nonce = nextLockNonce();
+  try {
+    await chrome.storage.session.set({
+      [RUN_LOCK_KEY]: {
+        runId,
+        name,
+        owner: OWNER_TOKEN,
+        nonce,
+        heartbeatAt: now,
+      } satisfies RunLock,
+    });
+  } catch {
+    return null;
+  }
+  const confirmed = await readRunLock();
+  if (!confirmed || confirmed.nonce !== nonce) return null;
+  return nonce;
+}
+
+async function releaseRunLock(nonce: string): Promise<void> {
   try {
     const current = await readRunLock();
-    if (current && current.owner === OWNER_TOKEN && current.runId === runId) {
+    if (current && current.nonce === nonce) {
       await chrome.storage.session.remove(RUN_LOCK_KEY);
     }
   } catch {
@@ -266,7 +316,7 @@ async function releaseStaleRunLock(now: number = Date.now()): Promise<boolean> {
   const current = await readRunLock();
   if (!current) return false;
   if (current.owner === OWNER_TOKEN) return false;
-  if (now - current.heartbeatAt < STALE_LOCK_MS) return false;
+  if (lockIsAlive(current, now)) return false;
   try {
     await chrome.storage.session.remove(RUN_LOCK_KEY);
     return true;
@@ -282,6 +332,9 @@ async function releaseStaleRunLock(now: number = Date.now()): Promise<boolean> {
 /** 이 탭이 사용자가 지금 보고 있는 탭인가 (MCP 전용 창의 활성 탭은 사용자 탭이 아니다). */
 async function isUserFacingActiveTab(tab: chrome.tabs.Tab | null): Promise<boolean> {
   if (!tab || tab.active !== true) return false;
+  // 실행 중 페이지가 연 팝업 창의 탭은 언제나 그 창의 활성 탭이다. 사용자가 고른 탭이
+  // 아니므로 인계로 보면 팝업이 뜰 때마다 실행이 끊긴다 (2026-09-05 Codex 리뷰 1).
+  if (isSpawnedPopupWindow(tab.windowId)) return false;
   try {
     return !(await isMcpWindow(tab.windowId));
   } catch {
@@ -294,6 +347,10 @@ async function isUserFacingActiveTab(tab: chrome.tabs.Tab | null): Promise<boole
  * 사용자가 보고 있는 탭은 **닫지 않고 소유만** 해제한다.
  */
 export async function cleanupScheduledSessionTabs(sessionKey: string): Promise<void> {
+  // 스코프를 먼저 닫아, 이 실행이 연 팝업 창 목록을 확정한다.
+  await settleSpawnAdoptions();
+  const popupWindowIds = new Set(endSpawnScope(sessionKey));
+
   let tabIds: number[] = [];
   try {
     tabIds = await getSessionScopedTabIds(sessionKey);
@@ -307,7 +364,9 @@ export async function cleanupScheduledSessionTabs(sessionKey: string): Promise<v
     } catch {
       tab = null;
     }
-    if (tab && !(await isUserFacingActiveTab(tab))) {
+    // 페이지가 연 팝업 창의 탭은 활성이어도 닫는다 (사용자가 고른 탭이 아니다).
+    const spawnedPopup = tab !== null && popupWindowIds.has(tab.windowId);
+    if (tab && (spawnedPopup || !(await isUserFacingActiveTab(tab)))) {
       try {
         await chrome.tabs.remove(tabId);
       } catch {
@@ -318,6 +377,14 @@ export async function cleanupScheduledSessionTabs(sessionKey: string): Promise<v
       await forgetOwnedTab(tabId);
     } catch {
       // ignore
+    }
+  }
+  // 팝업 창은 실행이 끝나면 창째로 닫는다. 탭만 닫으면 빈 창이 화면에 남는다.
+  for (const windowId of popupWindowIds) {
+    try {
+      await chrome.windows.remove(windowId);
+    } catch {
+      // 이미 닫혔다 - best-effort
     }
   }
   try {
@@ -332,6 +399,9 @@ export async function cleanupScheduledSessionTabs(sessionKey: string): Promise<v
  * 해제한다 - 사용자가 눌러 본 탭을 도구가 계속 조작하는 것이 곧 사용자 탭 침해다.
  */
 async function assertTabNotTakenOver(sessionKey: string): Promise<void> {
+  // 페이지가 방금 연 탭의 소유 등록·화면 복구가 끝난 뒤에 판정한다. 그 전에 보면
+  // 아직 활성 상태인 스폰 탭을 "사용자가 가져갔다" 로 오판한다.
+  await settleSpawnAdoptions();
   let tabIds: number[] = [];
   try {
     tabIds = await getSessionScopedTabIds(sessionKey);
@@ -481,40 +551,112 @@ async function captureFailureScreenshot(name: string, invoke: ToolInvoker): Prom
   }
 }
 
-/** 예약 실행 하나. 잠금은 호출부가 이미 잡았다. */
-async function executeScheduledRun(item: QueueItem): Promise<void> {
+/** 잠금·claim 결과. `ok` 일 때만 실행으로 이어진다. */
+type RunSlot =
+  | { kind: 'busy' }
+  | { kind: 'done' }
+  | { kind: 'ok'; nonce: string; record: ScheduleRecord; startedAt: number };
+
+/**
+ * 실행 자리를 잡는다: 잠금(fenced) -> 예약 레코드 확인 -> 이력 claim -> `running` 기록.
+ *
+ * 2026-09-05 Codex 리뷰 4: 예전에는 잠금과 이력 claim 사이가 벌어져 있었다. 잠금을 잡은
+ * 워커가 shortcut 을 읽고 params 를 검증하는 동안 다른 워커가 같은 due 를 집으면, 그
+ * 워커도 "이력에 아직 없다" 를 보고 함께 실행했다. 이제 네 단계를 한 임계 구역에서 한다.
+ */
+async function acquireRunSlot(item: QueueItem): Promise<RunSlot> {
+  const nonce = await acquireRunLock(item.runId, item.name);
+  if (nonce === null) return { kind: 'busy' };
+  try {
+    const record = await readSchedule(item.name);
+    if (!record) {
+      await clearScheduleAlarm(item.name);
+      await releaseRunLock(nonce);
+      return { kind: 'done' };
+    }
+    // storage claim: 다른 워커가 이미 이 due 를 실행했으면 포기한다.
+    const history = await readHistory();
+    if (findRecordById(history, item.runId, item.name) !== null) {
+      await releaseRunLock(nonce);
+      return { kind: 'done' };
+    }
+    const startedAt = Date.now();
+    currentLockNonce = nonce;
+    await safeWrite(() =>
+      startRunRecord({
+        runId: item.runId,
+        name: item.name,
+        trigger: 'scheduled',
+        startedAt,
+        revision: record.revision,
+        generation: record.generation,
+      }),
+    );
+    return { kind: 'ok', nonce, record, startedAt };
+  } catch (error) {
+    await releaseRunLock(nonce);
+    throw error;
+  }
+}
+
+/** 지금 사용자가 보고 있는 탭·창 (실행 중 팝업이 화면을 가져가면 여기로 되돌린다). */
+async function currentUserView(): Promise<{ tabId: number | null; windowId: number | null }> {
+  let windowId: number | null = null;
+  let tabId: number | null = null;
+  try {
+    const focused = await chrome.windows.getLastFocused();
+    if (typeof focused?.id === 'number' && !(await isMcpWindow(focused.id))) {
+      windowId = focused.id;
+    }
+  } catch {
+    windowId = null;
+  }
+  try {
+    const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (typeof active?.id === 'number') tabId = active.id;
+  } catch {
+    tabId = null;
+  }
+  return { tabId, windowId };
+}
+
+/** 예약 실행 하나. 잠금·이력 claim 은 `acquireRunSlot` 이 이미 끝냈다. */
+async function executeScheduledRun(
+  item: QueueItem,
+  slot: { record: ScheduleRecord; startedAt: number },
+): Promise<void> {
   const invoke = invoker;
   const { name, runId } = item;
+  const record = slot.record;
+  const startedAt = slot.startedAt;
 
-  const record = await readSchedule(name);
-  if (!record) {
-    await clearScheduleAlarm(name);
-    return;
-  }
-
-  // storage claim: 다른 워커가 이미 이 due 를 실행했으면 포기한다.
-  const history = await readHistory();
-  if (findRecordById(history, runId, name) !== null) return;
-
-  const shortcuts = await loadShortcuts();
-  const stored = shortcuts[name];
-  const startedAt = Date.now();
-
-  if (!invoke || !stored) {
+  /** 실행에 들어가지도 못한 실패. 이력과 예약 레코드에 같은 사유를 남긴다. */
+  const failBeforeRun = async (errorCode: string | null, error: string): Promise<void> => {
     await safeWrite(() =>
       finishRunRecord(name, runId, {
         status: 'failed',
         trigger: 'scheduled',
         startedAt,
         endedAt: Date.now(),
-        errorCode: invoke ? 'shortcut_not_found' : 'invoker_not_wired',
-        error: invoke
-          ? `shortcut_not_found: "${name}" was deleted, so the schedule cannot run`
-          : 'invoker_not_wired: the extension is still starting up',
+        errorCode,
+        error,
         revision: record.revision,
+        generation: record.generation,
       }),
     );
-    await applyRunOutcome(record, runId, 'failed', invoke ? 'shortcut_not_found' : null, null);
+    await applyRunOutcome(record, runId, 'failed', errorCode, null);
+  };
+
+  const shortcuts = await loadShortcuts();
+  const stored = shortcuts[name];
+
+  if (!invoke || !stored) {
+    await failBeforeRun(
+      invoke ? 'shortcut_not_found' : 'invoker_not_wired',
+      invoke
+        ? `shortcut_not_found: "${name}" was deleted, so the schedule cannot run`
+        : 'invoker_not_wired: the extension is still starting up',
+    );
     return;
   }
 
@@ -524,54 +666,30 @@ async function executeScheduledRun(item: QueueItem): Promise<void> {
   const params = resolveShortcutParams(stored.params, record.params);
 
   if (!params.ok) {
-    await safeWrite(() =>
-      finishRunRecord(name, runId, {
-        status: 'failed',
-        trigger: 'scheduled',
-        startedAt,
-        endedAt: Date.now(),
-        errorCode: params.error.split(':', 1)[0] ?? 'failed',
-        error: params.error,
-        revision: record.revision,
-      }),
-    );
-    await applyRunOutcome(record, runId, 'failed', params.error.split(':', 1)[0] ?? null, null);
+    await failBeforeRun(params.error.split(':', 1)[0] ?? 'failed', params.error);
     return;
   }
   const flowError = templatesEnabled ? validateFlow(steps, returnNames) : null;
   if (flowError) {
-    await safeWrite(() =>
-      finishRunRecord(name, runId, {
-        status: 'failed',
-        trigger: 'scheduled',
-        startedAt,
-        endedAt: Date.now(),
-        errorCode: flowError.split(':', 1)[0] ?? 'failed',
-        error: flowError,
-        revision: record.revision,
-      }),
-    );
-    await applyRunOutcome(record, runId, 'failed', flowError.split(':', 1)[0] ?? null, null);
+    await failBeforeRun(flowError.split(':', 1)[0] ?? 'failed', flowError);
     return;
   }
 
   const sessionKey = scheduledSessionKey(name);
   activeSessionKeys.add(sessionKey);
-  await safeWrite(() =>
-    startRunRecord({
-      runId,
-      name,
-      trigger: 'scheduled',
-      startedAt,
-      revision: record.revision,
-      secrets: params.secrets,
-    }),
-  );
 
   const deadlineAt = startedAt + RUN_TIMEOUT_MS;
   const heartbeat = setInterval(() => {
     void chrome.storage.session
-      .set({ [RUN_LOCK_KEY]: { runId, owner: OWNER_TOKEN, heartbeatAt: Date.now() } })
+      .set({
+        [RUN_LOCK_KEY]: {
+          runId,
+          name,
+          owner: OWNER_TOKEN,
+          nonce: currentLockNonce ?? '',
+          heartbeatAt: Date.now(),
+        },
+      })
       .catch(() => undefined);
   }, HEARTBEAT_MS);
   const keepalive = setInterval(() => {
@@ -584,132 +702,192 @@ async function executeScheduledRun(item: QueueItem): Promise<void> {
     }
   }, KEEPALIVE_MS);
 
-  let outcome: RunStepsOutcome;
+  // 2026-09-05 Codex 리뷰 5: heartbeat·keepalive 는 **정리까지** 살아 있어야 한다.
+  // 예전에는 runSteps 를 감싼 finally 에서 껐고, 그 뒤의 스크린샷·report·탭 정리는
+  // 잠금이 만료된 채로 돌았다.
   try {
-    outcome = await Promise.race([
-      runSteps({
-        steps,
-        invoke,
-        mcpSessionId: SCHEDULED_SESSION_ID,
-        lane: name,
-        disallowedTools: SHORTCUT_DISALLOWED_STEP_TOOLS,
-        containerLabel: 'chrome_shortcut',
-        skippedNote: 'skipped (scheduled run stopped at earlier failing step)',
-        collectImages: false,
-        templatesEnabled,
-        returnNames: templatesEnabled ? returnNames : undefined,
-        params: templatesEnabled ? params.values : undefined,
-        forceBackground: true,
-        taskTitle: scheduleTaskTitle(name),
-        beforeStep: async () => {
-          if (Date.now() >= deadlineAt) {
-            throw new FlowAbortedError('timeout', 'timeout: the run passed its 120 second budget');
-          }
-          await assertTabNotTakenOver(sessionKey);
-        },
-      }),
-      guardTimeout(deadlineAt - Date.now()),
-    ]);
-  } catch (error) {
-    outcome = {
-      success: false,
-      results: [],
-      images: [],
-      aborted: {
-        reason: 'failed',
-        message: error instanceof Error ? error.message : String(error),
+    const controller = new AbortController();
+    const view = await currentUserView();
+    // 실행 중 페이지가 여는 탭·팝업 창을 이 버킷이 흡수한다 (리뷰 1).
+    beginSpawnScope({
+      sessionKey,
+      forced: true,
+      restoreTabId: view.tabId,
+      restoreWindowId: view.windowId,
+    });
+
+    let outcome: RunStepsOutcome;
+    const running = runSteps({
+      steps,
+      invoke,
+      mcpSessionId: SCHEDULED_SESSION_ID,
+      lane: name,
+      disallowedTools: SHORTCUT_DISALLOWED_STEP_TOOLS,
+      containerLabel: 'chrome_shortcut',
+      skippedNote: 'skipped (scheduled run stopped at earlier failing step)',
+      collectImages: false,
+      templatesEnabled,
+      returnNames: templatesEnabled ? returnNames : undefined,
+      params: templatesEnabled ? params.values : undefined,
+      forceBackground: true,
+      taskTitle: scheduleTaskTitle(name),
+      deadlineAt,
+      signal: controller.signal,
+      ...(record.report === true ? { reportLimitBytes: MAX_REPORT_RESULT_BYTES } : {}),
+      beforeStep: async () => {
+        if (Date.now() >= deadlineAt) {
+          throw new FlowAbortedError('timeout', 'timeout: the run passed its 120 second budget');
+        }
+        await assertTabNotTakenOver(sessionKey);
       },
+    });
+    const settled = running.then(
+      (value) => ({ kind: 'settled' as const, value }),
+      (error) => ({ kind: 'failed' as const, error }),
+    );
+
+    const raced = await Promise.race([settled, guardTimeout(deadlineAt - Date.now())]);
+    if (raced.kind === 'timeout') {
+      // 응답만 돌려주고 실행을 살려 두면 취소된 실행이 탭을 더 연다. 실제로 끊고 기다린다.
+      controller.abort('timeout');
+      await Promise.race([settled, sleep(ABORT_GRACE_MS)]);
+      outcome = timeoutOutcome();
+    } else if (raced.kind === 'failed') {
+      outcome = {
+        success: false,
+        results: [],
+        images: [],
+        aborted: {
+          reason: 'failed',
+          message: raced.error instanceof Error ? raced.error.message : String(raced.error),
+        },
+      };
+    } else {
+      outcome = raced.value;
+    }
+
+    let classification = classifyRunOutcome(outcome, { loginCheckAs: record.loginCheck });
+    const warnings: string[] = [...(params.warnings ?? [])];
+    const usesSecret = params.secrets.length > 0;
+
+    // 2026-09-05 Codex 리뷰 6: 마지막 step 뒤에도 인계를 다시 본다. 산출물과 정리보다
+    // 앞이어야 한다 - 사용자가 방금 가져간 탭을 스크린샷 찍고 닫으면 그것이 침해다.
+    let takenOver = classification.status === 'user_took_over_tab';
+    if (!takenOver) {
+      try {
+        await assertTabNotTakenOver(sessionKey);
+      } catch (error) {
+        if (error instanceof FlowAbortedError) {
+          takenOver = true;
+          classification = {
+            status: 'user_took_over_tab',
+            errorCode: 'user_took_over_tab',
+            error: error.message,
+            failedStep: classification.failedStep,
+          };
+        }
+      }
+    }
+
+    // 실패 스크린샷 1장. secret 을 쓴 실행은 비밀번호가 화면에 남을 수 있어 만들지 않는다.
+    let screenshot: string | null = null;
+    if (
+      !takenOver &&
+      (classification.status === 'failed' || classification.status === 'timeout') &&
+      !usesSecret
+    ) {
+      screenshot = await captureFailureScreenshot(name, invoke);
+      if (screenshot === null) warnings.push('screenshot_failed');
+    }
+
+    const historyResults = buildHistoryResults(outcome.returned);
+    const truncated = Array.from(
+      new Set([...(outcome.resultsTruncated ?? []), ...historyResults.truncated]),
+    );
+
+    // 실행이 끝났으니 소유 탭을 닫고 버킷을 비운다 (스크린샷을 찍은 뒤여야 한다).
+    // 사용자가 가져간 탭은 여기서도 닫히지 않는다 - 소유가 이미 풀렸고, 활성 사용자
+    // 탭은 정리 대상에서 빠진다.
+    await cleanupScheduledSessionTabs(sessionKey);
+    activeSessionKeys.delete(sessionKey);
+
+    const endedAt = Date.now();
+    const patch: RunRecordPatch = {
+      status: classification.status,
+      trigger: 'scheduled',
+      startedAt,
+      endedAt,
+      durationMs: endedAt - startedAt,
+      failedStep: classification.failedStep,
+      errorCode: classification.errorCode,
+      error: classification.error,
+      stoppedBy: outcome.stoppedBy ?? null,
+      results: historyResults.results,
+      screenshot,
+      revision: record.revision,
+      generation: record.generation,
+      ...(truncated.length > 0 ? { resultsTruncated: truncated } : {}),
     };
+
+    // report 파일 (예약 실행 전용, 기본 꺼짐). 저장 직전에 secret 흔적을 한 번 더 본다.
+    let reportPath: string | null = null;
+    if (record.report === true && !takenOver) {
+      if (usesSecret) {
+        warnings.push('report_skipped_secret');
+      } else {
+        // 이력용 24,000자 페이로드가 아니라 256KiB 예산으로 따로 모은 것을 쓴다 (리뷰 10).
+        const report = buildReportResults(outcome.reportReturned ?? outcome.returned);
+        const reportTruncated = Array.from(
+          new Set([...(outcome.reportTruncated ?? []), ...report.truncated]),
+        );
+        const payload: RunRecord = {
+          ...(patch as unknown as RunRecord),
+          runId,
+          name,
+          results: report.results,
+        };
+        // 이력 쪽에서 빠진 이름을 그대로 물려받지 않는다. report 는 상한이 다르다.
+        if (reportTruncated.length > 0) payload.resultsTruncated = reportTruncated;
+        else delete payload.resultsTruncated;
+        try {
+          const saved = await saveArtifactToDownloads({
+            url: jsonDataUrl(JSON.stringify(payload, null, 2)),
+            kind: 'report',
+            name,
+            ext: 'json',
+            // 절대 경로는 필요 없다. 이력에 남기는 것은 다운로드 폴더 기준 상대 경로이고,
+            // 100ms 를 더 기다리는 만큼 end-to-end 예산만 축난다.
+            resolvePathDelayMs: 0,
+          });
+          reportPath = saved.filename;
+        } catch (error) {
+          console.warn('[schedule-runner] report 저장 실패:', error);
+          warnings.push('report_failed');
+        }
+      }
+    }
+    patch.report = reportPath;
+    if (warnings.length > 0) patch.warnings = warnings;
+
+    await applyRunOutcome(
+      record,
+      runId,
+      classification.status,
+      classification.errorCode,
+      classification.failedStep ? classification.failedStep.index : null,
+      patch,
+      params.secrets,
+    );
   } finally {
     clearInterval(heartbeat);
     clearInterval(keepalive);
+    activeSessionKeys.delete(sessionKey);
+    currentLockNonce = null;
   }
-
-  const classification = classifyRunOutcome(outcome, { loginCheckAs: record.loginCheck });
-  const warnings: string[] = [...(params.warnings ?? [])];
-  const usesSecret = params.secrets.length > 0;
-
-  // 실패 스크린샷 1장. secret 을 쓴 실행은 비밀번호가 화면에 남을 수 있어 만들지 않는다.
-  let screenshot: string | null = null;
-  if ((classification.status === 'failed' || classification.status === 'timeout') && !usesSecret) {
-    screenshot = await captureFailureScreenshot(name, invoke);
-    if (screenshot === null) warnings.push('screenshot_failed');
-  }
-
-  const historyResults = buildHistoryResults(outcome.returned);
-  const truncated = Array.from(
-    new Set([...(outcome.resultsTruncated ?? []), ...historyResults.truncated]),
-  );
-
-  // 실행이 끝났으니 소유 탭을 닫고 버킷을 비운다 (스크린샷을 찍은 뒤여야 한다).
-  await cleanupScheduledSessionTabs(sessionKey);
-  activeSessionKeys.delete(sessionKey);
-
-  const endedAt = Date.now();
-  const patch: RunRecordPatch = {
-    status: classification.status,
-    trigger: 'scheduled',
-    startedAt,
-    endedAt,
-    durationMs: endedAt - startedAt,
-    failedStep: classification.failedStep,
-    errorCode: classification.errorCode,
-    error: classification.error,
-    stoppedBy: outcome.stoppedBy ?? null,
-    results: historyResults.results,
-    screenshot,
-    revision: record.revision,
-    ...(truncated.length > 0 ? { resultsTruncated: truncated } : {}),
-  };
-
-  // report 파일 (예약 실행 전용, 기본 꺼짐). 저장 직전에 secret 흔적을 한 번 더 본다.
-  let reportPath: string | null = null;
-  if (record.report === true) {
-    if (usesSecret) {
-      warnings.push('report_skipped_secret');
-    } else {
-      const report = buildReportResults(outcome.returned);
-      const payload: RunRecord = {
-        ...(patch as unknown as RunRecord),
-        runId,
-        name,
-        results: report.results,
-        ...(report.truncated.length > 0 ? { resultsTruncated: report.truncated } : {}),
-      };
-      try {
-        const saved = await saveArtifactToDownloads({
-          url: jsonDataUrl(JSON.stringify(payload, null, 2)),
-          kind: 'report',
-          name,
-          ext: 'json',
-          // 절대 경로는 필요 없다. 이력에 남기는 것은 다운로드 폴더 기준 상대 경로이고,
-          // 100ms 를 더 기다리는 만큼 end-to-end 예산만 축난다.
-          resolvePathDelayMs: 0,
-        });
-        reportPath = saved.filename;
-      } catch (error) {
-        console.warn('[schedule-runner] report 저장 실패:', error);
-        warnings.push('report_failed');
-      }
-    }
-  }
-  patch.report = reportPath;
-  if (warnings.length > 0) patch.warnings = warnings;
-
-  await applyRunOutcome(
-    record,
-    runId,
-    classification.status,
-    classification.errorCode,
-    classification.failedStep ? classification.failedStep.index : null,
-    patch,
-    params.secrets,
-  );
 }
 
-/** 120초 벽시계 상한. 도구 하나가 매달려도 여기서 응답이 나온다. */
-async function guardTimeout(ms: number): Promise<RunStepsOutcome> {
-  await sleep(Math.max(0, ms));
+/** 상한을 넘긴 실행의 결과. */
+function timeoutOutcome(): RunStepsOutcome {
   return {
     success: false,
     results: [],
@@ -718,12 +896,24 @@ async function guardTimeout(ms: number): Promise<RunStepsOutcome> {
   };
 }
 
+/** 120초 벽시계 상한. 도구 하나가 매달려도 여기서 응답이 나온다. */
+async function guardTimeout(ms: number): Promise<{ kind: 'timeout' }> {
+  await sleep(Math.max(0, ms));
+  return { kind: 'timeout' };
+}
+
 /**
  * 실행 결과를 이력·예약 레코드·알람에 반영한다.
  *
- * `revision` 이 달라졌으면(실행 도중 사용자가 `save`·`unschedule`·`delete`·재예약을 했다)
+ * 예약이 달라졌으면(실행 도중 사용자가 `save`·`unschedule`·`delete`·재예약을 했다)
  * 재무장도 `lastStatus`·`failStreak` 갱신도 하지 않고 이력에 `superseded: true` 만 남긴다.
  * 지운 예약이 다시 도는 것을 막기 위해서다.
+ *
+ * 2026-09-05 Codex 리뷰 3: 판정 기준은 `revision` 이 아니라 저장소 전역 `generation` 이다.
+ * revision 은 예약을 지웠다 같은 이름으로 다시 걸면 1 부터 다시 세므로, 실행 도중
+ * unschedule -> schedule 을 하면 옛 값과 같아질 수 있었다(ABA). 그리고 재무장은
+ * **CAS patch 가 성공해 돌려준 레코드**에서만 한다 - patch 가 튕겼는데 알람만 걸면
+ * 저장된 `nextAt` 과 실제 알람이 어긋난다.
  */
 async function applyRunOutcome(
   record: ScheduleRecord,
@@ -736,7 +926,7 @@ async function applyRunOutcome(
 ): Promise<void> {
   const now = Date.now();
   const current = await readSchedule(record.name);
-  const superseded = current === null || current.revision !== record.revision;
+  const superseded = current === null || current.generation !== record.generation;
 
   if (patch) {
     await safeWrite(() => finishRunRecord(record.name, runId, { ...patch, superseded }, secrets));
@@ -748,7 +938,7 @@ async function applyRunOutcome(
 
   const failStreak = NOTIFY_STATUSES.has(status) ? (current.failStreak ?? 0) + 1 : 0;
   const nextAt = computeNextAt(current, now);
-  await patchSchedule(
+  const updated = await patchSchedule(
     record.name,
     {
       lastRunId: runId,
@@ -757,11 +947,54 @@ async function applyRunOutcome(
       failStreak,
       ...(nextAt !== null ? { nextAt } : {}),
     },
-    record.revision,
+    { generation: current.generation },
   );
-  if (nextAt !== null) await armScheduleAlarm(record.name, nextAt);
+  // 읽고 쓰는 사이에 또 바뀌었다. 그 예약은 자기 알람을 이미 걸었다.
+  if (updated === null) return;
 
-  await notifyFailure(current, status, errorCode, failedStepIndex, failStreak);
+  if (nextAt !== null) await armScheduleAlarm(record.name, updated.nextAt);
+
+  await notifyFailure(updated, status, errorCode, failedStepIndex, failStreak);
+}
+
+/**
+ * 워커·크롬이 죽어 `interrupted` 로 바뀐 실행의 뒤처리 (2026-09-05 Codex 리뷰 7).
+ *
+ * 예전에는 이력만 `interrupted` 로 바꾸고 끝이었다. 예약 레코드의 `lastStatus` 는 옛 값
+ * 그대로였고 `failStreak` 도 오르지 않아, 밤새 워커가 죽어 한 번도 못 돈 예약이 아침
+ * `schedules` 응답에서는 "마지막 실행 성공" 으로 보였다. 알림도 없었다.
+ *
+ * 바뀐 레코드마다 한 번씩만 부른다. 예약이 그 사이 바뀌었으면(generation 불일치)
+ * 상태를 건드리지 않고 이력에 `superseded` 만 남긴다.
+ */
+async function applyInterruptedOutcome(record: RunRecord, now: number): Promise<void> {
+  if (record.trigger !== 'scheduled') return;
+  const current = await readSchedule(record.name);
+  if (current === null || record.generation !== current.generation) {
+    await safeWrite(() =>
+      finishRunRecord(record.name, record.runId, { status: 'interrupted', superseded: true }),
+    );
+    return;
+  }
+  const failStreak = (current.failStreak ?? 0) + 1;
+  const updated = await patchSchedule(
+    record.name,
+    {
+      lastRunId: record.runId,
+      lastStatus: 'interrupted',
+      lastRunAt: now,
+      failStreak,
+    },
+    { generation: current.generation },
+  );
+  if (updated === null) return;
+  await notifyFailure(
+    updated,
+    'interrupted',
+    'interrupted',
+    record.failedStep ? record.failedStep.index : null,
+    failStreak,
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -781,9 +1014,20 @@ export async function reconcileSchedules(now: number = Date.now()): Promise<void
   if (reconciling) return;
   reconciling = true;
   try {
-    await markRunningAsInterrupted(now);
+    // 살아 있는 남의 lease 는 죽은 실행이 아니다. 그 runId 와 버킷은 건드리지 않는다.
+    const lock = await readRunLock();
+    const foreignAlive =
+      lock !== null && lock.owner !== OWNER_TOKEN && lockIsAlive(lock, now) ? lock : null;
+
+    const interrupted = await markRunningAsInterrupted(
+      now,
+      foreignAlive ? [foreignAlive.runId] : [],
+    );
     await releaseStaleRunLock(now);
-    await cleanupOrphanScheduledTabs();
+    await cleanupOrphanScheduledTabs(foreignAlive ? scheduledSessionKey(foreignAlive.name) : null);
+    for (const record of interrupted) {
+      await applyInterruptedOutcome(record, now);
+    }
 
     const map = await readSchedules();
     const signature = currentTimeZoneSignature(now);
@@ -799,12 +1043,18 @@ export async function reconcileSchedules(now: number = Date.now()): Promise<void
       let record = map[name];
       if (timeZoneChanged(record, signature)) {
         const recomputed = computeNextAt(record, now);
-        const updated = await patchSchedule(name, {
-          ...(recomputed !== null ? { nextAt: recomputed } : {}),
-          timeZone: signature.timeZone,
-          offsetMinutes: signature.offsetMinutes,
-        });
-        if (updated) record = updated;
+        // CAS: 그 사이 사용자가 예약을 새로 걸었으면 이 갱신은 버린다.
+        const updated = await patchSchedule(
+          name,
+          {
+            ...(recomputed !== null ? { nextAt: recomputed } : {}),
+            timeZone: signature.timeZone,
+            offsetMinutes: signature.offsetMinutes,
+          },
+          { generation: record.generation },
+        );
+        if (updated === null) continue;
+        record = updated;
         await armScheduleAlarm(name, record.nextAt);
       }
 
@@ -813,8 +1063,9 @@ export async function reconcileSchedules(now: number = Date.now()): Promise<void
         enqueueScheduledRun(name, record.nextAt, now);
         const nextAt = computeNextAt(record, now);
         if (nextAt !== null) {
-          await patchSchedule(name, { nextAt });
-          await armScheduleAlarm(name, nextAt);
+          // 알람은 저장에 성공한 레코드에서만 건다 (저장 값과 알람이 어긋나지 않게).
+          const updated = await patchSchedule(name, { nextAt }, { generation: record.generation });
+          if (updated !== null) await armScheduleAlarm(name, updated.nextAt);
         }
         continue;
       }
@@ -837,7 +1088,7 @@ export async function reconcileSchedules(now: number = Date.now()): Promise<void
 }
 
 /** 지금 돌고 있지 않은 `scheduled::` 버킷의 탭을 정리한다. */
-async function cleanupOrphanScheduledTabs(): Promise<void> {
+async function cleanupOrphanScheduledTabs(leasedSessionKey: string | null = null): Promise<void> {
   let keys: string[] = [];
   try {
     keys = await listSessionKeysWithPrefix(`${SCHEDULED_SESSION_ID}::`);
@@ -846,6 +1097,8 @@ async function cleanupOrphanScheduledTabs(): Promise<void> {
   }
   for (const key of keys) {
     if (activeSessionKeys.has(key)) continue;
+    // 다른 워커가 지금 쓰고 있는 버킷이다. 그 실행의 탭을 뺏으면 곧바로 실패한다.
+    if (leasedSessionKey !== null && key === leasedSessionKey) continue;
     await cleanupScheduledSessionTabs(key);
   }
 }
@@ -882,6 +1135,8 @@ export function resetScheduleRunnerState(): void {
   queue.length = 0;
   claimedRunIds.clear();
   activeSessionKeys.clear();
+  currentLockNonce = null;
+  resetSpawnScopes();
   draining = false;
   reconciling = false;
 }

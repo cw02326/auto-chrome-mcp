@@ -24,8 +24,9 @@ export interface SpawnedTabRecord {
   createdAt: number;
 }
 
+import { activateTab } from '@/utils/activation-guard';
 import { isBackgroundModeEnabled } from '@/utils/background-mode';
-import { getAllWorkTabs } from '@/utils/work-tab-manager';
+import { addOwnedTab, getAllWorkTabs, getSessionScopedTabIds } from '@/utils/work-tab-manager';
 import { scheduleDeferredUnfocus } from '@/utils/window-focus-guard';
 import { getCurrentUserWindowId } from '@/utils/mcp-window-manager';
 
@@ -33,6 +34,146 @@ const TTL_MS = 120_000;
 const MAX_RECORDS = 30;
 
 const records: SpawnedTabRecord[] = [];
+
+/* ------------------------------------------------------------------ *
+ * 소유 스코프 (2026-09-05 Codex 리뷰 1)
+ *
+ * 예약 실행처럼 "전역 토글과 무관하게 무간섭이어야 하는" 실행이 도는 동안, 그 실행의
+ * 작업 탭이 `target=_blank`·`window.open` 으로 연 탭·팝업 창은 지금까지 아무 데도 속하지
+ * 않았다. 소유 버킷 밖이라 실행이 끝나도 남았고, 활성 탭이 되어 사용자 화면을 가져갔고,
+ * 완화 로직은 전역 토글만 보고 있어 토글 OFF 에서는 아예 돌지 않았다.
+ *
+ * 스코프가 열려 있는 동안 그 세션이 소유한 탭에서 나온 새 탭은
+ *   1. 사용자가 보던 탭·창을 즉시 되돌리고
+ *   2. 같은 소유 버킷에 등록되어 인계 판정·정리에 함께 걸리고
+ *   3. 팝업 창이면 실행이 끝날 때 창째로 닫힌다.
+ * ------------------------------------------------------------------ */
+
+export interface SpawnScopeInput {
+  /** 소유 버킷 키 (예: `scheduled::daily-dashboard`). */
+  sessionKey: string;
+  /** 전역 토글과 무관하게 무간섭을 강제하는 실행인가. */
+  forced: boolean;
+  /** 스폰 전에 사용자가 보고 있던 탭·창. 복구 대상. */
+  restoreTabId?: number | null;
+  restoreWindowId?: number | null;
+}
+
+interface SpawnScope extends SpawnScopeInput {
+  restoreTabId: number | null;
+  restoreWindowId: number | null;
+  /** 이 스코프가 흡수한, 페이지가 연 팝업 창들. */
+  popupWindowIds: Set<number>;
+}
+
+const spawnScopes = new Map<string, SpawnScope>();
+
+/** 이미 흡수한 탭 (onCreated 와 webNavigation 이 같은 탭을 두 번 보내도 한 번만 처리한다). */
+const adoptedTabs = new Set<number>();
+
+/** 진행 중인 흡수 처리. 인계 판정은 이것이 끝난 뒤에 봐야 한다. */
+let adoptionChain: Promise<void> = Promise.resolve();
+
+function trackAdoption(work: () => Promise<void>): void {
+  adoptionChain = adoptionChain.then(work, work).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** 진행 중인 흡수 처리가 끝날 때까지 기다린다 (탭 인계 판정 직전에 부른다). */
+export async function settleSpawnAdoptions(): Promise<void> {
+  await adoptionChain;
+}
+
+/** 이 세션이 도는 동안 열리는 새 탭을 흡수하도록 스코프를 연다. */
+export function beginSpawnScope(input: SpawnScopeInput): void {
+  spawnScopes.set(input.sessionKey, {
+    ...input,
+    restoreTabId: typeof input.restoreTabId === 'number' ? input.restoreTabId : null,
+    restoreWindowId: typeof input.restoreWindowId === 'number' ? input.restoreWindowId : null,
+    popupWindowIds: new Set<number>(),
+  });
+}
+
+/** 스코프를 닫고, 실행이 끝날 때 닫아야 하는 팝업 창 id 를 돌려준다. */
+export function endSpawnScope(sessionKey: string): number[] {
+  const scope = spawnScopes.get(sessionKey);
+  spawnScopes.delete(sessionKey);
+  return scope ? Array.from(scope.popupWindowIds) : [];
+}
+
+/** 이 창이 지금 도는 실행이 연 팝업 창인가 (사용자가 연 창과 구분한다). */
+export function isSpawnedPopupWindow(windowId: number | null | undefined): boolean {
+  if (typeof windowId !== 'number') return false;
+  for (const scope of spawnScopes.values()) {
+    if (scope.popupWindowIds.has(windowId)) return true;
+  }
+  return false;
+}
+
+/** 테스트·정리용 - 열린 스코프를 모두 버린다. */
+export function resetSpawnScopes(): void {
+  spawnScopes.clear();
+  adoptedTabs.clear();
+}
+
+/** 이 opener 탭을 소유한 열린 스코프. 없으면 null. */
+async function scopeForOpener(openerTabId: number | null): Promise<SpawnScope | null> {
+  if (openerTabId === null || spawnScopes.size === 0) return null;
+  for (const scope of spawnScopes.values()) {
+    try {
+      const owned = await getSessionScopedTabIds(scope.sessionKey);
+      if (owned.includes(openerTabId)) return scope;
+    } catch {
+      // 조회 실패는 "이 스코프 소유가 아니다" 로 본다.
+    }
+  }
+  return null;
+}
+
+/**
+ * 사용자가 보던 탭·창을 즉시 되돌린다 (스폰 탭이 화면을 가져간 것을 취소한다).
+ *
+ * 탭은 activation-guard 의 복구 경로(`force: true`)를 쓴다. 창 포커스는 강제 포커스
+ * 토글과 무관하게 되돌려야 하므로 `window-focus-guard` 와 같은 이유로 직접 부른다 -
+ * 대상이 **사용자 창**일 때만 허용되는 호출이다.
+ */
+async function restoreUserView(scope: SpawnScope): Promise<void> {
+  if (scope.restoreTabId !== null) {
+    try {
+      await activateTab(scope.restoreTabId, { force: true, reason: 'spawned-tab:restore' });
+    } catch {
+      // 탭이 이미 닫혔을 수 있다 - best-effort
+    }
+  }
+  if (scope.restoreWindowId !== null) {
+    try {
+      await chrome.windows.update(scope.restoreWindowId, { focused: true });
+    } catch {
+      // 창이 이미 닫혔을 수 있다 - best-effort
+    }
+  }
+}
+
+/**
+ * 스코프가 도는 동안 그 소유 탭이 연 새 탭·창을 흡수한다.
+ * 흡수했으면 true (전역 토글만 보는 옛 완화 로직은 건너뛴다).
+ */
+async function adoptSpawnedTab(record: SpawnedTabRecord, windowType: string): Promise<boolean> {
+  if (adoptedTabs.has(record.tabId)) return true;
+  const scope = await scopeForOpener(record.openerTabId);
+  if (!scope) return false;
+  adoptedTabs.add(record.tabId);
+  try {
+    await addOwnedTab(record.tabId, scope.sessionKey);
+  } catch {
+    // 소유 등록 실패는 정리 경로가 창 단위로 한 번 더 걷는다.
+  }
+  if (windowType === 'popup') scope.popupWindowIds.add(record.windowId);
+  await restoreUserView(scope);
+  return true;
+}
 
 /**
  * auto-chrome-mcp fork(F7): MCP 작업 탭이 연 팝업 창은 OS 포커스를 훔친다 —
@@ -109,11 +250,14 @@ try {
       createdAt: Date.now(),
     };
     upsert(rec);
-    void resolveWindowType(tab.windowId).then((type) => {
+    trackAdoption(async () => {
+      const type = await resolveWindowType(tab.windowId);
       const existing = records.find((r) => r.tabId === tab.id);
       if (existing) existing.windowType = type;
-      if (type === 'popup') {
-        void unfocusPopupIfFromWorkTab(tab.windowId, rec.openerTabId);
+      // 무간섭을 강제하는 실행이 열어 놓은 스코프가 먼저다 - 전역 토글을 보지 않는다.
+      const adopted = await adoptSpawnedTab({ ...rec, windowType: type }, type);
+      if (!adopted && type === 'popup') {
+        await unfocusPopupIfFromWorkTab(tab.windowId, rec.openerTabId);
       }
     });
   });
@@ -127,18 +271,36 @@ try {
       windowId: records.find((r) => r.tabId === details.tabId)?.windowId ?? -1,
       createdAt: details.timeStamp,
     });
-    void chrome.tabs
-      .get(details.tabId)
-      .then((tab) => {
+    trackAdoption(async () => {
+      let windowId = records.find((r) => r.tabId === details.tabId)?.windowId ?? -1;
+      try {
+        const tab = await chrome.tabs.get(details.tabId);
+        windowId = tab.windowId;
         const existing = records.find((r) => r.tabId === details.tabId);
         if (existing && existing.windowId === -1) existing.windowId = tab.windowId;
-      })
-      .catch(() => {});
+      } catch {
+        return;
+      }
+      // onCreated 가 opener 를 몰랐던 경우 여기서 처음 소유가 정해진다.
+      const type = await resolveWindowType(windowId);
+      await adoptSpawnedTab(
+        {
+          tabId: details.tabId,
+          openerTabId: details.sourceTabId,
+          url: details.url,
+          windowId,
+          windowType: type,
+          createdAt: details.timeStamp,
+        },
+        type,
+      );
+    });
   });
 
   chrome.tabs?.onRemoved?.addListener((tabId) => {
     const idx = records.findIndex((r) => r.tabId === tabId);
     if (idx >= 0) records.splice(idx, 1);
+    adoptedTabs.delete(tabId);
   });
 } catch {
   // chrome API 불가 환경 — 추적 없이 동작 (getSpawnedTabsSince 는 빈 결과)

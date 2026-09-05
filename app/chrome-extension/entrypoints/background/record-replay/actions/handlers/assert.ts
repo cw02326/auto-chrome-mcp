@@ -10,6 +10,7 @@
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, Assertion, VariableStore } from '../types';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 /** Default timeout for polling assertions (ms) */
 const DEFAULT_ASSERT_TIMEOUT_MS = 5000;
@@ -255,6 +256,8 @@ async function pollAssertion(
   frameId: number | undefined,
   resolved: ResolvedAssertion,
   timeoutMs: number,
+  /** run 취소 신호. 폴링 간격도 이것을 본다 (2026-09-05 Codex 재확인 항목 3). */
+  signal?: AbortSignal,
 ): Promise<{ passed: boolean; message?: string }> {
   const startTime = Date.now();
   let lastResult: { passed: boolean; message?: string } = {
@@ -263,13 +266,19 @@ async function pollAssertion(
   };
 
   while (Date.now() - startTime < timeoutMs) {
+    if (signal?.aborted) break;
     lastResult = await checkAssertionInPage(tabId, frameId, resolved);
     if (lastResult.passed) return lastResult;
 
     // Wait before next poll
     const remaining = timeoutMs - (Date.now() - startTime);
     if (remaining > 0) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
+      try {
+        await sleepWithSignal(Math.min(POLL_INTERVAL_MS, remaining), signal);
+      } catch {
+        // 취소됐다 — 다음 확인 없이 마지막 결과로 끝낸다.
+        break;
+      }
     }
   }
 
@@ -323,7 +332,13 @@ export const assertHandler: ActionHandler<'assert'> = {
     const failStrategy = action.params.failStrategy ?? 'stop';
 
     // Execute assertion with polling
-    const result = await pollAssertion(tabId, ctx.frameId, resolved.resolved, timeoutMs);
+    const result = await pollAssertion(
+      tabId,
+      ctx.frameId,
+      resolved.resolved,
+      timeoutMs,
+      ctx.signal,
+    );
 
     if (result.passed) {
       return { status: 'success' };

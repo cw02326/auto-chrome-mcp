@@ -31,6 +31,7 @@ import type {
   VariablePointer,
   VariableStore,
 } from './types';
+import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 // ================================
 // 类型定义
@@ -129,9 +130,8 @@ export function failed<T extends ExecutableActionType>(
   return { status: 'failed', error: { code, message } };
 }
 
-function sleep(ms: number): Promise<void> {
-  const safe = Math.max(0, Math.floor(ms));
-  return new Promise((resolve) => setTimeout(resolve, safe));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return sleepWithSignal(Math.max(0, Math.floor(ms)), signal);
 }
 
 // ================================
@@ -613,7 +613,8 @@ export class ActionRegistry {
         // ignore
       }
 
-      if (delay > 0) await sleep(delay);
+      // 재시도 간격도 취소를 본다 (2026-09-05 Codex 재확인 항목 3).
+      if (delay > 0) await sleep(delay, ctx.signal);
     }
 
     const finalResult: ActionExecutionResult<T> =

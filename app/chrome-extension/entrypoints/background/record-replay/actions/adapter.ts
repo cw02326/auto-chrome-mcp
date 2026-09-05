@@ -98,6 +98,9 @@ export function execCtxToActionCtx(
   // The owned-tab set is shared by reference: a tab opened by a handler has to
   // show up in the run context too, or the next step could not close it.
   if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
+  // Same for the extra tab leases: a lease a handler takes has to be visible to
+  // the run, or nothing would release it when the run ends.
+  if (!ctx.leasedTabIds) ctx.leasedTabIds = new Set<number>();
   return {
     vars: ctx.vars as VariableStore,
     tabId,
@@ -109,6 +112,7 @@ export function execCtxToActionCtx(
     leaseToken: ctx.leaseToken,
     ownedTabIds: ctx.ownedTabIds,
     entryTabId: ctx.entryTabId,
+    leasedTabIds: ctx.leasedTabIds,
     signal: ctx.signal,
     log: (message: string, level?: 'info' | 'warn' | 'error') => {
       ctx.logger({

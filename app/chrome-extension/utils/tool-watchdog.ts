@@ -33,6 +33,42 @@ export class RunAbortedError extends Error {
   }
 }
 
+/** abort 된 signal 이 들고 있는 사유를 RunAbortedError 로 정규화한다. */
+export function abortErrorOf(signal?: AbortSignal, fallback = 'the caller cancelled this run') {
+  const reason: unknown = signal?.reason;
+  if (reason instanceof RunAbortedError) return reason;
+  if (reason instanceof Error) return new RunAbortedError(reason.message);
+  if (typeof reason === 'string' && reason.trim()) return new RunAbortedError(reason);
+  return new RunAbortedError(fallback);
+}
+
+/**
+ * 취소 가능한 sleep (2026-09-05 Codex 재확인 항목 3).
+ *
+ * 예전에는 엔진 곳곳의 대기가 `new Promise((r) => setTimeout(r, ms))` 였다. 스텝 경계에서만
+ * 취소를 확인했으므로, 60초짜리 delay 노드 안에 들어간 run 은 abort 를 받고도 그 60초가
+ * 다 지나야 멈췄다. 이 헬퍼는 signal 이 abort 되는 순간 타이머를 지우고 즉시 reject 한다.
+ *
+ * 던지는 값은 항상 `RunAbortedError` 라, 스케줄러가 이것을 잡아 `run_aborted` 결과로 닫는다.
+ */
+export function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  const requested = Number(ms);
+  const budget = Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 0;
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, budget));
+  if (signal.aborted) return Promise.reject(abortErrorOf(signal));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortErrorOf(signal));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, budget);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export interface TimeoutAbort {
   signal: AbortSignal;
   /** 실제로 적용된 예산 (ms). 상한을 넘겨 요청하면 상한으로 깎인다. */

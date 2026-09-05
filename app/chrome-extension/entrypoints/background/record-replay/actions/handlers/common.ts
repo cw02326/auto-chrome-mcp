@@ -19,6 +19,7 @@ import {
 import { tryResolveString } from '../registry';
 import type { ActionExecutionContext, ElementTarget, Resolvable, VariableStore } from '../types';
 import { LEASE_TOKEN_ARG } from '@/utils/tab-lock';
+import { acquireRunTabLease } from '../../engine/tab-context';
 
 // ================================
 // Tool Call Arguments
@@ -67,6 +68,8 @@ export function actionOwnedTabIds(ctx: ActionExecutionContext): Set<number> {
 /** Register a tab the run just opened. */
 export function markActionOwnedTab(ctx: ActionExecutionContext, tabId: number): void {
   if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  // 새로 연 탭에도 run 의 리스를 건다 (2026-09-05 Codex 재확인 항목 2).
+  acquireRunTabLease(ctx, tabId);
   if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
   ctx.ownedTabIds.add(tabId);
 }

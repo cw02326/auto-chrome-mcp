@@ -31,8 +31,21 @@ const MANUAL_BUSY_TTL_MS = 60_000;
 /** 리스 보유자 토큰. 같은 토큰으로 들어온 호출만 재진입으로 인정한다. */
 export type TabLeaseToken = string;
 
-/** tabId → 지금 리스를 쥔 토큰. */
-const leaseOwners = new Map<number, TabLeaseToken>();
+/**
+ * tabId → 그 탭에 걸린 리스 보유 토큰 **스택**.
+ *
+ * 예전에는 `Map<number, TabLeaseToken>` 하나였고, 리스를 풀 때 "이전 보유자" 를 되살렸다.
+ * 그런데 비차단 리스 둘이 겹친 뒤 **역순으로** 끝나면(A 시작 → B 시작 → A 종료 → B 종료),
+ * B 가 풀리면서 자기가 기억한 이전 보유자 A 를 되살린다. A 는 이미 끝났으므로 그 토큰은
+ * 아무도 풀어 주지 않고 영영 남는다(stale owner) — 그 탭은 계속 busy 로 보이고, A 의 토큰을
+ * 아는 호출만 통과하는 유령 리스가 된다 (2026-09-05 Codex 재확인 항목 1).
+ *
+ * 스택이면 종료 순서와 무관하다: 각자 자기 토큰 하나만 빼고, 남은 것의 마지막이 보유자다.
+ */
+const leaseStacks = new Map<number, TabLeaseToken[]>();
+
+/** 리스가 완전히 풀리기를 기다리는 대기자들 (tabId → resolve 목록). */
+const leaseWaiters = new Map<number, Array<() => void>>();
 
 /** 도구 인자에 리스 토큰을 실을 때 쓰는 키 (engine 의 runToolArgs 가 넣는다). */
 export const LEASE_TOKEN_ARG = '_leaseToken';
@@ -40,15 +53,12 @@ export const LEASE_TOKEN_ARG = '_leaseToken';
 /**
  * 리스 보유 중 **토큰 없는** withTabLock 호출을 대기시킬지.
  *
- * 현재 도구 파이프라인(`entrypoints/background/tools/index.ts`)은 `args._leaseToken` 을
- * `withTabLock` 에 넘기지 않는다. 그 상태에서 대기를 켜면 run 자신의 노드 호출이 자기
- * 리스에 막혀 교착한다. 그래서 기본값은 false 다 — 리스는 "재진입 즉시 통과 + busy 표시"
- * 로만 동작하고, 바깥 호출 차단은 파이프라인이 토큰을 넘기기 시작하면 켠다.
- *
- * 켜는 법: tools/index.ts 가 `withTabLock(lockTabId, fn, { token: args[LEASE_TOKEN_ARG] })`
- * 로 바뀐 뒤 이 값을 true 로 바꾼다.
+ * 이제 도구 파이프라인(`entrypoints/background/tools/index.ts`)이 `args._leaseToken` 을
+ * `withTabLock` 에 넘긴다. run 자신의 노드 호출은 토큰이 맞아 즉시 통과하므로 교착하지
+ * 않고, 토큰 없는 바깥 호출만 리스가 풀릴 때까지 기다린다. 그래서 기본값이 true 다 —
+ * 흐름 실행 중에는 다른 세션이 그 탭에 끼어들 수 없다 (2026-09-05 Codex 재확인 항목 1).
  */
-export const LEASE_BLOCKS_UNTOKENED_CALLS = false;
+export const LEASE_BLOCKS_UNTOKENED_CALLS = true;
 
 export interface TabLockOptions {
   /**
@@ -81,16 +91,79 @@ function enqueue<T>(tabId: number, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** 지금 이 탭의 보유 토큰 목록 (마지막이 현재 보유자). */
+function stackOf(tabId: number): TabLeaseToken[] | undefined {
+  return leaseStacks.get(tabId);
+}
+
+/** 리스가 완전히 풀렸음을 대기자들에게 알린다. */
+function notifyLeaseReleased(tabId: number): void {
+  const waiters = leaseWaiters.get(tabId);
+  if (!waiters) return;
+  leaseWaiters.delete(tabId);
+  for (const resolve of waiters) resolve();
+}
+
+/** 이 탭의 리스가 전부 풀릴 때까지 기다린다. */
+function waitForLeaseRelease(tabId: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const waiters = leaseWaiters.get(tabId);
+    if (waiters) waiters.push(resolve);
+    else leaseWaiters.set(tabId, [resolve]);
+  });
+}
+
+/**
+ * 이 탭에 리스를 하나 더 얹는다. 같은 토큰을 여러 번 얹어도 각각 한 번씩 풀어야 한다.
+ *
+ * 흐름이 실행 중 자기가 연 탭으로 옮겨갈 때 그 탭에도 같은 토큰의 리스를 거는 데 쓴다
+ * (2026-09-05 Codex 재확인 항목 2).
+ */
+export function acquireTabLease(tabId: unknown, ownerToken: TabLeaseToken): void {
+  if (typeof tabId !== 'number') return;
+  const stack = leaseStacks.get(tabId);
+  if (stack) stack.push(ownerToken);
+  else leaseStacks.set(tabId, [ownerToken]);
+}
+
+/** `acquireTabLease` 로 얹은 리스를 하나 내린다. 없으면 아무 일도 하지 않는다. */
+export function releaseTabLease(tabId: unknown, ownerToken: TabLeaseToken): void {
+  if (typeof tabId !== 'number') return;
+  const stack = leaseStacks.get(tabId);
+  if (!stack) return;
+  // 마지막 것부터 뺀다 — 중첩 획득의 짝을 안쪽부터 맞춘다.
+  const index = stack.lastIndexOf(ownerToken);
+  if (index === -1) return;
+  stack.splice(index, 1);
+  if (stack.length === 0) {
+    leaseStacks.delete(tabId);
+    notifyLeaseReleased(tabId);
+  }
+}
+
+/** 이 탭에 그 토큰의 리스가 걸려 있는가. */
+export function isTabLeasedBy(tabId: unknown, ownerToken: TabLeaseToken): boolean {
+  if (typeof tabId !== 'number') return false;
+  return stackOf(tabId)?.includes(ownerToken) === true;
+}
+
 export async function withTabLock<T>(
   tabId: unknown,
   fn: () => Promise<T>,
   options?: TabLockOptions,
 ): Promise<T> {
   if (typeof tabId !== 'number') return fn();
-  // 리스 보유자의 재진입: 자기 자신을 기다리지 않는다.
   const token = options?.token;
-  if (token !== undefined && leaseOwners.get(tabId) === token) return fn();
-  // 리스가 걸려 있고 차단 모드가 아니면(= 토큰 전달이 아직 없는 과도기) 평소대로 줄을 선다.
+  for (;;) {
+    const stack = stackOf(tabId);
+    if (!stack || stack.length === 0) break;
+    // 리스 보유자의 재진입: 자기 자신을 기다리지 않는다.
+    if (token !== undefined && stack.includes(token)) return fn();
+    // 차단 모드가 아니면(테스트·과도기) 예전처럼 스텝 단위 큐에만 선다.
+    if (!LEASE_BLOCKS_UNTOKENED_CALLS) break;
+    // 리스가 풀린 뒤 다시 확인한다 — 그 사이 다른 리스가 걸렸을 수 있다.
+    await waitForLeaseRelease(tabId);
+  }
   return enqueue(tabId, fn);
 }
 
@@ -106,20 +179,16 @@ export async function withTabLease<T>(
   options?: TabLeaseOptions,
 ): Promise<T> {
   if (typeof tabId !== 'number') return fn();
-  if (leaseOwners.get(tabId) === ownerToken) return fn();
+  if (isTabLeasedBy(tabId, ownerToken)) return fn();
 
   const block = options?.blockUntokenedCalls ?? LEASE_BLOCKS_UNTOKENED_CALLS;
 
   const body = async (): Promise<T> => {
-    const previous = leaseOwners.get(tabId);
-    leaseOwners.set(tabId, ownerToken);
+    acquireTabLease(tabId, ownerToken);
     try {
       return await fn();
     } finally {
-      if (leaseOwners.get(tabId) === ownerToken) {
-        if (previous === undefined) leaseOwners.delete(tabId);
-        else leaseOwners.set(tabId, previous);
-      }
+      releaseTabLease(tabId, ownerToken);
     }
   };
 
@@ -131,12 +200,13 @@ export async function withTabLease<T>(
 
 /** 지금 이 탭에 리스가 걸려 있는가 (테스트·진단용). */
 export function hasTabLease(tabId: number): boolean {
-  return leaseOwners.has(tabId);
+  return (stackOf(tabId)?.length ?? 0) > 0;
 }
 
-/** 지금 이 탭의 리스 보유 토큰 (테스트·진단용). */
+/** 지금 이 탭의 리스 보유 토큰 (테스트·진단용). 스택의 마지막이 현재 보유자다. */
 export function getTabLeaseOwner(tabId: number): TabLeaseToken | undefined {
-  return leaseOwners.get(tabId);
+  const stack = stackOf(tabId);
+  return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
 }
 
 /** 겹치지 않는 리스 토큰을 만든다. */
@@ -151,7 +221,7 @@ export function createTabLeaseToken(prefix = 'lease'): TabLeaseToken {
  */
 export function isTabBusy(tabId: number): boolean {
   if (tabLockTails.has(tabId)) return true;
-  if (leaseOwners.has(tabId)) return true;
+  if (hasTabLease(tabId)) return true;
   const markedAt = manualBusy.get(tabId);
   if (markedAt === undefined) return false;
   if (Date.now() - markedAt > MANUAL_BUSY_TTL_MS) {
