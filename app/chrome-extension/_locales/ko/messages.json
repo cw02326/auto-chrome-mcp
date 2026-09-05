@@ -614,5 +614,637 @@
   "dnrFallbackLabel": {
     "message": "DNR fallback (declarativeNetRequest)",
     "description": "DNR 폴백 옵션"
+  },
+  "sidepanel_marker_search_placeholder": {
+    "message": "마킹 이름, 선택기 검색...",
+    "description": "요소 마킹 목록 검색창 placeholder"
+  },
+  "sidepanel_marker_add": {
+    "message": "마킹 추가",
+    "description": "요소 마킹 추가 버튼/제목"
+  },
+  "sidepanel_marker_edit": {
+    "message": "마킹 편집",
+    "description": "요소 마킹 편집 모달 제목"
+  },
+  "sidepanel_marker_name_placeholder": {
+    "message": "예: 로그인 버튼",
+    "description": "요소 마킹 이름 입력창 placeholder"
+  },
+  "sidepanel_marker_selector_type_label": {
+    "message": "선택기 유형",
+    "description": "요소 마킹 선택기 유형 라벨"
+  },
+  "sidepanel_marker_match_type_label": {
+    "message": "일치 유형",
+    "description": "요소 마킹 일치 유형 라벨"
+  },
+  "sidepanel_match_type_prefix": {
+    "message": "경로 접두사",
+    "description": "일치 유형 옵션: 경로 접두사"
+  },
+  "sidepanel_match_type_exact": {
+    "message": "정확히 일치",
+    "description": "일치 유형 옵션: 정확히 일치"
+  },
+  "sidepanel_selector_type_css": {
+    "message": "CSS 선택기",
+    "description": "선택기 유형 옵션: CSS 선택기"
+  },
+  "sidepanel_marker_selector_label": {
+    "message": "선택기",
+    "description": "요소 마킹 선택기 입력 라벨"
+  },
+  "sidepanel_marker_selector_placeholder": {
+    "message": "CSS 선택기 또는 XPath",
+    "description": "요소 마킹 선택기 입력창 placeholder"
+  },
+  "sidepanel_update_button": {
+    "message": "업데이트",
+    "description": "기존 항목 업데이트 버튼"
+  },
+  "sidepanel_marker_stats_filtered": {
+    "message": "검색 결과 $COUNT$개 마킹 (전체 $TOTAL$개, 도메인 $DOMAINS$개)",
+    "description": "요소 마킹 검색 결과 통계",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "total": {
+        "content": "$2",
+        "example": "10"
+      },
+      "domains": {
+        "content": "$3",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanel_marker_stats_all": {
+    "message": "전체 $TOTAL$개 마킹, 도메인 $DOMAINS$개",
+    "description": "요소 마킹 전체 통계",
+    "placeholders": {
+      "total": {
+        "content": "$1",
+        "example": "10"
+      },
+      "domains": {
+        "content": "$2",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanel_marker_domain_count": {
+    "message": "$COUNT$개 마킹",
+    "description": "도메인별 마킹 개수",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_marker_verify": {
+    "message": "검증",
+    "description": "요소 마킹 검증 버튼"
+  },
+  "sidepanel_edit_button": {
+    "message": "편집",
+    "description": "편집 버튼(공용)"
+  },
+  "sidepanel_marker_no_match": {
+    "message": "일치하는 마킹을 찾을 수 없습니다",
+    "description": "요소 마킹 검색 결과 없음"
+  },
+  "sidepanel_clear_search_button": {
+    "message": "검색 지우기",
+    "description": "검색어 지우기 버튼"
+  },
+  "sidepanel_marker_empty": {
+    "message": "마킹된 요소가 없습니다",
+    "description": "요소 마킹 빈 상태 안내"
+  },
+  "sidepanel_marker_local_file": {
+    "message": "(로컬 파일)",
+    "description": "요소 마킹 도메인 미상 표시(로컬 파일)"
+  },
+  "sidepanel_marker_unknown_url": {
+    "message": "(알 수 없는 URL)",
+    "description": "요소 마킹 URL 미상 표시"
+  },
+  "sidepanel_flow_delete_confirm": {
+    "message": "이 흐름을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다",
+    "description": "흐름 삭제 확인 문구"
+  },
+  "sidepanel_marker_delete_confirm": {
+    "message": "\"$NAME$\" 마킹을 삭제하시겠습니까?",
+    "description": "요소 마킹 삭제 확인 문구",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "로그인 버튼"
+      }
+    }
+  },
+  "sidepanel_nav_trigger_title": {
+    "message": "페이지 전환 (드래그로 이동, 더블클릭으로 위치 초기화)",
+    "description": "사이드패널 네비게이터 트리거 버튼 안내"
+  },
+  "sidepanel_nav_switch_page": {
+    "message": "페이지 전환",
+    "description": "사이드패널 네비게이터 메뉴 제목"
+  },
+  "sidepanel_nav_workflows_title": {
+    "message": "흐름 관리",
+    "description": "네비게이터 메뉴: 흐름 관리 항목 제목"
+  },
+  "sidepanel_nav_workflows_desc": {
+    "message": "자동화 흐름을 녹화하고 재생합니다",
+    "description": "네비게이터 메뉴: 흐름 관리 항목 설명"
+  },
+  "sidepanel_nav_markers_title": {
+    "message": "요소 마킹 관리",
+    "description": "네비게이터 메뉴: 요소 마킹 관리 항목 제목"
+  },
+  "sidepanel_nav_markers_desc": {
+    "message": "페이지 요소 마킹을 관리합니다",
+    "description": "네비게이터 메뉴: 요소 마킹 관리 항목 설명"
+  },
+  "sidepanel_search_flows_placeholder": {
+    "message": "흐름 검색...",
+    "description": "흐름 목록 검색창 placeholder"
+  },
+  "sidepanel_refresh_button": {
+    "message": "새로고침",
+    "description": "흐름 목록 새로고침 버튼"
+  },
+  "sidepanel_current_page_only": {
+    "message": "현재 페이지만",
+    "description": "현재 페이지 흐름만 보기 체크박스 라벨"
+  },
+  "sidepanel_flow_count": {
+    "message": "흐름 $COUNT$개",
+    "description": "흐름 개수 표시",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
+  },
+  "sidepanel_no_matching_flows": {
+    "message": "일치하는 흐름이 없습니다",
+    "description": "흐름 검색 결과 없음"
+  },
+  "sidepanel_no_flows_yet": {
+    "message": "아직 흐름이 없습니다",
+    "description": "흐름 빈 상태 제목"
+  },
+  "sidepanel_record_first_flow": {
+    "message": "첫 자동화 흐름을 녹화해보세요",
+    "description": "흐름 빈 상태 안내"
+  },
+  "sidepanel_create_flow_button": {
+    "message": "흐름 만들기",
+    "description": "흐름 만들기 버튼"
+  },
+  "sidepanel_advanced_section": {
+    "message": "고급",
+    "description": "고급 설정 구분선 제목"
+  },
+  "sidepanel_run_history_title": {
+    "message": "실행 이력",
+    "description": "실행 이력 섹션 제목"
+  },
+  "sidepanel_no_run_history": {
+    "message": "아직 실행 이력이 없습니다",
+    "description": "실행 이력 빈 상태 안내"
+  },
+  "sidepanel_status_label": {
+    "message": "상태",
+    "description": "실행 상태 라벨"
+  },
+  "sidepanel_elapsed_time_label": {
+    "message": "소요 시간",
+    "description": "실행 소요 시간 라벨"
+  },
+  "sidepanel_step_label": {
+    "message": "단계",
+    "description": "실행 이력 단계 라벨"
+  },
+  "sidepanel_run_status_queued": {
+    "message": "대기 중",
+    "description": "실행 상태: 대기 중"
+  },
+  "sidepanel_run_status_running": {
+    "message": "실행 중",
+    "description": "실행 상태: 실행 중"
+  },
+  "sidepanel_run_status_paused": {
+    "message": "일시 정지됨",
+    "description": "실행 상태: 일시 정지됨"
+  },
+  "sidepanel_run_status_succeeded": {
+    "message": "성공",
+    "description": "실행 상태: 성공"
+  },
+  "sidepanel_run_status_failed": {
+    "message": "실패",
+    "description": "실행 상태: 실패"
+  },
+  "sidepanel_run_status_canceled": {
+    "message": "취소됨",
+    "description": "실행 상태: 취소됨"
+  },
+  "sidepanel_untitled_flow": {
+    "message": "제목 없음",
+    "description": "흐름 이름 미지정 시 기본값"
+  },
+  "sidepanel_no_description": {
+    "message": "설명 없음",
+    "description": "흐름 설명 미지정 시 기본값"
+  },
+  "sidepanel_run_flow_button": {
+    "message": "흐름 실행",
+    "description": "흐름 카드 실행 버튼"
+  },
+  "sidepanel_edit_flow_button": {
+    "message": "흐름 편집",
+    "description": "흐름 카드 편집 버튼"
+  },
+  "sidepanel_more_actions_button": {
+    "message": "더보기",
+    "description": "흐름 카드 더보기 버튼"
+  },
+  "sidepanel_export_button": {
+    "message": "내보내기",
+    "description": "흐름 내보내기 메뉴 항목"
+  },
+  "sidepanel_record_start": {
+    "message": "녹화 시작",
+    "description": "녹화 시작 버튼"
+  },
+  "sidepanel_record_stop": {
+    "message": "녹화 중지",
+    "description": "녹화 중지 버튼"
+  },
+  "sidepanel_record_recording": {
+    "message": "녹화 중",
+    "description": "녹화 중 표시"
+  },
+  "sidepanel_record_paused": {
+    "message": "일시정지",
+    "description": "녹화 일시정지 표시"
+  },
+  "sidepanel_record_stopping": {
+    "message": "마무리하는 중",
+    "description": "녹화 마무리 표시"
+  },
+  "sidepanel_record_hint": {
+    "message": "현재 탭에서 클릭, 입력, 페이지 이동을 기록합니다",
+    "description": "녹화 시작 안내"
+  },
+  "sidepanel_record_steps": {
+    "message": "단계 $COUNT$개",
+    "description": "잡힌 단계 수",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "7"
+      }
+    }
+  },
+  "sidepanel_record_start_failed": {
+    "message": "녹화를 시작하지 못했습니다: $REASON$",
+    "description": "녹화 시작 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no active tab"
+      }
+    }
+  },
+  "sidepanel_record_stop_failed": {
+    "message": "녹화를 멈추지 못했습니다: $REASON$",
+    "description": "녹화 중지 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no active recording"
+      }
+    }
+  },
+  "sidepanel_record_nothing_captured": {
+    "message": "기록된 단계가 없어 저장하지 않았습니다",
+    "description": "녹화 결과 없음"
+  },
+  "sidepanel_wizard_title": {
+    "message": "흐름 저장",
+    "description": "저장 화면 제목"
+  },
+  "sidepanel_wizard_loading": {
+    "message": "불러오는 중",
+    "description": "저장 화면 로딩"
+  },
+  "sidepanel_wizard_load_failed": {
+    "message": "흐름을 불러오지 못했습니다",
+    "description": "흐름 로딩 실패"
+  },
+  "sidepanel_wizard_name_label": {
+    "message": "이름",
+    "description": "흐름 이름 라벨"
+  },
+  "sidepanel_wizard_name_required": {
+    "message": "이름을 입력해 주세요",
+    "description": "이름 미입력"
+  },
+  "sidepanel_wizard_start_url_label": {
+    "message": "시작 URL",
+    "description": "시작 URL 라벨"
+  },
+  "sidepanel_wizard_start_url_hint": {
+    "message": "실행할 때 작업 탭이 없으면 이 주소로 새 탭을 엽니다",
+    "description": "시작 URL 설명"
+  },
+  "sidepanel_wizard_variables_title": {
+    "message": "감지된 변수",
+    "description": "변수 목록 제목"
+  },
+  "sidepanel_wizard_variables_empty": {
+    "message": "감지된 변수가 없습니다",
+    "description": "변수 없음"
+  },
+  "sidepanel_wizard_variable_sensitive": {
+    "message": "민감",
+    "description": "민감 변수 표시"
+  },
+  "sidepanel_wizard_variable_sensitive_hint": {
+    "message": "민감 변수의 값은 흐름에 저장하지 않습니다. 실행할 때 입력받습니다",
+    "description": "민감 변수 설명"
+  },
+  "sidepanel_wizard_duplicate_variable": {
+    "message": "변수 이름이 겹칩니다: $NAME$",
+    "description": "변수 이름 중복",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "password"
+      }
+    }
+  },
+  "sidepanel_wizard_invalid_variable": {
+    "message": "변수 이름은 영문자나 밑줄로 시작하고 영문자, 숫자, 밑줄만 쓸 수 있습니다",
+    "description": "변수 이름 형식 오류"
+  },
+  "sidepanel_wizard_steps_title": {
+    "message": "단계 $COUNT$개",
+    "description": "단계 목록 제목",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "7"
+      }
+    }
+  },
+  "sidepanel_wizard_no_steps": {
+    "message": "기록된 단계가 없습니다",
+    "description": "단계 없음"
+  },
+  "sidepanel_wizard_step_delete": {
+    "message": "단계 삭제",
+    "description": "단계 삭제 버튼"
+  },
+  "sidepanel_wizard_test_run": {
+    "message": "시험 실행",
+    "description": "시험 실행 버튼"
+  },
+  "sidepanel_wizard_test_running": {
+    "message": "시험 실행 중",
+    "description": "시험 실행 중"
+  },
+  "sidepanel_wizard_test_result": {
+    "message": "성공 $OK$, 실패 $FAIL$, $SEC$초",
+    "description": "시험 실행 결과",
+    "placeholders": {
+      "fail": {
+        "content": "$2",
+        "example": "0"
+      },
+      "ok": {
+        "content": "$1",
+        "example": "6"
+      },
+      "sec": {
+        "content": "$3",
+        "example": "4.2"
+      }
+    }
+  },
+  "sidepanel_wizard_test_needs_url": {
+    "message": "시험 실행을 하려면 시작 URL 이 필요합니다",
+    "description": "시험 실행에 URL 필요"
+  },
+  "sidepanel_wizard_save_publish": {
+    "message": "저장하고 발행",
+    "description": "저장하고 발행 버튼"
+  },
+  "sidepanel_wizard_save_only": {
+    "message": "저장만",
+    "description": "저장만 버튼"
+  },
+  "sidepanel_wizard_close": {
+    "message": "닫기",
+    "description": "닫기 버튼"
+  },
+  "sidepanel_wizard_saved": {
+    "message": "저장했습니다",
+    "description": "저장 완료"
+  },
+  "sidepanel_wizard_published": {
+    "message": "발행했습니다",
+    "description": "발행 완료"
+  },
+  "sidepanel_wizard_save_failed": {
+    "message": "저장하지 못했습니다: $REASON$",
+    "description": "저장 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "storage error"
+      }
+    }
+  },
+  "sidepanel_wizard_publish_failed": {
+    "message": "발행하지 못했습니다: $REASON$",
+    "description": "발행 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "flow not found"
+      }
+    }
+  },
+  "sidepanel_step_type_navigate": {
+    "message": "이동",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_click": {
+    "message": "클릭",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_dblclick": {
+    "message": "더블클릭",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_fill": {
+    "message": "입력",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_key": {
+    "message": "키 입력",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_scroll": {
+    "message": "스크롤",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_wait": {
+    "message": "대기",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_assert": {
+    "message": "확인",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_extract": {
+    "message": "값 추출",
+    "description": "단계 유형"
+  },
+  "sidepanel_step_type_screenshot": {
+    "message": "화면 저장",
+    "description": "단계 유형"
+  },
+  "sidepanel_runvars_title": {
+    "message": "실행에 필요한 값",
+    "description": "실행 변수 입력 제목"
+  },
+  "sidepanel_runvars_hint": {
+    "message": "민감값은 이 창에서만 쓰이고 저장하지 않습니다",
+    "description": "실행 변수 안내"
+  },
+  "sidepanel_runvars_run": {
+    "message": "실행",
+    "description": "실행 버튼"
+  },
+  "sidepanel_runvars_cancel": {
+    "message": "취소",
+    "description": "취소 버튼"
+  },
+  "sidepanel_published_badge": {
+    "message": "발행됨",
+    "description": "발행됨 배지"
+  },
+  "sidepanel_republish_badge": {
+    "message": "수정 후 재발행 필요",
+    "description": "재발행 필요 배지"
+  },
+  "sidepanel_publish_action": {
+    "message": "발행",
+    "description": "발행 메뉴"
+  },
+  "sidepanel_unpublish_action": {
+    "message": "발행 해제",
+    "description": "발행 해제 메뉴"
+  },
+  "sidepanel_unpublished": {
+    "message": "발행을 해제했습니다",
+    "description": "발행 해제 완료"
+  },
+  "sidepanel_publish_failed": {
+    "message": "발행하지 못했습니다: $REASON$",
+    "description": "발행 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "flow not found"
+      }
+    }
+  },
+  "sidepanel_unpublish_failed": {
+    "message": "발행을 해제하지 못했습니다: $REASON$",
+    "description": "발행 해제 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "storage error"
+      }
+    }
+  },
+  "sidepanel_run_running": {
+    "message": "실행 중",
+    "description": "실행 중 표시"
+  },
+  "sidepanel_run_succeeded": {
+    "message": "실행 성공 (단계 $COUNT$개, $SEC$초)",
+    "description": "실행 성공",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "6"
+      },
+      "sec": {
+        "content": "$2",
+        "example": "4.2"
+      }
+    }
+  },
+  "sidepanel_run_failed": {
+    "message": "실행 실패: $REASON$",
+    "description": "실행 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "step_3: element not found"
+      }
+    }
+  },
+  "sidepanel_flow_delete_failed": {
+    "message": "삭제하지 못했습니다: $REASON$",
+    "description": "삭제 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "storage error"
+      }
+    }
+  },
+  "sidepanel_flow_export_failed": {
+    "message": "내보내지 못했습니다: $REASON$",
+    "description": "내보내기 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "flow not found"
+      }
+    }
+  },
+  "sidepanel_record_no_tab": {
+    "message": "녹화할 탭을 찾지 못했습니다",
+    "description": "녹화할 탭 없음"
+  },
+  "sidepanel_record_restricted_url": {
+    "message": "이 페이지에서는 녹화할 수 없습니다. 일반 웹페이지를 연 뒤 다시 시작해 주세요",
+    "description": "녹화 불가 주소 안내"
+  },
+  "sidepanel_search_hides_flows": {
+    "message": "검색어에 걸려 보이지 않습니다. 저장된 흐름은 모두 $COUNT$개입니다",
+    "description": "검색 때문에 목록이 빈 경우",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   }
 }

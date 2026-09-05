@@ -289,6 +289,9 @@ describe('publishFlow drops sensitive variable defaults from the snapshot', () =
   beforeEach(() => {
     vi.clearAllMocks();
     (IndexedDbStorage.published.save as any).mockResolvedValue(undefined);
+    // publishFlow 는 slug 유일성 검사를 위해 발행 목록도 읽는다 (2026-09-05 교차 리뷰 3항).
+    // restoreMocks 가 모듈 수준 구현을 지우므로 여기서 다시 깔아 준다.
+    (IndexedDbStorage.published.list as any).mockResolvedValue([]);
   });
 
   it('sensitive 변수의 default 는 스냅샷에 저장되지 않는다', async () => {

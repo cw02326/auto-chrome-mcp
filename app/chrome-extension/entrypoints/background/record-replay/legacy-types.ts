@@ -100,6 +100,14 @@ export interface StepKey extends StepBase {
   type: 'key';
   keys: string; // e.g. "Backspace Enter" or "cmd+a"
   target?: TargetLocator; // optional focus target
+  /**
+   * Post-key waits (2026-09-05 Codex cross review, item 5).
+   *
+   * Enter on a form submits it, so a recorded key step can carry the same
+   * navigation hint a click does. The recorder sets `waitForNavigation` only
+   * when it actually observed a navigation right after the key press.
+   */
+  after?: { waitForNavigation?: boolean; waitForNetworkIdle?: boolean };
 }
 
 export interface StepScroll extends StepBase {

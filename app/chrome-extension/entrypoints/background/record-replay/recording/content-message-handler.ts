@@ -11,7 +11,7 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
  * - 'finalize': Content script has finished flushing (used during stop barrier)
  */
 export function initContentMessageHandler(session: RecordingSessionManager): void {
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (!message || message.type !== TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT) return false;
 
@@ -29,6 +29,9 @@ export function initContentMessageHandler(session: RecordingSessionManager): voi
       }
 
       const payload = message?.payload || {};
+      // 이 단계들이 어느 탭에서 왔는지 함께 넘긴다. 이동 판정 상태를 탭별로 두기 위해서다
+      // (2026-09-05 Codex 교차 리뷰 1). content script 메시지에는 항상 sender.tab 이 있다.
+      const stepOptions = { tabId: sender?.tab?.id };
 
       // Handle steps
       if (payload.kind === 'steps' || payload.kind === 'step') {
@@ -38,7 +41,7 @@ export function initContentMessageHandler(session: RecordingSessionManager): voi
             ? [payload.step as Step]
             : [];
         if (steps.length > 0) {
-          session.appendSteps(steps);
+          session.appendSteps(steps, stepOptions);
         }
       }
 
@@ -59,7 +62,7 @@ export function initContentMessageHandler(session: RecordingSessionManager): voi
           ? (payload.variables as VariableDef[])
           : [];
         if (steps.length > 0) {
-          session.appendSteps(steps);
+          session.appendSteps(steps, stepOptions);
         }
         if (variables.length > 0) {
           session.appendVariables(variables);

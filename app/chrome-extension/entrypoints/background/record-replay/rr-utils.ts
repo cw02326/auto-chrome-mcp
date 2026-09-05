@@ -111,6 +111,32 @@ async function waitForTabSettled(
 }
 
 /**
+ * 두 주소가 "이미 그 페이지" 라고 볼 수 있는가 (2026-09-05 Codex 교차 리뷰 6).
+ *
+ * 파서가 만든 정규형으로 비교하고, 끝 슬래시만 무시한다. 파싱이 안 되는 입력은 원문 비교다.
+ */
+export function isSameUrlForPrepare(a?: string | null, b?: string | null): boolean {
+  const norm = (u?: string | null): string | null => {
+    if (typeof u !== 'string') return null;
+    const trimmed = u.trim();
+    if (!trimmed) return null;
+    let canonical = trimmed;
+    try {
+      canonical = new URL(trimmed).href;
+    } catch {
+      // 완전한 URL 이 아니면 원문 그대로 비교한다.
+    }
+    if (canonical.length > 1 && canonical.endsWith('/') && !canonical.endsWith('://')) {
+      canonical = canonical.slice(0, -1);
+    }
+    return canonical;
+  };
+  const left = norm(a);
+  const right = norm(b);
+  return left !== null && right !== null && left === right;
+}
+
+/**
  * Get the run's tab ready before the first step.
  *
  * Works only on the tab the run was pinned to. Unlike the old ensureTab(), it
@@ -158,8 +184,16 @@ export async function prepareRunTab(
   }
 
   if (options.startUrl) {
-    await chrome.tabs.update(tabId, { url: options.startUrl });
-    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
+    // 이미 그 페이지면 다시 불러오지 않는다 (2026-09-05 Codex 교차 리뷰 6). 도구가 시작
+    // URL 로 작업 탭을 방금 열었는데 여기서 또 이동시키면 같은 페이지를 두 번 읽는다.
+    // 명시적인 refresh 요청은 아래 분기가 따로 처리한다.
+    if (!isSameUrlForPrepare(current?.url, options.startUrl)) {
+      await chrome.tabs.update(tabId, { url: options.startUrl });
+      await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
+    } else if (options.refresh) {
+      await chrome.tabs.reload?.(tabId);
+      await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
+    }
   } else if (options.refresh && isWebUrl(current?.url)) {
     await chrome.tabs.reload?.(tabId);
     await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);

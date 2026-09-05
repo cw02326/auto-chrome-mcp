@@ -1308,18 +1308,30 @@ published in the extension side panel; this tool only reads the list.
 
 Run one published flow on this session work tab.
 
-The flow engine never picks a tab on its own: the work-tab gate supplies the tab, and every
-step the flow runs carries that tab id. So the tool needs a work tab. Call `chrome_navigate`
-first (or pass `tabId`); with no work tab the call is refused with `no_work_tab`. It cannot be
-nested inside `chrome_batch` or `chrome_shortcut` steps.
+The flow engine never picks a tab on its own: the tab is supplied to it, and every step the
+flow runs carries that tab id. Where that tab comes from is decided in this order:
+
+1. the `tabId` you passed, or this session's work tab, which the work-tab gate injects;
+2. otherwise the **flow start URL**: a `startUrl` argument, or the page the flow was recorded
+   on (`startUrl` is stored with the flow when you record it in the side panel). The tool
+   opens that page as a background work tab through the same path
+   `chrome_navigate(background: true)` uses, so the tab is registered as this session's work
+   tab and stays open afterwards, exactly as if you had called `chrome_navigate` yourself;
+3. only when there is neither a work tab nor a start URL is the call refused with
+   `no_work_tab`. Call `chrome_navigate` first, or pass `tabId`.
+
+Flows recorded before start URLs existed have none, so they still need a work tab. The call
+cannot be nested inside `chrome_batch` or `chrome_shortcut` steps.
 
 **Parameters**:
 
 - `flowId` (string, required): id from `record_replay_list_published`
 - `args` (object, optional): values for the flow variables, keyed by variable name
 - `tabTarget` (string, optional, default `current`): `current` runs in the work tab. `new`
-  opens a background tab in the work tab window, runs there, and leaves the tab open
-- `startUrl` (string, optional): open this URL in the run tab before the first step
+  opens a background tab in the work tab window, runs there, and leaves the tab open. It is
+  ignored when the run tab was just created from the start URL, since that tab is already new
+- `startUrl` (string, optional): open this URL in the run tab before the first step. It
+  overrides the flow's own start URL, and is what a work tab is created from when there is none
 - `refresh` (boolean, optional, default `false`): reload the run tab before the first step
 - `captureNetwork` (boolean, optional, default `false`): record network requests during the run
 - `returnLogs` (boolean, optional, default `false`): include the step log, capped at 4000 chars
@@ -1327,11 +1339,12 @@ nested inside `chrome_batch` or `chrome_shortcut` steps.
 - `tabId` (number, optional): run in this exact tab instead of the session work tab
 
 **Returns** a summary, not the raw run record: `success`, `runId`, `flowId`, `tabId`,
+`tabSource` (`work_tab` | `created_from_start_url` | `explicit`; how the run tab was obtained),
 `summary { total, success, failed, tookMs }`, `paused`, `outputs` (the flow variables that are
 not marked sensitive) and, when a step failed, `failedStep { stepId, message }`. Step logs and
 the failure screenshot are left out unless you ask for logs.
 
-**Example**:
+**Example**, with no `chrome_navigate` needed when the flow knows its own start page:
 
 ```json
 { "flowId": "flow_daily_report", "args": { "date": "2026-09-05" }, "returnLogs": true }

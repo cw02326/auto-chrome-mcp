@@ -7,9 +7,19 @@
  *
  * Contract:
  *   - `record_replay_flow_run` is in TAB_ID_INJECT_TOOLS, so the gate injects
- *     this session/lane's work tab as `tabId` when the caller omits it, and
- *     refuses with `no_work_tab` when there is none. The engine has no
- *     active-tab fallback, so nothing here may borrow the tab the user is on.
+ *     this session/lane's work tab as `tabId` when the caller omits it. The
+ *     engine has no active-tab fallback, so nothing here may borrow the tab the
+ *     user is on.
+ *   - With no work tab the call is not refused outright any more (2026-09-05
+ *     side panel stage 1, part B): a recorded flow carries the page it was
+ *     recorded on (`flow.startUrl`), and an explicit `startUrl` argument wins
+ *     over it. When one of the two is known this tool opens a background work
+ *     tab through the very same path `chrome_navigate(background:true)` uses,
+ *     so the tab is still made by the gate side of the house and registered as
+ *     this session's work tab, and the engine never picks a tab. Only when there
+ *     is neither a work tab nor a start URL does the call end in `no_work_tab`.
+ *   - The response says where the tab came from in `tabSource`:
+ *     `work_tab` | `created_from_start_url` | `explicit`.
  *   - `tabTarget: 'current'` (default) runs in that work tab.
  *   - `tabTarget: 'new'` opens a session-owned background tab in the work tab's
  *     window and runs there, leaving the tab open afterwards.
@@ -24,7 +34,8 @@
  */
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
-import type { RunResult } from '../record-replay/types';
+import type { Flow, RunResult } from '../record-replay/types';
+import { isSameUrlForPrepare } from '../record-replay/rr-utils';
 import { listPublished, resolvePublishedFlow } from '../record-replay/flow-store';
 import { runFlow } from '../record-replay/flow-runner';
 import {
@@ -38,6 +49,12 @@ import { createTimeoutAbort, MAX_FLOW_RUN_TIMEOUT_MS } from '@/utils/tool-watchd
 // url-target.ts 는 다른 작업이 진행 중인 파일이라 **import 만** 한다 (수정 금지).
 import { createTabForUrl } from './browser/url-target';
 import { isExplicitTabId, noWorkTabErrorText } from '@/utils/work-tab-gate';
+import { getWorkTabId, sessionKeyOf } from '@/utils/work-tab-manager';
+// 작업 탭 생성은 chrome_navigate 를 그대로 탄다. 탭 선택·작업 탭 등록 규칙을 한 곳에만 둔다.
+// (record-replay 노드들도 같은 방식으로 handleCallTool 을 다시 부른다. 순환 import 지만
+//  참조는 실행 시점에만 일어나므로 안전하다. 다만 이 모듈을 tools/index 보다 먼저 평가하면
+//  안 된다는 기존 제약은 그대로다.)
+import { handleCallTool } from '.';
 
 /** returnLogs:true 일 때 응답에 실을 로그 문자열 상한. */
 export const MAX_RETURNED_LOG_CHARS = 4000;
@@ -103,7 +120,7 @@ function formatLogLine(entry: any): string {
  */
 export function summarizeRunResult(
   result: RunResult,
-  options: { returnLogs?: boolean; tabId: number; flowId: string },
+  options: { returnLogs?: boolean; tabId: number; flowId: string; tabSource?: RunTabSourceLabel },
 ): Record<string, unknown> {
   const logs: any[] = Array.isArray((result as any)?.logs) ? ((result as any).logs as any[]) : [];
   const firstFailure = logs.find((l) => l?.status === 'failed');
@@ -119,6 +136,8 @@ export function summarizeRunResult(
     paused: !!result?.paused,
     outputs: outputs.value,
   };
+  // 호출자가 "왜 이 탭에서 돌았는지" 를 되묻지 않아도 되게 한 줄로 알린다.
+  if (options.tabSource) payload.tabSource = options.tabSource;
   if (outputs.truncated) payload.outputsTruncated = true;
 
   if (firstFailure) {
@@ -142,6 +161,75 @@ export function summarizeRunResult(
   }
 
   return payload;
+}
+
+/**
+ * 이 실행이 쓴 탭을 어떻게 얻었는가 (2026-09-05 사이드패널 1단계 B).
+ *
+ *   - `work_tab`               게이트가 이 세션·레인의 작업 탭을 주입했다.
+ *   - `created_from_start_url` 작업 탭이 없어 흐름의 시작 URL(또는 인자 startUrl)로
+ *                              백그라운드 작업 탭을 새로 열었다.
+ *   - `explicit`               호출자가 tabId 로 탭을 직접 지정했다.
+ */
+export type RunTabSourceLabel = 'work_tab' | 'created_from_start_url' | 'explicit';
+
+/** 흐름·인자에서 실제로 쓸 시작 URL 을 고른다. 인자가 흐름 값을 이긴다. */
+export function resolveStartUrl(argStartUrl: unknown, flowStartUrl: unknown): string | undefined {
+  const fromArg = typeof argStartUrl === 'string' ? argStartUrl.trim() : '';
+  if (fromArg) return fromArg;
+  const fromFlow = typeof flowStartUrl === 'string' ? flowStartUrl.trim() : '';
+  return fromFlow || undefined;
+}
+
+/**
+ * 방금 연 시작 페이지로 가는 **첫 navigate 단계**를 뺀 흐름을 돌려준다
+ * (2026-09-05 Codex 교차 리뷰 6).
+ *
+ * 녹화는 시작 페이지를 흐름의 첫 navigate 단계로도 남긴다. 그런데 이 도구가 시작 URL 로
+ * 작업 탭을 방금 열었다면 그 단계는 같은 페이지를 한 번 더 읽는 일밖에 하지 않는다.
+ *
+ * 조건을 좁게 잡는다. 첫 노드가 navigate 이고, 그 URL 이 방금 연 주소와 같고, 그 노드로
+ * 들어오는 간선이 없어야(= 되돌아오는 경로가 없어야) 뺀다. 나머지는 그대로 둔다 - 발행
+ * 스냅샷은 사용자가 승인한 내용이므로 확실한 무의미 단계만 건드린다.
+ *
+ * 저장소가 준 객체를 고치지 않고 얕은 복사본을 만든다.
+ */
+export function stripLeadingStartUrlNavigate(flow: Flow, startUrl: string): Flow {
+  const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
+  if (nodes.length < 2) return flow;
+  const first = nodes[0];
+  if (!first || first.type !== 'navigate') return flow;
+  const url = (first.config as { url?: unknown } | undefined)?.url;
+  if (typeof url !== 'string' || !isSameUrlForPrepare(url, startUrl)) return flow;
+  const edges = Array.isArray(flow.edges) ? flow.edges : [];
+  if (edges.some((e) => e.to === first.id)) return flow;
+  return {
+    ...flow,
+    nodes: nodes.slice(1),
+    edges: edges.filter((e) => e.from !== first.id),
+  };
+}
+
+/** chrome_navigate 응답에서 탭 id·창 id 를 꺼낸다 (새 창 경로는 tabs[0]). */
+function tabFromNavigateResult(result: ToolResult): { tabId?: number; windowId?: number } {
+  const first = result?.content?.find(
+    (c: any) => c && c.type === 'text' && typeof c.text === 'string',
+  ) as { text: string } | undefined;
+  if (!first) return {};
+  let payload: any;
+  try {
+    payload = JSON.parse(first.text);
+  } catch {
+    return {};
+  }
+  const tabId =
+    typeof payload?.tabId === 'number'
+      ? payload.tabId
+      : typeof payload?.tabs?.[0]?.tabId === 'number'
+        ? payload.tabs[0].tabId
+        : undefined;
+  const windowId = typeof payload?.windowId === 'number' ? payload.windowId : undefined;
+  return { tabId, windowId };
 }
 
 function jsonResult(payload: unknown): ToolResult {
@@ -199,10 +287,8 @@ class FlowRunTool {
     }
     const flow = resolution.flow;
 
-    // 작업 탭은 게이트가 정한다. 여기서 활성 탭을 찾아보는 경로는 없다 — 없으면 거절이다.
-    if (!isExplicitTabId(tabId)) {
-      return createErrorResponse(noWorkTabErrorText(this.name));
-    }
+    // 시작 URL: 인자가 먼저고, 없으면 흐름이 녹화된 페이지를 쓴다 (설계 B 1항).
+    const effectiveStartUrl = resolveStartUrl(startUrl, (flow as { startUrl?: unknown }).startUrl);
 
     // 2026-09-05 발행 전 검토 2: 도구로 시작한 흐름은 **항상** 무간섭이다. 호출자는
     // 화면을 보고 있지 않으므로(모델이 부른 것이다) 탭 활성화·창 포커스가 곧 침해다.
@@ -215,14 +301,75 @@ class FlowRunTool {
       effectiveBackgroundMode: true as const,
     };
 
+    // 대상 탭 결정. 순서도 계약이다:
+    //   ① 게이트가 넣어 준(또는 호출자가 지정한) tabId
+    //   ② 없으면 시작 URL 로 백그라운드 작업 탭을 연다 - 만드는 주체는 chrome_navigate 다
+    //   ③ 둘 다 없을 때만 no_work_tab
+    // 어느 경우에도 사용자가 보고 있는 탭을 찾아보는 경로는 없다.
+    let resolvedTabId: number;
+    let tabSource: RunTabSourceLabel;
+    /** 이 호출이 방금 만든 탭인가. tabTarget:'new' 를 한 번 더 적용하지 않기 위해 본다. */
+    let tabJustCreated = false;
+
+    if (isExplicitTabId(tabId)) {
+      resolvedTabId = tabId;
+      // 게이트가 주입한 작업 탭과 호출자가 직접 지정한 탭을 구분한다(진단용 표시일 뿐,
+      // 동작은 같다). 값이 같으면 어느 쪽이든 "이 세션의 작업 탭" 이라고 부르는 것이 맞다.
+      let workTabId: number | null = null;
+      try {
+        workTabId = await getWorkTabId(sessionKeyOf({ _mcpSessionId, lane }));
+      } catch {
+        workTabId = null;
+      }
+      tabSource = workTabId === resolvedTabId ? 'work_tab' : 'explicit';
+    } else if (effectiveStartUrl) {
+      // chrome_navigate(background:true) 를 그대로 부른다. 탭을 어느 창에 만들지, 만든 탭을
+      // 이 세션의 작업 탭으로 등록할지는 전부 그쪽 규칙이다("엔진이 탭을 고르지 않는다").
+      // 만든 탭은 run 소유로 등록하지 않는다 - 이제 이 세션의 작업 탭이므로, 실행이
+      // 중단돼도 chrome_navigate 로 만든 작업 탭과 똑같이 남는다.
+      let opened: ToolResult;
+      try {
+        opened = await handleCallTool({
+          name: TOOL_NAMES.BROWSER.NAVIGATE,
+          args: {
+            url: effectiveStartUrl,
+            background: true,
+            ...(typeof _mcpSessionId === 'string' ? { _mcpSessionId } : {}),
+            ...(typeof lane === 'string' ? { lane } : {}),
+          },
+          effectiveBackgroundMode: true,
+        });
+      } catch (e) {
+        return createErrorResponse(e instanceof Error ? e.message : String(e));
+      }
+      if ((opened as { isError?: boolean })?.isError) {
+        const text = (opened as { content?: Array<{ text?: string }> })?.content?.[0]?.text;
+        return createErrorResponse(
+          text || `Could not open the flow start page (${effectiveStartUrl}).`,
+        );
+      }
+      const openedTab = tabFromNavigateResult(opened);
+      if (!isExplicitTabId(openedTab.tabId)) {
+        return createErrorResponse(
+          `Could not open the flow start page (${effectiveStartUrl}) as a background work tab.`,
+        );
+      }
+      resolvedTabId = openedTab.tabId;
+      tabSource = 'created_from_start_url';
+      tabJustCreated = true;
+    } else {
+      // 작업 탭도 없고 흐름에 시작 URL 도 없다. 예전과 같은 문구로 거절한다.
+      return createErrorResponse(noWorkTabErrorText(this.name));
+    }
+
     let runTab: RunTabContext;
     try {
-      const workTab = await chrome.tabs.get(tabId);
-      if (tabTarget === 'new') {
+      const workTab = await chrome.tabs.get(resolvedTabId);
+      if (tabTarget === 'new' && !tabJustCreated) {
         // 작업 탭이 있는 창에 세션 소유의 백그라운드 탭을 새로 연다. 실행 후에도 남겨 둬
         // 호출자가 결과를 확인하거나 이어서 쓸 수 있게 한다.
         const created = await createTabForUrl(
-          typeof startUrl === 'string' && startUrl.trim() ? startUrl : 'about:blank',
+          effectiveStartUrl ? effectiveStartUrl : 'about:blank',
           {
             background: true,
             windowId: workTab?.windowId,
@@ -238,7 +385,7 @@ class FlowRunTool {
         // abort 정리 대상에서 빠져, 취소된 실행이 빈 탭을 남긴 채 끝났다.
         markRunOwnedTab(runTab, created.id);
       } else {
-        runTab = runTabFromId(tabId, 'mcp', workTab?.windowId, session);
+        runTab = runTabFromId(resolvedTabId, 'mcp', workTab?.windowId, session);
       }
     } catch (e) {
       return createErrorResponse(e instanceof Error ? e.message : String(e));
@@ -260,10 +407,16 @@ class FlowRunTool {
     // 신호를 보지 않으므로, 마감을 args 로 실어 파이프라인이 워치독 상한으로 쓰게 한다.
     runTab.deadlineAt = Date.now() + abort.timeoutMs;
 
+    // 방금 연 시작 페이지로 다시 가는 첫 단계는 뺀다 (Codex 교차 리뷰 6).
+    const flowToRun =
+      tabJustCreated && effectiveStartUrl
+        ? stripLeadingStartUrlNavigate(flow, effectiveStartUrl)
+        : flow;
+
     let result;
     try {
       result = await withTabLease(runTab.tabId, leaseToken, () =>
-        runFlow(flow, runTab, {
+        runFlow(flowToRun, runTab, {
           // 엔진 쪽 'new' 는 여기서 이미 처리했다. 엔진이 또 탭을 만들지 않도록 'current' 로 넘긴다.
           tabTarget: 'current',
           refresh,
@@ -272,7 +425,9 @@ class FlowRunTool {
           // summarizeRunResult 가 통제한다.
           returnLogs: true,
           timeoutMs: abort.timeoutMs,
-          startUrl,
+          // 흐름의 시작 URL 도 여기까지 따라온다 - 기존 작업 탭이 다른 페이지에 있어도
+          // 첫 단계 전에 시작 페이지로 맞춘다(prepareRunTab).
+          startUrl: effectiveStartUrl,
           args: vars,
           // 정리(소유 탭 닫기)까지 리스 안에서 끝난다 — 리스는 그 뒤에 풀린다.
           signal: abort.signal,
@@ -290,6 +445,7 @@ class FlowRunTool {
         returnLogs: returnLogs === true,
         tabId: runTab.tabId,
         flowId: String(flowId),
+        tabSource,
       }),
     );
   }

@@ -406,15 +406,43 @@ export function ensurePublishedSensitiveDefaultsMigrated(): Promise<number> {
   return sensitiveDefaultsMigration;
 }
 
+/**
+ * 이미 쓰이는 slug 를 피해 유일한 slug 를 고른다 (2026-09-05 Codex 교차 리뷰 3항).
+ *
+ * slug 는 도구 표면의 이름이고 `resolvePublishedFlow` 는 id 로 못 찾으면 slug 로 찾는다.
+ * 이름이 같은 흐름 둘을 발행하면 자동 slug 도 같아지고, 그러면 slug 로 들어온 실행 요청이
+ * **어느 흐름인지 알 수 없다**(먼저 저장된 쪽이 잡힌다). 그래서 겹치면 숫자를 붙인다.
+ * 호출자가 slug 를 직접 준 경우에도 같다 - 조용히 남의 slug 를 빼앗는 것보다 낫다.
+ */
+/**
+ * 이름에서 자동 slug 를 만든다 (2026-09-05 시연 지적 3항).
+ *
+ * `toSlug` 는 ascii 가 아닌 글자를 전부 구분자로 바꾼다. 그래서 한글 이름
+ * "짬뽕 : 네이버 검색 2026.09.05" 는 날짜 부스러기 "2026-09-05" 만 남았다 - 무엇을 실행하는
+ * 흐름인지 알 수 없고, 이름이 다른 두 흐름이 같은 날 만들어졌다는 이유로 같은 slug 가 된다.
+ * 그래서 **ascii 글자가 하나도 남지 않으면** 흐름 id 에서 만든 안정적인 이름을 쓴다.
+ */
+function autoSlugFor(flow: Flow): string {
+  const fromName = toSlug(flow.name);
+  if (/[a-z]/.test(fromName)) return fromName;
+  const tail = String(flow.id || '')
+    .replace(/[^A-Za-z0-9]+/g, '')
+    .toLowerCase()
+    .slice(-6);
+  return tail ? `flow-${tail}` : `flow-${Date.now()}`;
+}
+
+function uniquePublishedSlug(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; n <= 1000; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
+}
+
 export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedFlowInfo> {
   await ensureMigratedFromLocal();
-  const info: PublishedFlowInfo = {
-    id: flow.id,
-    slug: slug || toSlug(flow.name) || flow.id,
-    version: flow.version,
-    name: flow.name,
-    description: flow.description,
-  };
   // 발행 시점의 흐름 전문을 함께 저장한다. 저장 형식은 saveFlow 와 같게 맞춘다
   // (steps → nodes 정규화 후 deprecated steps 제거), 여기에 sensitive 변수의 기본값을
   // 뺀다 (2026-09-05 발행 전 검토 6).
@@ -422,10 +450,29 @@ export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedF
   // 마이그레이션과 같은 락을 거친다 - 마이그레이션이 이 레코드를 처리 중이면 그 뒤에
   // 줄을 서고, 이 발행이 끝난 뒤에는 마이그레이션이 "현재" 값(이 발행 결과)을 다시 읽어
   // 이미 깨끗함을 확인하므로 되돌려지지 않는다.
-  await withPublishedLock(async () => {
+  //
+  // slug 중복 검사도 이 락 **안에서** 한다. 밖에서 읽고 안에서 쓰면 두 발행이 같은 빈
+  // slug 를 동시에 보고 둘 다 차지한다.
+  return await withPublishedLock(async () => {
+    // 목록을 못 읽어도 발행 자체는 막지 않는다 (그 경우 유일성 검사만 건너뛴다).
+    const records = ((await IndexedDbStorage.published.list()) ?? []) as PublishedRecord[];
+    const existing = Array.isArray(records) ? records : [];
+    const taken = new Set(
+      existing.filter((r) => r.id !== flow.id).map((r) => String(r.slug || '')),
+    );
+    const base = slug || autoSlugFor(flow) || flow.id;
+    const info: PublishedFlowInfo = {
+      id: flow.id,
+      slug: uniquePublishedSlug(base, taken),
+      version: flow.version,
+      name: flow.name,
+      description: flow.description,
+    };
     await IndexedDbStorage.published.save({ ...info, snapshot } as PublishedFlowInfo);
+    // 발행 상태가 바뀌면 열려 있는 사이드패널의 카드 배지도 따라와야 한다.
+    notifyFlowsChanged();
+    return info;
   });
-  return info;
 }
 
 /**
@@ -476,6 +523,8 @@ export async function unpublishFlow(flowId: string): Promise<void> {
   await withPublishedLock(async () => {
     await IndexedDbStorage.published.delete(flowId);
   });
+  // 발행 해제도 카드 배지에 반영돼야 한다.
+  notifyFlowsChanged();
 }
 
 export function toSlug(name: string): string {

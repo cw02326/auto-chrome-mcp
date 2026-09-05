@@ -720,7 +720,7 @@ describe('flow_run 은 전역 토글과 무관하게 게이트에서 강제 back
     expect(result.noWorkTab).toBe(false);
   });
 
-  it('전역 OFF + 작업 탭 없음이면 no_work_tab 으로 거절한다 (사용자 탭으로 흘리지 않는다)', async () => {
+  it('전역 OFF + 작업 탭 없음이면 탭을 주입하지 않고 판정을 도구에 넘긴다', async () => {
     const gate = await loadGate();
 
     const result = await gate.applyBackgroundModeGate(RR.FLOW_RUN, {
@@ -728,8 +728,16 @@ describe('flow_run 은 전역 토글과 무관하게 게이트에서 강제 back
       _mcpSessionId: SESSION,
     });
 
-    expect(result.noWorkTab).toBe(true);
+    // 2026-09-05 설계 B 3항: 거절 판정이 게이트에서 도구로 옮겨졌다. 흐름에 시작 URL
+    // (`flow.startUrl`)이 있으면 그 주소로 백그라운드 작업 탭을 열 수 있는데, 흐름을 읽어야
+    // 알 수 있는 값이라 게이트가 판정할 수 없기 때문이다. 도구는 시작 URL 도 없을 때
+    // **같은 no_work_tab 문구로** 거절한다 (tests/record-replay/flow-run-start-url.test.ts).
+    expect(result.noWorkTab).toBe(false);
+    // 바뀌지 않은 것: 사용자가 보고 있는 탭은 절대 주입하지 않는다.
     expect(result.args.tabId).toBeUndefined();
+    expect(gate.requiresWorkTab(RR.FLOW_RUN, { flowId: 'daily', _mcpSessionId: SESSION })).toBe(
+      false,
+    );
   });
 
   it('강제 목록은 flow_run 하나이고, 그 도구는 tabId 주입 대상이다', async () => {

@@ -356,7 +356,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
     description:
-      'Run a published record-replay flow (recorded in the extension side panel) on this session work tab. Requires a work tab: call chrome_navigate first, otherwise the call is refused with no_work_tab. Cannot be nested inside chrome_batch. Returns a summary: success, step counts, first failed step, flow outputs.',
+      'Run a published record-replay flow (recorded in the extension side panel) on this session work tab. With no work tab it opens one in the background at the flow start URL (the page the flow was recorded on, or the startUrl argument); only when neither exists is the call refused with no_work_tab, and then chrome_navigate makes the work tab. Cannot be nested inside chrome_batch. Returns a summary: success, step counts, first failed step, flow outputs, and tabSource (work_tab | created_from_start_url | explicit).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -376,7 +376,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         startUrl: {
           type: 'string',
-          description: 'Open this URL in the run tab before the first step.',
+          description:
+            "Open this URL in the run tab before the first step. Overrides the flow's own start URL, and is also what a work tab is created from when there is none.",
         },
         refresh: {
           type: 'boolean',

@@ -875,6 +875,10 @@ class ExecutionOrchestrator {
     const labels = (outEdges.get(currentId) || []).map((e) =>
       String(e.label || ENGINE_CONSTANTS.EDGE_LABELS.DEFAULT),
     );
+    // 나가는 간선이 하나도 없으면 그냥 흐름의 마지막 단계다 - 정상 종료지 경고가 아니다.
+    // 예전에는 성공한 실행마다 마지막 단계에 "No next edge" 경고가 찍혀, 실제로 라벨이
+    // 어긋난 경우와 구분되지 않았다 (2026-09-05 시연 부수 지적).
+    if (labels.length === 0) return undefined;
     this.logger.push({
       stepId: step.id,
       status: 'warning',

@@ -77,6 +77,15 @@ export interface FlowV3 {
   /** 更新时间 */
   updatedAt: ISODateTimeString;
 
+  /**
+   * 녹화를 시작한 페이지 주소 (2026-09-05 사이드패널 1단계 B).
+   *
+   * 녹화 시작 시점의 활성 탭 URL 이다. 흐름 저장·발행 스냅샷·내보내기 JSON 에 함께 남고,
+   * `record_replay_flow_run` 은 작업 탭도 `startUrl` 인자도 없을 때 이 값으로 백그라운드
+   * 작업 탭을 연다. 이 필드가 생기기 전에 만든 흐름은 값이 없다(undefined 허용).
+   */
+  startUrl?: string;
+
   /** 入口节点 ID（显式指定，不依赖入度推断） */
   entryNodeId: NodeId;
   /** 节点列表 */

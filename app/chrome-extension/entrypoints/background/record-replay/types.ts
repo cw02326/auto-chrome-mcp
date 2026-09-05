@@ -112,9 +112,28 @@ export interface Flow {
   name: string;
   description?: string;
   version: number;
+  /**
+   * Page the recording started on (2026-09-05 side panel stage 1, part B).
+   *
+   * Written once when recording starts and kept in the published snapshot and
+   * the export JSON, so `record_replay_flow_run` can open the flow's own start
+   * page when the caller has no work tab and passed no `startUrl`.
+   *
+   * Optional on purpose: flows recorded before this field existed simply have
+   * no start page, and the tool keeps refusing those with `no_work_tab`.
+   */
+  startUrl?: string;
   meta?: {
     createdAt: string;
     updatedAt: string;
+    /**
+     * 녹화를 시작한 탭의 문서 제목 (2026-09-05 시연 지적 2항).
+     *
+     * 저장 화면이 흐름 이름의 기본값을 지을 때 쓴다. 예전에는 마법사가 "지금 활성 탭" 의
+     * 제목을 썼는데, 녹화가 끝난 뒤에는 그 탭이 사용자가 옮겨 간 다른 페이지일 수 있어
+     * 엉뚱한 이름이 채워졌다. 녹화 시작 시점의 제목을 흐름에 함께 남긴다.
+     */
+    startTitle?: string;
     domain?: string;
     tags?: string[];
     bindings?: Array<{ type: 'domain' | 'path' | 'url'; value: string }>;

@@ -5,7 +5,7 @@ import { recordingSession as session } from './session-manager';
 import { createInitialFlow, addNavigationStep } from './flow-builder';
 import { initBrowserEventListeners } from './browser-event-listener';
 import { initContentMessageHandler } from './content-message-handler';
-import { queryEntryPointTab, tryGetRunTabInfo } from '../engine/tab-context';
+import { queryEntryPointTab, runTabFromId, tryGetRunTabInfo } from '../engine/tab-context';
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -137,7 +137,20 @@ class RecorderManagerImpl {
     this.initialized = true;
   }
 
-  async start(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
+  /**
+   * 녹화 시작.
+   *
+   * @param meta     새 흐름의 초기 메타데이터.
+   * @param options  `tabId` 를 주면 **그 탭**에서 녹화한다 (2026-09-05 사이드패널 1단계 A).
+   *                 팝업의 녹화 버튼은 눌린 순간의 탭 id 를 실어 보낸다. 팝업이 닫히고
+   *                 사이드패널이 뜨는 사이에 활성 탭이 바뀌면 여기서 다시 "활성 탭" 을
+   *                 물었을 때 엉뚱한 탭이 잡히기 때문이다. 지정된 id 는 활성 탭 조회를
+   *                 아예 건너뛰므로 진입점 원칙(탭은 호출자가 정한다)에 더 가깝다.
+   */
+  async start(
+    meta?: Partial<Flow>,
+    options?: { tabId?: number },
+  ): Promise<{ success: boolean; error?: string }> {
     if (session.getStatus() !== 'idle')
       return { success: false, error: 'Recording already active' };
     // Recording starts from a user gesture in the side panel, so resolving the
@@ -145,16 +158,30 @@ class RecorderManagerImpl {
     // sanctioned entry-point helper and is pinned for the whole session.
     let active: { id: number; url?: string };
     try {
-      const entry = await queryEntryPointTab('sidepanel');
+      const entry =
+        typeof options?.tabId === 'number'
+          ? runTabFromId(options.tabId, 'sidepanel')
+          : await queryEntryPointTab('sidepanel');
       const info = await tryGetRunTabInfo(entry);
       active = { id: entry.tabId, url: info?.url };
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) };
     }
 
-    // Initialize flow & session
+    // Initialize flow & session.
+    // 시작 URL 은 세션과 흐름 양쪽에 남는다 (2026-09-05 사이드패널 1단계 B):
+    // 저장·발행 스냅샷·내보내기가 이 값을 그대로 실어 나르고, 도구 실행 때 작업 탭이
+    // 없으면 이 주소로 백그라운드 탭을 연다.
     const flow: Flow = createInitialFlow(meta);
-    await session.startSession(flow, active.id);
+    // 시작 탭의 문서 제목도 함께 남긴다 (2026-09-05 시연 지적 2항). 저장 화면이 흐름 이름의
+    // 기본값을 지을 때 쓴다. 못 읽어도 녹화는 그대로 진행한다(도메인 + 날짜로 대신한다).
+    try {
+      const startTitle = (await chrome.tabs.get(active.id))?.title;
+      if (startTitle && flow.meta) flow.meta.startTitle = String(startTitle);
+    } catch {
+      // 제목을 못 읽었다. 이름 기본값은 startUrl 의 도메인으로 만들어진다.
+    }
+    await session.startSession(flow, active.id, active.url);
 
     // Ensure recorder available and start listening
     await ensureRecorderInjected(active.id);

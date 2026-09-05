@@ -210,6 +210,22 @@ const NO_TAB_NEEDED: Record<string, (args: any) => boolean> = {
   // tabId 를 주지 않으면 규칙 범위가 '모든 탭' 이다 — network-rules.ts 에는 활성 탭을
   // 조회하는 경로가 없다 (params.tabId 만 본다).
   [B.NETWORK_RULES]: () => true,
+  /**
+   * record_replay_flow_run: 게이트가 **거절을 대신 하지 않는다** (2026-09-05 설계 B).
+   *
+   * 흐름에는 녹화 시작 페이지(`flow.startUrl`)가 저장돼 있다. 작업 탭이 없어도 그 주소로
+   * 백그라운드 작업 탭을 열면 실행할 수 있는데, 흐름을 읽어야 알 수 있는 값이라 게이트가
+   * 판정할 수 없다. 그래서 여기서는 통과시키고, 도구 구현이 판정한다:
+   *   - 작업 탭이 있으면 게이트가 그대로 tabId 를 주입한다(아래 주입 분기는 그대로다).
+   *   - 없고 startUrl 이 있으면 도구가 chrome_navigate 와 같은 경로로 탭을 만든다.
+   *   - 둘 다 없으면 도구가 **같은 문구로** no_work_tab 을 돌려준다.
+   *
+   * 게이트가 fail-closed 로 막는 이유는 "도구 구현이 tabId 없으면 사용자의 활성 탭으로
+   * fallback 하기 때문" 인데, 이 도구에는 그 경로가 없다. 엔진은 호출자가 지정한 탭에만
+   * 고정되고(engine/tab-context.ts), 활성 탭 조회가 없음을 소스 가드 테스트
+   * (tests/record-replay/no-active-tab-query.test.ts)가 못박는다.
+   */
+  [RR.FLOW_RUN]: () => true,
   // 쿠키 조작은 범위(url 또는 domain)만 있으면 대상 탭을 찾지 않는다.
   [B.STORAGE]: (args) => {
     // kind 가 'local'·'session' 이면 웹 스토리지 경로라 반드시 탭에서 실행해야 한다.
