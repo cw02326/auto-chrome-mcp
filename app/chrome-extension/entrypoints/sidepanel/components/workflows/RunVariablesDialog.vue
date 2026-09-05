@@ -1,40 +1,46 @@
 <template>
-  <div class="rv-overlay" @click.self="$emit('cancel')">
-    <div class="rv-dialog" :style="dialogStyle">
-      <div class="rv-title" :style="titleStyle">{{ getMessage('sidepanel_runvars_title') }}</div>
-      <div class="rv-hint" :style="hintStyle">{{ getMessage('sidepanel_runvars_hint') }}</div>
+  <div class="ac-dim rv-dim" @click.self="$emit('cancel')">
+    <div
+      ref="dialogRef"
+      class="ac-dialog rv-dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
+      <div class="ac-title" :id="titleId">{{ getMessage('sidepanel_runvars_title') }}</div>
+      <div class="ac-sub">{{ getMessage('sidepanel_runvars_hint') }}</div>
 
       <div class="rv-fields">
         <label v-for="v in variables" :key="v.key" class="rv-field">
-          <span class="rv-label" :style="labelStyle">
-            {{ v.label || v.key }}
-            <span v-if="v.sensitive" class="rv-tag" :style="tagStyle">{{
+          <span class="rv-label">
+            <span class="ac-clip">{{ v.label || v.key }}</span>
+            <span v-if="v.sensitive" class="ac-badge">{{
               getMessage('sidepanel_wizard_variable_sensitive')
             }}</span>
             <!-- 값을 넣지 않으면 실행이 그 단계에서 멈춘다. 그래서 필수라고 적는다. -->
-            <span class="rv-tag" :style="requiredStyle">{{
+            <span class="ac-badge ac-badge--accent">{{
               getMessage('sidepanel_daily_var_required')
             }}</span>
           </span>
           <input
             v-model="values[v.key]"
-            class="rv-input"
-            :style="inputStyle"
+            class="ac-field"
             :type="v.sensitive ? 'password' : 'text'"
             :autocomplete="v.sensitive ? 'new-password' : 'off'"
             :placeholder="defaultHint(v)"
           />
-          <span v-if="defaultHint(v)" class="rv-default" :style="hintStyle">{{
+          <span v-if="defaultHint(v)" class="ac-caption rv-default">{{
             getMessage('sidepanel_daily_var_default', [defaultHint(v)])
           }}</span>
         </label>
       </div>
 
       <div class="rv-actions">
-        <button class="rv-btn" :style="cancelStyle" @click="$emit('cancel')">
+        <button class="ac-button ac-button--ghost" type="button" @click="$emit('cancel')">
           {{ getMessage('sidepanel_runvars_cancel') }}
         </button>
-        <button class="rv-btn rv-btn-primary" :style="primaryStyle" @click="submit">
+        <button class="ac-button ac-button--primary" type="button" @click="submit">
           {{ getMessage('sidepanel_runvars_run') }}
         </button>
       </div>
@@ -43,8 +49,9 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive } from 'vue';
+import { reactive, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
+import { useDialogA11y } from '../../composables/useDialogA11y';
 import type { WizardVariableDef } from '../../utils/flow-wizard';
 
 const props = defineProps<{
@@ -55,6 +62,10 @@ const emit = defineEmits<{
   (e: 'submit', values: Record<string, string>): void;
   (e: 'cancel'): void;
 }>();
+
+const dialogRef = ref<HTMLElement | null>(null);
+const titleId = 'run-variables-dialog-title';
+useDialogA11y(dialogRef, titleId, () => emit('cancel'));
 
 /**
  * 입력값은 이 다이얼로그가 사라지면 함께 사라진다. 민감값은 흐름에도, 저장소에도 쓰지
@@ -76,110 +87,47 @@ function defaultHint(variable: WizardVariableDef): string {
   const fallback = variable.default;
   return fallback === undefined || fallback === null ? '' : String(fallback);
 }
-
-const dialogStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-  borderRadius: 'var(--ac-radius-card, 12px)',
-  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-}));
-const titleStyle = computed(() => ({ color: 'var(--ac-text)' }));
-const hintStyle = computed(() => ({ color: 'var(--ac-text-subtle)' }));
-const labelStyle = computed(() => ({ color: 'var(--ac-text-muted)' }));
-const tagStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text-muted)',
-}));
-const requiredStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent-subtle, rgba(217, 119, 87, 0.12))',
-  color: 'var(--ac-accent, #d97757)',
-}));
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const cancelStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-const primaryStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent)',
-  color: 'var(--ac-accent-contrast)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
 </script>
 
 <style scoped>
-.rv-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
+.rv-dim {
   z-index: 60;
 }
 
 .rv-dialog {
-  width: 100%;
-  max-width: 340px;
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.rv-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.rv-hint {
-  font-size: 12px;
+  gap: 12px;
+  max-height: calc(100vh - 48px);
 }
 
 .rv-fields {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 240px;
+  gap: 12px;
   overflow-y: auto;
 }
 
 .rv-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.rv-label {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
   gap: 6px;
 }
 
-.rv-tag {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 999px;
+/* 섹션 라벨 */
+.rv-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ac-text-secondary);
 }
 
 .rv-default {
-  font-size: 11px;
   word-break: break-all;
-}
-
-.rv-input {
-  height: 34px;
-  padding: 0 10px;
-  border: none;
-  outline: none;
-  font-size: 13px;
-  font-family: inherit;
-  width: 100%;
 }
 
 .rv-actions {
@@ -187,14 +135,5 @@ const primaryStyle = computed(() => ({
   gap: 8px;
   justify-content: flex-end;
   margin-top: 4px;
-}
-
-.rv-btn {
-  border: none;
-  padding: 7px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
 }
 </style>

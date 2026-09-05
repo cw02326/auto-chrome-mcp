@@ -1,48 +1,52 @@
 <template>
   <div class="dh-root">
     <div class="dh-toolbar">
-      <label class="dh-filter-label" :style="mutedStyle">{{
+      <label class="ac-caption dh-filter-label">{{
         getMessage('sidepanel_daily_history_filter')
       }}</label>
-      <select v-model="status" class="dh-select" :style="selectStyle">
+      <select v-model="status" class="ac-field dh-select">
         <option value="">{{ getMessage('sidepanel_daily_history_all') }}</option>
         <option v-for="key in statusKeys" :key="key" :value="key">
           {{ formatRunStatus(key) }}
         </option>
       </select>
-      <button class="dh-btn" :style="ghostStyle" @click="reload">
+      <button class="ac-button ac-button--ghost ac-button--sm" type="button" @click="reload">
         {{ getMessage('sidepanel_daily_refresh') }}
       </button>
-      <button class="dh-btn dh-btn-primary" :style="primaryStyle" @click="$emit('rerun')">
+      <button
+        class="ac-button ac-button--ghost ac-button--sm"
+        type="button"
+        @click="$emit('rerun')"
+      >
         {{ getMessage('sidepanel_daily_rerun') }}
       </button>
     </div>
 
-    <div v-if="error" class="dh-error" :style="dangerStyle">{{ error }}</div>
+    <div v-if="error" class="ac-error-text dh-error">{{ error }}</div>
 
-    <div v-if="loading && runs.length === 0" class="dh-empty" :style="mutedStyle">
+    <div v-if="loading && runs.length === 0" class="ac-sub dh-empty">
       {{ getMessage('sidepanel_daily_history_loading') }}
     </div>
-    <div v-else-if="runs.length === 0" class="dh-empty" :style="mutedStyle">
+    <div v-else-if="runs.length === 0" class="ac-sub dh-empty">
       {{ getMessage('sidepanel_daily_history_empty') }}
     </div>
 
     <ul v-else class="dh-list">
-      <li v-for="run in runs" :key="run.runId" class="dh-item" :style="itemStyle">
+      <li v-for="run in runs" :key="run.runId" class="dh-item">
         <div class="dh-item-head">
-          <span class="dh-dot" :style="{ backgroundColor: runStatusColor(run.status) }"></span>
-          <span class="dh-status" :style="{ color: runStatusColor(run.status) }">{{
+          <span class="dh-dot" :style="{ backgroundColor: runStatusVar(run.status) }"></span>
+          <span class="dh-status" :class="runStatusClass(run.status)">{{
             formatRunStatus(run.status)
           }}</span>
-          <span class="dh-trigger" :style="subtleStyle">{{ triggerLabel(run.trigger) }}</span>
-          <span class="dh-time" :style="subtleStyle">{{ formatRunTime(run.startedAt) }}</span>
+          <span class="ac-caption dh-trigger">{{ triggerLabel(run.trigger) }}</span>
+          <span class="ac-caption ac-num dh-time">{{ formatRunTime(run.startedAt) }}</span>
         </div>
 
-        <div v-if="durationText(run)" class="dh-line" :style="subtleStyle">
+        <div v-if="durationText(run)" class="ac-caption ac-num dh-line">
           {{ durationText(run) }}
         </div>
 
-        <div v-if="run.failedStep" class="dh-line" :style="dangerStyle">
+        <div v-if="run.failedStep" class="ac-caption ac-text-danger dh-line">
           {{
             getMessage('sidepanel_daily_history_step', [
               String((run.failedStep.index ?? 0) + 1),
@@ -51,7 +55,7 @@
           }}
         </div>
 
-        <div v-if="run.error" class="dh-line dh-error-text" :style="dangerStyle">
+        <div v-if="run.error" class="ac-caption ac-text-danger dh-line dh-error-text">
           {{ getMessage('sidepanel_daily_history_error', [String(run.error)]) }}
         </div>
 
@@ -61,8 +65,8 @@
         -->
         <button
           v-if="run.screenshot"
-          class="dh-btn dh-btn-small"
-          :style="ghostStyle"
+          class="ac-button ac-button--ghost ac-button--sm dh-shot-btn"
+          type="button"
           @click="openShot(String(run.screenshot))"
         >
           {{ getMessage('sidepanel_daily_open_screenshot') }}
@@ -72,8 +76,8 @@
 
     <button
       v-if="nextCursor"
-      class="dh-more"
-      :style="ghostStyle"
+      class="ac-button ac-button--ghost dh-more"
+      type="button"
       :disabled="loading"
       @click="loadMore"
     >
@@ -84,12 +88,12 @@
 
 <script lang="ts" setup>
 /**
- * 예약 하나의 실행 이력 (2026-09-05 사이드패널 2단계 E).
+ * 예약 하나의 실행 이력 (2026-09-05 사이드패널 2단계 E, 2026-09-06 토스 스타일).
  *
  * 이력은 백그라운드 저장소에 있고 여기서 조각(20건)씩 읽는다. 상태 필터가 바뀌면 처음부터
  * 다시 읽는다 - 커서는 조건과 짝이라 조건이 바뀌면 이어 읽을 수 없다.
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { getMessage } from '@/utils/i18n';
 import * as daily from '../../utils/daily-messages';
 import type { DailyRunRecord } from '../../utils/daily-messages';
@@ -98,7 +102,6 @@ import {
   formatDuration,
   formatRunStatus,
   formatRunTime,
-  runStatusColor,
 } from '../../utils/daily-format';
 
 /** 한 번에 읽는 건수. */
@@ -131,6 +134,40 @@ function triggerLabel(trigger: string | undefined): string {
 
 function durationText(run: DailyRunRecord): string {
   return formatDuration(run.durationMs ?? null);
+}
+
+/** 상태 점의 색. 성공 파랑·진행 강조·로그인 필요 등은 주황·그 외는 위험 빨강. */
+function runStatusVar(status: string | undefined): string {
+  switch (status) {
+    case 'success':
+      return 'var(--ac-success)';
+    case 'running':
+      return 'var(--ac-accent)';
+    case 'login_required':
+    case 'skipped_queue':
+    case 'user_took_over_tab':
+    case 'stopped':
+      return 'var(--ac-warning)';
+    default:
+      return 'var(--ac-danger-text)';
+  }
+}
+
+/** 상태 글자색 클래스. 점 색과 같은 갈래를 쓴다. */
+function runStatusClass(status: string | undefined): string {
+  switch (status) {
+    case 'success':
+      return 'ac-text-success';
+    case 'running':
+      return 'ac-text-accent';
+    case 'login_required':
+    case 'skipped_queue':
+    case 'user_took_over_tab':
+    case 'stopped':
+      return 'ac-text-warning';
+    default:
+      return 'ac-text-danger';
+  }
 }
 
 async function load(reset: boolean): Promise<void> {
@@ -186,30 +223,6 @@ watch(
 );
 
 onMounted(() => reload());
-
-const mutedStyle = computed(() => ({ color: 'var(--ac-text-muted, #6e6e6e)' }));
-const subtleStyle = computed(() => ({ color: 'var(--ac-text-subtle, #a8a29e)' }));
-const dangerStyle = computed(() => ({ color: 'var(--ac-danger, #ef4444)' }));
-const itemStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f5f5f4)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const selectStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-  color: 'var(--ac-text, #1a1a1a)',
-  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
-const ghostStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
-const primaryStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent, #d97757)',
-  color: 'var(--ac-accent-contrast, #ffffff)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
 </script>
 
 <style scoped>
@@ -227,39 +240,21 @@ const primaryStyle = computed(() => ({
 }
 
 .dh-filter-label {
-  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .dh-select {
-  height: 28px;
-  font-size: 12px;
-  padding: 0 6px;
-  font-family: inherit;
-  outline: none;
-}
-
-.dh-btn {
-  border: none;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.dh-btn-small {
-  align-self: flex-start;
-  margin-top: 2px;
-}
-
-.dh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  width: auto;
+  height: 32px;
+  flex-shrink: 0;
+  font-size: 13px;
+  padding-left: 10px;
+  padding-right: 28px;
+  background-position: right 8px center;
 }
 
 .dh-empty,
 .dh-error {
-  font-size: 12px;
   padding: 8px 0;
 }
 
@@ -273,10 +268,14 @@ const primaryStyle = computed(() => ({
 }
 
 .dh-item {
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-row);
 }
 
 .dh-item-head {
@@ -289,40 +288,39 @@ const primaryStyle = computed(() => ({
 .dh-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--ac-radius-pill);
   flex-shrink: 0;
 }
 
 .dh-status {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 18px;
 }
 
-.dh-trigger,
-.dh-time {
-  font-size: 11px;
+.dh-trigger {
+  flex-shrink: 0;
 }
 
 .dh-time {
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .dh-line {
-  font-size: 12px;
   word-break: break-word;
 }
 
 .dh-error-text {
-  font-family: var(--ac-font-mono, 'Monaco', 'Menlo', 'Ubuntu Mono', monospace);
-  font-size: 11px;
+  font-family: var(--ac-font-mono);
+}
+
+.dh-shot-btn {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .dh-more {
-  border: none;
-  padding: 7px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
+  align-self: stretch;
 }
 </style>

@@ -1,10 +1,18 @@
 <template>
-  <div class="h-full w-full bg-slate-50 relative agent-theme" :data-agent-theme="currentTheme">
-    <!-- Sidepanel Navigator -->
+  <div class="sp-app agent-theme" :data-agent-theme="currentTheme">
+    <!-- Sidepanel Navigator: sticky 탭 바. 아래 화면은 탭 바를 뺀 나머지 높이를 채우고, 그
+         안에서 각 화면이 자기 스크롤 영역을 갖는다. -->
     <SidepanelNavigator :activeTab="activeTab" @change="handleTabChange" />
 
     <!-- Workflows Tab -->
-    <div v-show="activeTab === 'workflows'" class="h-full flex flex-col">
+    <div
+      v-show="activeTab === 'workflows'"
+      id="sp-panel-workflows"
+      role="tabpanel"
+      aria-labelledby="sp-tab-workflows"
+      tabindex="0"
+      class="flex-1 min-h-0 flex flex-col"
+    >
       <!-- 녹화 표시줄: 시작·중지 버튼과 녹화 중 표시가 여기 있다 -->
       <RecordingBar
         :recording="recorder.isRecording.value"
@@ -46,7 +54,14 @@
     </div>
 
     <!-- 매일 작업 탭: 예약 목록과 그 실행 이력 -->
-    <div v-show="activeTab === 'daily'" class="h-full flex flex-col">
+    <div
+      v-show="activeTab === 'daily'"
+      id="sp-panel-daily"
+      role="tabpanel"
+      aria-labelledby="sp-tab-daily"
+      tabindex="0"
+      class="flex-1 min-h-0 flex flex-col"
+    >
       <DailyView
         class="flex-1 min-h-0"
         :schedules="dailySchedules.schedules.value"
@@ -101,11 +116,20 @@
     />
 
     <!-- 토스트: 실행·발행 실패를 콘솔에만 남기지 않는다 -->
-    <div v-if="toast" class="sp-toast" :style="toastStyle">{{ toast.text }}</div>
+    <div v-if="toast" class="sp-toast" :class="toast.kind === 'error' ? 'sp-toast--error' : ''">
+      {{ toast.text }}
+    </div>
 
     <!-- Element Markers Tab -->
-    <div v-show="activeTab === 'element-markers'" class="element-markers-content">
-      <div class="px-4 py-4">
+    <div
+      v-show="activeTab === 'element-markers'"
+      id="sp-panel-element-markers"
+      role="tabpanel"
+      aria-labelledby="sp-tab-element-markers"
+      tabindex="0"
+      class="element-markers-content ac-scroll"
+    >
+      <div>
         <!-- Toolbar: Search + Add Button -->
         <div class="em-toolbar">
           <div class="em-search-wrapper">
@@ -150,10 +174,21 @@
         </div>
 
         <!-- Modal: Add/Edit Marker -->
-        <div v-if="markerEditorOpen" class="em-modal-overlay" @click.self="closeMarkerEditor">
-          <div class="em-modal">
+        <div
+          v-if="markerEditorOpen"
+          class="ac-dim em-modal-overlay"
+          @click.self="closeMarkerEditor"
+        >
+          <div
+            ref="markerModalRef"
+            class="em-modal"
+            role="dialog"
+            aria-modal="true"
+            :aria-labelledby="markerModalTitleId"
+            tabindex="-1"
+          >
             <div class="em-modal-header">
-              <h3 class="em-modal-title">
+              <h3 :id="markerModalTitleId" class="em-modal-title">
                 {{
                   editingMarkerId
                     ? getMessage('sidepanel_marker_edit')
@@ -175,7 +210,7 @@
                   <label class="em-field-label">{{ getMessage('nameLabel') }}</label>
                   <input
                     v-model="markerForm.name"
-                    class="em-input"
+                    class="ac-field"
                     :placeholder="getMessage('sidepanel_marker_name_placeholder')"
                     required
                   />
@@ -188,7 +223,7 @@
                     getMessage('sidepanel_marker_selector_type_label')
                   }}</label>
                   <div class="em-select-wrapper">
-                    <select v-model="markerForm.selectorType" class="em-select">
+                    <select v-model="markerForm.selectorType" class="ac-field">
                       <option value="css">{{ getMessage('sidepanel_selector_type_css') }}</option>
                       <option value="xpath">XPath</option>
                     </select>
@@ -199,7 +234,7 @@
                     getMessage('sidepanel_marker_match_type_label')
                   }}</label>
                   <div class="em-select-wrapper">
-                    <select v-model="markerForm.matchType" class="em-select">
+                    <select v-model="markerForm.matchType" class="ac-field">
                       <option value="prefix">{{
                         getMessage('sidepanel_match_type_prefix')
                       }}</option>
@@ -217,7 +252,7 @@
                   }}</label>
                   <textarea
                     v-model="markerForm.selector"
-                    class="em-textarea"
+                    class="ac-field ac-field--mono"
                     :placeholder="getMessage('sidepanel_marker_selector_placeholder')"
                     rows="3"
                     required
@@ -226,10 +261,14 @@
               </div>
 
               <div class="em-modal-actions">
-                <button type="button" class="em-btn em-btn-ghost" @click="closeMarkerEditor">
+                <button
+                  type="button"
+                  class="ac-button ac-button--ghost ac-button--sm"
+                  @click="closeMarkerEditor"
+                >
                   {{ getMessage('cancelButton') }}
                 </button>
-                <button type="submit" class="em-btn em-btn-primary">
+                <button type="submit" class="ac-button ac-button--primary">
                   {{
                     editingMarkerId
                       ? getMessage('sidepanel_update_button')
@@ -269,7 +308,12 @@
             class="em-domain-group"
           >
             <!-- Domain Header -->
-            <div class="em-domain-header" @click="toggleDomain(domainGroup.domain)">
+            <button
+              type="button"
+              class="em-domain-header"
+              :aria-expanded="expandedDomains.has(domainGroup.domain)"
+              @click="toggleDomain(domainGroup.domain)"
+            >
               <div class="em-domain-info">
                 <svg
                   class="em-domain-icon"
@@ -285,7 +329,7 @@
                   getMessage('sidepanel_marker_domain_count', [String(domainGroup.count)])
                 }}</span>
               </div>
-            </div>
+            </button>
 
             <!-- URLs and Markers -->
             <div v-if="expandedDomains.has(domainGroup.domain)" class="em-domain-content">
@@ -367,7 +411,7 @@
         <!-- No search results -->
         <div v-else-if="markers.length > 0 && filteredMarkers.length === 0" class="em-empty">
           <p>{{ getMessage('sidepanel_marker_no_match') }}</p>
-          <button class="em-btn em-btn-ghost em-empty-btn" @click="markerSearch = ''">
+          <button class="ac-button ac-button--ghost em-empty-btn" @click="markerSearch = ''">
             {{ getMessage('sidepanel_clear_search_button') }}
           </button>
         </div>
@@ -375,7 +419,7 @@
         <!-- Empty state -->
         <div v-else class="em-empty">
           <p>{{ getMessage('sidepanel_marker_empty') }}</p>
-          <button class="em-btn em-btn-primary em-empty-btn" @click="openMarkerEditor()">
+          <button class="ac-button ac-button--primary em-empty-btn" @click="openMarkerEditor()">
             {{ getMessage('sidepanel_marker_add') }}
           </button>
         </div>
@@ -399,6 +443,7 @@ import {
 } from './components/workflows';
 import { DailyView, DailyScheduleForm } from './components/daily';
 import { useAgentTheme } from './composables/useAgentTheme';
+import { useDialogA11y } from './composables/useDialogA11y';
 import { useWorkflowsV3, type FlowLite } from './composables/useWorkflowsV3';
 import { useDailySchedules } from './composables/useDailySchedules';
 import { useRecorder } from './composables/useRecorder';
@@ -562,12 +607,6 @@ function showToast(text: string, kind: 'ok' | 'error' = 'ok') {
     toast.value = null;
   }, 4000);
 }
-
-const toastStyle = computed(() => ({
-  backgroundColor:
-    toast.value?.kind === 'error' ? 'var(--ac-danger, #ef4444)' : 'var(--ac-text, #262626)',
-  color: 'var(--ac-surface, #ffffff)',
-}));
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -1026,6 +1065,11 @@ function closeMarkerEditor() {
   resetForm();
 }
 
+/** 요소 마킹 추가·수정 모달 접근성(포커스 이동·트랩·Escape). */
+const markerModalRef = ref<HTMLElement | null>(null);
+const markerModalTitleId = 'em-modal-title';
+useDialogA11y(markerModalRef, markerModalTitleId, closeMarkerEditor);
+
 function resetForm() {
   markerForm.value = {
     url: currentPageUrl.value,
@@ -1308,33 +1352,47 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 토스트: 실행·발행 결과를 사용자에게 보여 준다 */
-.sp-toast {
-  position: fixed;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  padding: 10px 14px;
-  border-radius: var(--ac-radius-inner, 8px);
-  font-size: 12px;
-  line-height: 1.4;
-  z-index: 70;
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.2));
-  word-break: break-word;
+/* 전체 패널: 위에 sticky 탭 바, 아래는 그 탭 바를 뺀 나머지 높이를 채우는 세로 flex. */
+.sp-app {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--ac-bg);
 }
 
-/* reuse popup styles; only tune list item spacing for sidepanel width */
-.rr-item {
-  margin-bottom: 8px;
+/* 토스트: 실행·발행 결과를 사용자에게 보여 준다. 하단 중앙, 어두운 바탕에 흰 글자. */
+.sp-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 12px 16px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-toast-bg);
+  color: var(--ac-text-inverse);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  z-index: 70;
+  box-shadow: var(--ac-shadow-float);
+  word-break: break-word;
+  text-align: center;
 }
-.rr-actions button {
-  margin-left: 6px;
+
+.sp-toast--error {
+  background-color: var(--ac-danger);
 }
 
 /* Element Markers Styles - Using agent-theme tokens */
 .element-markers-content {
-  padding-bottom: 24px;
-  color: var(--ac-text, #262626);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 16px 24px;
+  color: var(--ac-text);
 }
 
 .em-form {
@@ -1364,114 +1422,11 @@ onUnmounted(() => {
 .em-field-label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--ac-text-subtle, #737373);
-}
-
-.em-input {
-  width: 100%;
-  height: 44px;
-  padding: 0 16px;
-  background: var(--ac-surface-muted, #f5f5f5);
-  border: none;
-  border-radius: var(--ac-radius-inner, 10px);
-  font-size: 14px;
-  color: var(--ac-text, #262626);
-  font-family: inherit;
-  outline: none;
-  transition: background var(--ac-motion-fast, 150ms) ease;
-}
-
-.em-input:focus {
-  background: var(--ac-hover-bg, #e5e5e5);
-}
-
-.em-textarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 12px 16px;
-  background: var(--ac-surface-muted, #f5f5f5);
-  border: none;
-  border-radius: var(--ac-radius-inner, 10px);
-  font-size: 14px;
-  color: var(--ac-text, #262626);
-  font-family: var(--ac-font-mono, 'Monaco', 'Menlo', 'Ubuntu Mono', monospace);
-  outline: none;
-  transition: background var(--ac-motion-fast, 150ms) ease;
-  resize: vertical;
-}
-
-.em-textarea:focus {
-  background: var(--ac-hover-bg, #e5e5e5);
+  color: var(--ac-text-caption);
 }
 
 .em-select-wrapper {
   position: relative;
-}
-
-.em-select {
-  width: 100%;
-  height: 44px;
-  padding: 0 40px 0 16px;
-  background: var(--ac-surface-muted, #f5f5f5);
-  border: none;
-  border-radius: var(--ac-radius-inner, 10px);
-  font-size: 14px;
-  color: var(--ac-text, #262626);
-  font-family: inherit;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-}
-
-.em-select-wrapper::after {
-  content: '';
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid var(--ac-text-subtle, #737373);
-  pointer-events: none;
-}
-
-.em-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.em-btn {
-  flex: 1;
-  height: 44px;
-  border: none;
-  border-radius: var(--ac-radius-button, 10px);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
-}
-
-.em-btn-primary {
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, #ffffff);
-}
-
-.em-btn-primary:hover {
-  background: var(--ac-accent-hover, #c4664a);
-  transform: translateY(-1px);
-  box-shadow: var(--ac-shadow-float, 0 4px 12px rgba(0, 0, 0, 0.15));
-}
-
-.em-btn-ghost {
-  background: var(--ac-surface-muted, #f5f5f5);
-  color: var(--ac-text, #404040);
-}
-
-.em-btn-ghost:hover {
-  background: var(--ac-hover-bg, #e5e5e5);
 }
 
 .em-list {
@@ -1483,7 +1438,7 @@ onUnmounted(() => {
 .em-empty {
   text-align: center;
   padding: 48px 20px;
-  color: var(--ac-text-subtle, #a3a3a3);
+  color: var(--ac-text-caption);
   font-size: 14px;
 }
 
@@ -1505,7 +1460,7 @@ onUnmounted(() => {
 .em-search-icon {
   position: absolute;
   left: 12px;
-  color: var(--ac-text-muted, #737373);
+  color: var(--ac-text-muted);
   pointer-events: none;
 }
 
@@ -1513,42 +1468,42 @@ onUnmounted(() => {
   width: 100%;
   height: 40px;
   padding: 0 36px;
-  background: var(--ac-surface-muted, #f5f5f5);
+  background: var(--ac-surface-muted);
   border: none;
-  border-radius: var(--ac-radius-inner, 10px);
+  border-radius: var(--ac-radius-inner);
   font-size: 14px;
-  color: var(--ac-text, #262626);
+  color: var(--ac-text);
   outline: none;
-  transition: background var(--ac-motion-fast, 150ms) ease;
+  transition: background var(--ac-motion-fast) ease;
 }
 
 .em-search-input:focus {
-  background: var(--ac-hover-bg, #e5e5e5);
+  background: var(--ac-hover-bg);
 }
 
 .em-search-input::placeholder {
-  color: var(--ac-text-muted, #a3a3a3);
+  color: var(--ac-text-muted);
 }
 
 .em-search-clear {
   position: absolute;
-  right: 8px;
-  width: 24px;
-  height: 24px;
+  right: 4px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: none;
   border-radius: 50%;
-  color: var(--ac-text-muted, #737373);
+  color: var(--ac-text-muted);
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
+  transition: all var(--ac-motion-fast) ease;
 }
 
 .em-search-clear:hover {
-  background: var(--ac-hover-bg, #e5e5e5);
-  color: var(--ac-text, #262626);
+  background: var(--ac-hover-bg);
+  color: var(--ac-text);
 }
 
 .em-add-btn {
@@ -1557,29 +1512,21 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--ac-accent, #d97757);
+  background: var(--ac-accent);
   border: none;
-  border-radius: var(--ac-radius-button, 10px);
-  color: var(--ac-accent-contrast, #ffffff);
+  border-radius: var(--ac-radius-button);
+  color: var(--ac-accent-contrast);
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
+  transition: all var(--ac-motion-fast) ease;
   flex-shrink: 0;
 }
 
 .em-add-btn:hover {
-  background: var(--ac-accent-hover, #c4664a);
-  transform: translateY(-1px);
-  box-shadow: var(--ac-shadow-float, 0 4px 12px rgba(0, 0, 0, 0.15));
+  background: var(--ac-accent-hover);
 }
 
-/* Modal */
+/* Modal. 딤 배경·중앙 정렬은 ac-dim 이 준다. 여기서는 진입 애니메이션과 z-index 만. */
 .em-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1000;
   animation: fadeIn 150ms ease-out;
 }
@@ -1597,9 +1544,9 @@ onUnmounted(() => {
   width: calc(100% - 32px);
   max-width: 480px;
   max-height: calc(100vh - 64px);
-  background: var(--ac-surface, #ffffff);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-float, 0 8px 32px rgba(0, 0, 0, 0.2));
+  background: var(--ac-surface);
+  border-radius: var(--ac-radius-card);
+  box-shadow: var(--ac-shadow-float);
   overflow: hidden;
   animation: slideUp 200ms ease-out;
 }
@@ -1620,13 +1567,13 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--ac-border, #e5e5e5);
+  box-shadow: inset 0 -0.75px 0 0 var(--ac-divider);
 }
 
 .em-modal-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--ac-text, #262626);
+  color: var(--ac-text);
   margin: 0;
 }
 
@@ -1638,15 +1585,15 @@ onUnmounted(() => {
   justify-content: center;
   background: transparent;
   border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #737373);
+  border-radius: var(--ac-radius-button);
+  color: var(--ac-text-muted);
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
+  transition: all var(--ac-motion-fast) ease;
 }
 
 .em-modal-close:hover {
-  background: var(--ac-hover-bg, #f5f5f5);
-  color: var(--ac-text, #262626);
+  background: var(--ac-hover-bg);
+  color: var(--ac-text);
 }
 
 .em-modal .em-form {
@@ -1660,7 +1607,7 @@ onUnmounted(() => {
   margin-top: 16px;
 }
 
-.em-modal-actions .em-btn {
+.em-modal-actions .ac-button {
   flex: none;
   min-width: 80px;
 }
@@ -1668,33 +1615,44 @@ onUnmounted(() => {
 /* Statistics Bar (compact) */
 .em-stats-bar {
   padding: 10px 16px;
-  background: var(--ac-surface-muted, #f5f5f5);
-  border-radius: var(--ac-radius-inner, 8px);
+  background: var(--ac-surface-muted);
+  border-radius: var(--ac-radius-inner);
 }
 
 .em-stats-text {
   font-size: 13px;
-  color: var(--ac-text-muted, #737373);
+  color: var(--ac-text-muted);
 }
 
 .em-stats-text strong {
-  color: var(--ac-text, #262626);
+  color: var(--ac-text);
   font-weight: 600;
 }
 
 .em-domain-header {
-  background: var(--ac-surface, #ffffff);
-  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-  border-radius: var(--ac-radius-card, 12px);
-  padding: 6px 12px;
+  /* 카드는 테두리·그림자 없이 바탕색 위 흰 표면으로만 구분한다. */
+  display: block;
+  width: 100%;
+  border: none;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--ac-surface);
+  border-radius: var(--ac-radius-card);
+  padding: 12px 16px;
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
+  transition: background-color var(--ac-motion-fast) ease;
   user-select: none;
 }
 
+.em-domain-header:focus-visible {
+  outline: 2px solid var(--ac-focus-ring);
+  outline-offset: 2px;
+}
+
 .em-domain-header:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-  box-shadow: var(--ac-shadow-float, 0 4px 12px rgba(0, 0, 0, 0.1));
+  background: var(--ac-surface-hover);
 }
 
 .em-domain-info {
@@ -1705,8 +1663,8 @@ onUnmounted(() => {
 
 .em-domain-icon {
   flex-shrink: 0;
-  color: var(--ac-text-muted, #525252);
-  transition: transform var(--ac-motion-fast, 150ms) ease;
+  color: var(--ac-text-muted);
+  transition: transform var(--ac-motion-fast) ease;
 }
 
 .em-domain-icon-expanded {
@@ -1720,17 +1678,17 @@ onUnmounted(() => {
 .em-domain-name {
   font-size: 16px;
   font-weight: 600;
-  color: var(--ac-text, #262626);
+  color: var(--ac-text);
   margin: 0;
   flex: 1;
 }
 
 .em-domain-count {
   font-size: 13px;
-  color: var(--ac-text-muted, #737373);
-  background: var(--ac-surface-muted, rgba(255, 255, 255, 0.6));
+  color: var(--ac-text-muted);
+  background: var(--ac-surface-muted);
   padding: 4px 12px;
-  border-radius: var(--ac-radius-button, 12px);
+  border-radius: var(--ac-radius-button);
   font-weight: 500;
 }
 
@@ -1755,8 +1713,8 @@ onUnmounted(() => {
   margin-left: 8px;
   margin-top: 8px;
   padding: 4px 0 4px 12px;
-  border-radius: var(--ac-radius-inner, 8px);
-  background: var(--ac-surface-muted, #f5f5f5);
+  border-radius: var(--ac-radius-inner);
+  background: var(--ac-surface-muted);
 }
 
 /* URL Group */
@@ -1776,14 +1734,14 @@ onUnmounted(() => {
 }
 
 .em-url-icon {
-  color: var(--ac-text-muted, #a3a3a3);
+  color: var(--ac-text-muted);
   flex-shrink: 0;
 }
 
 .em-url-path {
   font-size: 12px;
-  color: var(--ac-text-muted, #737373);
-  font-family: var(--ac-font-mono, 'Monaco', 'Menlo', 'Ubuntu Mono', monospace);
+  color: var(--ac-text-muted);
+  font-family: var(--ac-font-mono);
   word-break: break-all;
   line-height: 1.4;
 }
@@ -1798,8 +1756,8 @@ onUnmounted(() => {
 /* Marker Item - Two row layout */
 .em-marker-item {
   padding: 8px 10px;
-  border-radius: var(--ac-radius-inner, 6px);
-  background: var(--ac-hover-bg, rgba(0, 0, 0, 0.03));
+  border-radius: var(--ac-radius-inner);
+  background: var(--ac-hover-bg);
   margin-bottom: 4px;
 }
 
@@ -1808,7 +1766,7 @@ onUnmounted(() => {
 }
 
 .em-marker-item:hover {
-  background: var(--ac-hover-bg, rgba(0, 0, 0, 0.05));
+  background: var(--ac-hover-bg);
 }
 
 /* Top row: name + actions */
@@ -1823,7 +1781,7 @@ onUnmounted(() => {
 .em-marker-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--ac-text, #262626);
+  color: var(--ac-text);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1837,15 +1795,15 @@ onUnmounted(() => {
 }
 
 .em-action-btn {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: var(--ac-radius-button, 6px);
+  border-radius: var(--ac-radius-button);
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 150ms) ease;
+  transition: all var(--ac-motion-fast) ease;
 }
 
 .em-action-btn svg {
@@ -1855,31 +1813,31 @@ onUnmounted(() => {
 }
 
 .em-action-btn.em-action-verify {
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.1));
-  color: var(--ac-accent, #d97757);
+  background: var(--ac-accent-subtle);
+  color: var(--ac-accent);
 }
 
 .em-action-btn.em-action-verify:hover {
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.18));
+  background: var(--ac-accent-subtle);
 }
 
 .em-action-btn.em-action-edit {
-  background: var(--ac-surface-muted, #f5f5f5);
-  color: var(--ac-text-muted, #737373);
+  background: var(--ac-surface-muted);
+  color: var(--ac-text-muted);
 }
 
 .em-action-btn.em-action-edit:hover {
-  background: var(--ac-hover-bg, #e5e5e5);
-  color: var(--ac-text, #262626);
+  background: var(--ac-hover-bg);
+  color: var(--ac-text);
 }
 
 .em-action-btn.em-action-delete {
-  background: var(--ac-danger-subtle, rgba(239, 68, 68, 0.08));
-  color: var(--ac-danger, #ef4444);
+  background: var(--ac-danger-subtle);
+  color: var(--ac-danger);
 }
 
 .em-action-btn.em-action-delete:hover {
-  background: var(--ac-danger-subtle, rgba(239, 68, 68, 0.15));
+  background: var(--ac-danger-subtle);
 }
 
 /* Bottom row: selector + tags */
@@ -1890,10 +1848,11 @@ onUnmounted(() => {
 }
 
 .em-marker-selector {
-  font-size: 11px;
-  font-family: var(--ac-font-mono, 'Monaco', 'Menlo', 'Ubuntu Mono', monospace);
-  color: var(--ac-text-muted, #737373);
-  background: var(--ac-surface-muted, #f5f5f5);
+  font-size: 12px;
+  line-height: 16px;
+  font-family: var(--ac-font-mono);
+  color: var(--ac-text-secondary);
+  background: var(--ac-surface-muted);
   padding: 2px 6px;
   border-radius: 4px;
   flex: 1;
@@ -1911,13 +1870,13 @@ onUnmounted(() => {
 }
 
 .em-tag {
-  font-size: 9px;
-  padding: 2px 5px;
-  background: transparent;
-  color: var(--ac-text-muted, #a3a3a3);
-  border: 1px solid var(--ac-border, #e5e5e5);
-  border-radius: 3px;
-  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 2px 8px;
+  background: var(--ac-surface-muted);
+  color: var(--ac-text-secondary);
+  border-radius: var(--ac-radius-pill);
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }

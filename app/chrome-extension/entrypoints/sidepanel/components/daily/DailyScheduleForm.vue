@@ -1,20 +1,25 @@
 <template>
-  <div class="df-overlay" @click.self="$emit('cancel')">
-    <div class="df-dialog" :style="dialogStyle">
-      <div class="df-title" :style="titleStyle">
+  <div class="ac-dim df-dim" @click.self="$emit('cancel')">
+    <div
+      ref="dialogRef"
+      class="ac-dialog df-dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
+      <div class="ac-title" :id="titleId">
         {{ getMessage('sidepanel_daily_form_title', [label]) }}
       </div>
-      <div class="df-hint" :style="subtleStyle">{{
-        getMessage('sidepanel_daily_chrome_note')
-      }}</div>
+      <div class="ac-sub df-hint">{{ getMessage('sidepanel_daily_chrome_note') }}</div>
 
       <!-- 예약할 수 없는 흐름이면 이유를 먼저 말하고 저장을 잠근다 -->
-      <div v-if="blockMessage" class="df-block" :style="blockStyle">
-        <div>{{ blockMessage }}</div>
+      <div v-if="blockMessage" class="df-block">
+        <div class="ac-sub">{{ blockMessage }}</div>
         <button
           v-if="blockReason === 'flow_start_url_required'"
-          class="df-btn df-btn-small"
-          :style="ghostStyle"
+          class="ac-button ac-button--ghost ac-button--sm df-block-btn"
+          type="button"
           @click="$emit('open-wizard')"
         >
           {{ getMessage('sidepanel_daily_block_open_wizard') }}
@@ -24,16 +29,14 @@
       <div class="df-body">
         <!-- 반복 방식 -->
         <div class="df-field">
-          <span class="df-label" :style="mutedStyle">{{
-            getMessage('sidepanel_daily_form_mode')
-          }}</span>
+          <span class="ac-caption df-label">{{ getMessage('sidepanel_daily_form_mode') }}</span>
           <div class="df-modes">
             <button
               v-for="option in modeOptions"
               :key="option.value"
               type="button"
-              class="df-chip"
-              :style="state.mode === option.value ? chipOnStyle : chipStyle"
+              class="ac-chip"
+              :class="{ 'ac-chip--on': state.mode === option.value }"
               @click="state.mode = option.value"
             >
               {{ option.text }}
@@ -43,16 +46,14 @@
 
         <!-- 요일 (요일 선택일 때만) -->
         <div v-if="state.mode === 'weekdays'" class="df-field">
-          <span class="df-label" :style="mutedStyle">{{
-            getMessage('sidepanel_daily_form_days')
-          }}</span>
+          <span class="ac-caption df-label">{{ getMessage('sidepanel_daily_form_days') }}</span>
           <div class="df-days">
             <button
               v-for="day in dayOrder"
               :key="day"
               type="button"
-              class="df-day"
-              :style="state.days.includes(day) ? chipOnStyle : chipStyle"
+              class="ac-chip df-day"
+              :class="{ 'ac-chip--on': state.days.includes(day) }"
               @click="toggleDay(day)"
             >
               {{ dayLabel(day) }}
@@ -62,22 +63,18 @@
 
         <!-- 시각 (매일·요일 선택) -->
         <div v-if="state.mode !== 'every'" class="df-field">
-          <span class="df-label" :style="mutedStyle">{{
-            getMessage('sidepanel_daily_form_times')
-          }}</span>
+          <span class="ac-caption df-label">{{ getMessage('sidepanel_daily_form_times') }}</span>
           <div v-for="(time, index) in state.times" :key="index" class="df-time-row">
             <input
               v-model="state.times[index]"
               type="time"
-              class="df-input"
-              :style="inputStyle"
+              class="ac-field df-time-input"
               step="60"
             />
             <button
               v-if="state.times.length > 1"
               type="button"
-              class="df-btn df-btn-small"
-              :style="ghostStyle"
+              class="ac-button ac-button--ghost ac-button--sm"
               @click="removeTime(index)"
             >
               {{ getMessage('sidepanel_daily_form_remove_time') }}
@@ -86,8 +83,7 @@
           <button
             v-if="state.times.length < maxTimes"
             type="button"
-            class="df-btn df-btn-small"
-            :style="ghostStyle"
+            class="ac-button ac-button--ghost ac-button--sm df-add-time"
             @click="addTime"
           >
             {{ getMessage('sidepanel_daily_form_add_time') }}
@@ -96,16 +92,14 @@
 
         <!-- 간격 -->
         <div v-else class="df-field">
-          <span class="df-label" :style="mutedStyle">{{
-            getMessage('sidepanel_daily_form_every')
-          }}</span>
+          <span class="ac-caption df-label">{{ getMessage('sidepanel_daily_form_every') }}</span>
           <div class="df-modes">
             <button
               v-for="key in everyKeys"
               :key="key"
               type="button"
-              class="df-chip"
-              :style="state.every === key ? chipOnStyle : chipStyle"
+              class="ac-chip"
+              :class="{ 'ac-chip--on': state.every === key }"
               @click="state.every = key"
             >
               {{ getMessage(`sidepanel_daily_every_${key}`) }}
@@ -114,54 +108,49 @@
         </div>
 
         <!-- 옵션 -->
-        <label class="df-check" :style="mutedStyle">
-          <input type="checkbox" v-model="state.notify" />
+        <label class="df-check ac-sub">
+          <input type="checkbox" class="ac-check" v-model="state.notify" />
           <span>{{ getMessage('sidepanel_daily_form_notify') }}</span>
         </label>
-        <label class="df-check" :style="mutedStyle">
-          <input type="checkbox" v-model="state.report" />
+        <label class="df-check ac-sub">
+          <input type="checkbox" class="ac-check" v-model="state.report" />
           <span>{{ getMessage('sidepanel_daily_form_report') }}</span>
         </label>
-        <label class="df-check" :style="mutedStyle">
-          <input type="checkbox" v-model="state.enabled" />
+        <label class="df-check ac-sub">
+          <input type="checkbox" class="ac-check" v-model="state.enabled" />
           <span>{{ getMessage('sidepanel_daily_form_enabled') }}</span>
         </label>
 
         <!-- 변수 값 -->
         <div v-if="variables.length > 0" class="df-field">
-          <span class="df-label" :style="mutedStyle">{{
+          <span class="ac-caption df-label">{{
             getMessage('sidepanel_daily_form_variables')
           }}</span>
           <label v-for="variable in variables" :key="variable.key" class="df-var">
-            <span class="df-var-label" :style="subtleStyle">{{
-              variable.label || variable.key
-            }}</span>
+            <span class="ac-caption">{{ variable.label || variable.key }}</span>
             <input
               v-model="state.args[variable.key]"
               type="text"
-              class="df-input"
-              :style="variableError?.key === variable.key ? inputErrorStyle : inputStyle"
+              class="ac-field"
+              :class="{ 'ac-field--error': variableError?.key === variable.key }"
             />
             <!-- 예약은 값을 물어볼 수 없다. 빈 값·규칙 위반은 저장 전에 여기서 말한다. -->
-            <span
-              v-if="variableError?.key === variable.key"
-              class="df-var-error"
-              :style="dangerStyle"
-              >{{ variableErrorMessage(variableError, variable.label || variable.key) }}</span
-            >
+            <span v-if="variableError?.key === variable.key" class="ac-error-text">{{
+              variableErrorMessage(variableError, variable.label || variable.key)
+            }}</span>
           </label>
         </div>
       </div>
 
-      <div v-if="formError" class="df-error" :style="dangerStyle">{{ formError }}</div>
+      <div v-if="formError" class="ac-error-text">{{ formError }}</div>
 
-      <div class="df-actions">
-        <button class="df-btn" :style="ghostStyle" @click="$emit('cancel')">
+      <div class="df-actions ac-hairline-top">
+        <button class="ac-button ac-button--ghost" type="button" @click="$emit('cancel')">
           {{ getMessage('sidepanel_daily_form_cancel') }}
         </button>
         <button
-          class="df-btn df-btn-primary"
-          :style="primaryStyle"
+          class="ac-button ac-button--primary"
+          type="button"
           :disabled="!!blockReason"
           @click="submit"
         >
@@ -174,7 +163,7 @@
 
 <script lang="ts" setup>
 /**
- * 예약 폼 (2026-09-05 사이드패널 2단계 E).
+ * 예약 폼 (2026-09-05 사이드패널 2단계 E, 2026-09-06 토스 스타일).
  *
  * 흐름 카드의 예약 버튼과 매일 작업 탭의 예약 수정이 같은 화면을 연다. 값 검증은
  * `utils/daily-form.ts` 의 순수 함수가 하고, 여기서는 그 결과를 문구로 보여주기만 한다.
@@ -184,6 +173,7 @@
  */
 import { computed, reactive, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
+import { useDialogA11y } from '../../composables/useDialogA11y';
 import { DAY_DISPLAY_ORDER, EVERY_KEYS, dayLabel } from '../../utils/daily-format';
 import {
   flowScheduleBlockMessage,
@@ -224,6 +214,10 @@ const emit = defineEmits<{
 const maxTimes = MAX_DAILY_TIMES;
 const dayOrder = DAY_DISPLAY_ORDER;
 const everyKeys = EVERY_KEYS;
+
+const dialogRef = ref<HTMLElement | null>(null);
+const titleId = 'daily-schedule-form-title';
+useDialogA11y(dialogRef, titleId, () => emit('cancel'));
 
 const state = reactive(initialFormState(props.existing));
 
@@ -297,93 +291,36 @@ function submit(): void {
     ...(props.existing?.loginCheck ? { loginCheck: props.existing.loginCheck } : {}),
   });
 }
-
-const dialogStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-  borderRadius: 'var(--ac-radius-card, 12px)',
-  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-}));
-const titleStyle = computed(() => ({ color: 'var(--ac-text, #1a1a1a)' }));
-const mutedStyle = computed(() => ({ color: 'var(--ac-text-muted, #6e6e6e)' }));
-const subtleStyle = computed(() => ({ color: 'var(--ac-text-subtle, #a8a29e)' }));
-const dangerStyle = computed(() => ({ color: 'var(--ac-danger, #ef4444)' }));
-const blockStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f5f5f4)',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f5f5f4)',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const inputErrorStyle = computed(() => ({
-  backgroundColor: 'var(--ac-danger-subtle, rgba(239, 68, 68, 0.08))',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const chipStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-  color: 'var(--ac-text-muted, #6e6e6e)',
-  borderRadius: 'var(--ac-radius-button, 999px)',
-}));
-const chipOnStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent, #d97757)',
-  color: 'var(--ac-accent-contrast, #ffffff)',
-  borderRadius: 'var(--ac-radius-button, 999px)',
-}));
-const ghostStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
-const primaryStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent, #d97757)',
-  color: 'var(--ac-accent-contrast, #ffffff)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
 </script>
 
 <style scoped>
-.df-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+.df-dim {
   z-index: 80;
 }
 
 .df-dialog {
-  width: 100%;
-  max-width: 340px;
+  width: min(340px, 100% - 24px);
   max-height: calc(100vh - 40px);
-  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.df-title {
-  font-size: 14px;
-  font-weight: 600;
-  word-break: break-word;
-}
-
 .df-hint {
-  font-size: 11px;
-  line-height: 1.4;
+  margin: 0;
 }
 
 .df-block {
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 10px;
+  background-color: var(--ac-surface-muted);
+  border-radius: var(--ac-radius);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.df-block-btn {
+  align-self: flex-start;
 }
 
 .df-body {
@@ -400,11 +337,6 @@ const primaryStyle = computed(() => ({
   gap: 6px;
 }
 
-.df-label {
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .df-modes,
 .df-days {
   display: flex;
@@ -412,19 +344,9 @@ const primaryStyle = computed(() => ({
   gap: 6px;
 }
 
-.df-chip,
-.df-day {
-  border: none;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
 .df-day {
   width: 36px;
-  padding: 6px 0;
+  padding: 0;
   text-align: center;
 }
 
@@ -434,22 +356,19 @@ const primaryStyle = computed(() => ({
   gap: 6px;
 }
 
-.df-input {
+.df-time-input {
   flex: 1;
-  height: 34px;
-  padding: 0 10px;
-  border: none;
-  outline: none;
-  font-size: 13px;
-  font-family: inherit;
   min-width: 0;
+}
+
+.df-add-time {
+  align-self: flex-start;
 }
 
 .df-check {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
   cursor: pointer;
 }
 
@@ -459,43 +378,10 @@ const primaryStyle = computed(() => ({
   gap: 4px;
 }
 
-.df-var-label {
-  font-size: 11px;
-}
-
-.df-var-error {
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.df-error {
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 .df-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-
-.df-btn {
-  border: none;
-  padding: 7px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.df-btn-small {
-  padding: 5px 10px;
-  font-size: 12px;
-  align-self: flex-start;
-}
-
-.df-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  padding-top: 12px;
 }
 </style>

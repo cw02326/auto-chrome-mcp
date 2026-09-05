@@ -14,7 +14,9 @@ import {
   formatDays,
   formatNextRun,
   formatRunStatus,
+  formatScheduleEnabledLine,
   formatTimes,
+  runStatusColor,
   summarizeSchedule,
 } from '@/entrypoints/sidepanel/utils/daily-format';
 
@@ -115,5 +117,60 @@ describe('daily-format', () => {
 
   it('모르는 상태는 감추지 않고 그대로 보여 준다', () => {
     expect(formatRunStatus('weird_state', t)).toBe('weird_state');
+  });
+
+  describe('예약 줄의 켜짐 상태 문구 (2026-09-06 실기기 확인: 펼친 줄에서 이 분기가 뒤집힌 적이 있었다)', () => {
+    // 2026년 9월 5일 토요일 10:00 (로컬 시간)
+    const now = new Date(2026, 8, 5, 10, 0, 0).getTime();
+
+    it('켜져 있고 다음 실행이 미래면 다음 실행 문구다', () => {
+      const at = new Date(2026, 8, 6, 9, 0, 0).getTime();
+      expect(formatScheduleEnabledLine(true, at, now, t)).toBe(
+        'sidepanel_daily_next_run(sidepanel_daily_next_tomorrow(09:00))',
+      );
+    });
+
+    it('꺼져 있으면 다음 실행이 미래라도 꺼짐이다', () => {
+      const at = new Date(2026, 8, 6, 9, 0, 0).getTime();
+      expect(formatScheduleEnabledLine(false, at, now, t)).toBe('sidepanel_daily_paused');
+    });
+
+    it('꺼져 있으면 다음 실행이 없어도 꺼짐이다', () => {
+      expect(formatScheduleEnabledLine(false, null, now, t)).toBe('sidepanel_daily_paused');
+    });
+  });
+
+  describe('상태별 색은 토큰 이름만 돌려준다 (하드코드 폴백 금지)', () => {
+    it('색 문자열에 폴백(쉼표·# 값)이 없다', () => {
+      const statuses = [
+        'success',
+        'running',
+        'failed',
+        'stopped',
+        'timeout',
+        'interrupted',
+        'skipped_queue',
+        'login_required',
+        'user_took_over_tab',
+        undefined,
+      ];
+      for (const status of statuses) {
+        const color = runStatusColor(status);
+        expect(color).toMatch(/^var\(--ac-[a-z-]+\)$/);
+        expect(color).not.toContain(',');
+        expect(color).not.toContain('#');
+      }
+    });
+
+    it('성공은 success, 진행 중은 accent, 로그인 필요 등은 warning, 나머지는 danger 토큰이다', () => {
+      expect(runStatusColor('success')).toBe('var(--ac-success)');
+      expect(runStatusColor('running')).toBe('var(--ac-accent)');
+      expect(runStatusColor('login_required')).toBe('var(--ac-warning)');
+      expect(runStatusColor('skipped_queue')).toBe('var(--ac-warning)');
+      expect(runStatusColor('user_took_over_tab')).toBe('var(--ac-warning)');
+      expect(runStatusColor('stopped')).toBe('var(--ac-warning)');
+      expect(runStatusColor('failed')).toBe('var(--ac-danger)');
+      expect(runStatusColor(undefined)).toBe('var(--ac-danger)');
+    });
   });
 });

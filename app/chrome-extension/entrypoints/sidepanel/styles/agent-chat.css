@@ -4,33 +4,41 @@
  * This file defines the CSS variable tokens for the AgentChat component.
  * All components must only use these tokens - never hardcode colors.
  *
- * Themes:
- * - warm-editorial (default): Warm, editorial style from agent-ux.html
- * - blueprint-architect: Blueprint grid with technical aesthetic
- * - zen-journal: Calm journal / graphite accent (Muji style)
- * - neo-pop: Thick borders + hard shadow (Brutalist)
- * - dark-console: Dark terminal/console style
- * - swiss-grid: High-contrast brutalist/swiss style
+ * Theme:
+ * - toss-light (only theme, 2026-09-06): Toss Securities style light theme.
+ *   Measured from tossinvest.com. See docs/plans/2026-09-06-sidepanel-toss-style-design.md
+ *   The panel used to ship 7 themes; the other 6 were removed and the
+ *   `toss-light` values now live solely in the base `.agent-theme` block.
  */
+
+/*
+ * Pretendard Variable (SIL Open Font License 1.1).
+ * Bundled at public/fonts/ so the panel renders the same on every machine.
+ * The license text ships next to it (public/fonts/LICENSE.txt).
+ */
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('/fonts/PretendardVariable.woff2') format('woff2-variations');
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
 
 @layer base {
   .agent-theme {
     /* ========================================
-       Font Stacks (system font fallbacks)
+       Font Stacks
        ======================================== */
     --ac-font-sans:
-      'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-      'Apple Color Emoji', 'Segoe UI Emoji';
+      'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Noto Sans KR',
+      'Segoe UI', 'Apple SD Gothic Neo', Roboto, sans-serif;
     --ac-font-serif: 'Newsreader', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
-    --ac-font-mono:
-      'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-      'Courier New', monospace;
-    --ac-font-grotesk:
-      'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial;
+    --ac-font-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+    --ac-font-grotesk: var(--ac-font-sans);
 
     /* Semantic font tokens */
     --ac-font-body: var(--ac-font-sans);
-    --ac-font-heading: var(--ac-font-serif);
+    --ac-font-heading: var(--ac-font-sans);
     --ac-font-code: var(--ac-font-mono);
 
     /* ========================================
@@ -39,9 +47,12 @@
     --ac-border-width: 1px;
     --ac-border-width-strong: 2px;
     --ac-radius-container: 0px;
-    --ac-radius-card: 12px;
-    --ac-radius-inner: 8px;
-    --ac-radius-button: 8px;
+    --ac-radius-card: 16px;
+    --ac-radius: 8px;
+    --ac-radius-chip: 7px;
+    --ac-radius-pill: 999px;
+    --ac-radius-inner: var(--ac-radius);
+    --ac-radius-button: var(--ac-radius);
 
     /* Motion */
     --ac-motion-fast: 120ms;
@@ -53,515 +64,143 @@
     --ac-timeline-indent: 24px;
 
     /* Scrollbar sizing */
-    --ac-scrollbar-size: 4px;
+    --ac-scrollbar-size: 6px;
 
     /* ========================================
-       WARM EDITORIAL (Default Theme)
+       TOSS LIGHT (Default Theme)
        ======================================== */
 
     /* Background */
-    --ac-bg: #fdfcf8;
+    --ac-bg: #f6f7f9;
     --ac-bg-pattern: none;
     --ac-bg-pattern-size: 16px 16px;
 
     /* Header */
-    --ac-header-bg: rgba(253, 252, 248, 0.95);
-    --ac-header-border: rgba(245, 245, 244, 0.5);
+    --ac-header-bg: #f6f7f9;
+    --ac-header-border: rgba(0, 27, 55, 0.1);
 
     /* Surfaces */
     --ac-surface: #ffffff;
-    --ac-surface-muted: #f2f0eb;
-    --ac-surface-inset: #f2f0eb;
+    --ac-surface-row: #fbfcfd;
+    --ac-surface-muted: rgba(7, 25, 76, 0.04);
+    --ac-surface-hover: #f2f4f6;
+    --ac-surface-inset: rgba(2, 32, 71, 0.05);
 
     /* Text */
-    --ac-text: #1a1a1a;
-    --ac-text-muted: #6e6e6e;
-    --ac-text-subtle: #a8a29e;
+    --ac-text: rgba(26, 31, 41, 0.89);
+    --ac-text-secondary: rgb(78, 89, 104);
+    --ac-text-tertiary: rgba(18, 31, 51, 0.47);
+    --ac-text-disabled: rgba(19, 30, 54, 0.3);
     --ac-text-inverse: #ffffff;
-    --ac-text-placeholder: #a8a29e;
+    --ac-icon: rgba(24, 31, 43, 0.77);
 
-    /* Borders */
-    --ac-border: #e7e5e4;
-    --ac-border-strong: #d6d3d1;
+    /* Contrast-safe caption/status text. --ac-text-tertiary computes to
+       ~2.9:1 against both --ac-bg and white - well under the 4.5:1 WCAG AA
+       floor for the 12-13px text that reads it - so real caption/status
+       copy (.ac-caption, timestamps, secondary status lines) uses this
+       solid color instead. rgb(100, 110, 125) measures 5.16:1 on #ffffff
+       and 4.82:1 on --ac-bg (#f6f7f9); --ac-text-tertiary itself is kept
+       unchanged for genuinely decorative use (placeholders, disabled
+       icons). */
+    --ac-text-caption: rgb(100, 110, 125);
+
+    /* Legacy aliases (older token names still referenced in shared utilities) */
+    --ac-text-muted: var(--ac-text-secondary);
+    --ac-text-subtle: var(--ac-text-tertiary);
+    --ac-text-placeholder: var(--ac-text-disabled);
+
+    /* Dividers. Toss draws hairlines, not borders. */
+    --ac-divider: rgba(0, 27, 55, 0.1);
+    --ac-border: var(--ac-divider);
+    --ac-border-strong: rgba(0, 27, 55, 0.16);
 
     /* Hover states */
-    --ac-hover-bg: #f5f5f4;
-    --ac-hover-bg-subtle: #fafaf9;
+    --ac-hover-bg: var(--ac-surface-hover);
+    --ac-hover-bg-subtle: var(--ac-surface-row);
 
-    /* Accent (terracotta) */
-    --ac-accent: #d97757;
-    --ac-accent-hover: #c4664a;
-    --ac-accent-subtle: rgba(217, 119, 87, 0.12);
+    /* Accent (Toss blue) */
+    --ac-accent: #3182f6;
+    --ac-accent-hover: #2272eb;
+    --ac-accent-soft: #ebf4ff;
+    --ac-accent-text: #2272eb;
+    --ac-accent-subtle: var(--ac-accent-soft);
     --ac-accent-contrast: #ffffff;
     --ac-accent-2: var(--ac-accent);
 
     /* Links */
-    --ac-link: var(--ac-accent);
+    --ac-link: var(--ac-accent-text);
     --ac-link-hover: var(--ac-accent-hover);
 
     /* Selection */
-    --ac-selection-bg: #ffedd5;
-    --ac-selection-text: #7c2d12;
+    --ac-selection-bg: #ebf4ff;
+    --ac-selection-text: rgba(26, 31, 41, 0.89);
 
-    /* Shadows */
-    --ac-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --ac-shadow-float: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+    /* Shadows. Cards have none - the page ground separates them. */
+    --ac-shadow-card: none;
+    --ac-shadow-float: 0 8px 24px rgba(0, 27, 55, 0.12);
 
     /* Focus */
-    --ac-focus-ring: rgba(214, 211, 209, 0.9);
+    --ac-focus-ring: var(--ac-accent);
 
     /* Timeline */
-    --ac-timeline-line: #e7e5e4;
-    --ac-timeline-node: #d6d3d1;
-    --ac-timeline-node-hover: #a8a29e;
+    --ac-timeline-line: var(--ac-divider);
+    --ac-timeline-node: rgba(0, 27, 55, 0.2);
+    --ac-timeline-node-hover: var(--ac-text-tertiary);
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: var(--ac-accent);
-    --ac-timeline-node-tool: #94a3b8;
+    --ac-timeline-node-tool: var(--ac-text-tertiary);
     --ac-timeline-node-pulse-shadow:
-      0 0 0 2px rgba(217, 119, 87, 0.25), 0 0 12px rgba(217, 119, 87, 0.2);
+      0 0 0 2px rgba(49, 130, 246, 0.25), 0 0 12px rgba(49, 130, 246, 0.2);
 
     /* Chips/Pills */
-    --ac-chip-bg: #f2f0eb;
-    --ac-chip-text: #1a1a1a;
-    --ac-chip-border: #e7e5e4;
+    --ac-chip-bg: var(--ac-surface-muted);
+    --ac-chip-text: var(--ac-text);
+    --ac-chip-border: transparent;
 
     /* Code blocks */
-    --ac-code-bg: #ffffff;
-    --ac-code-text: #1a1a1a;
-    --ac-code-border: #e7e5e4;
+    --ac-code-bg: var(--ac-surface-muted);
+    --ac-code-text: var(--ac-text);
+    --ac-code-border: transparent;
 
     /* Diff colors */
-    --ac-diff-add-bg: rgba(240, 253, 244, 0.6);
-    --ac-diff-add-text: #15803d;
-    --ac-diff-add-border: #4ade80;
-    --ac-diff-del-bg: rgba(254, 242, 242, 0.6);
-    --ac-diff-del-text: #b91c1c;
-    --ac-diff-del-border: #fca5a5;
+    --ac-diff-add-bg: #ebf4ff;
+    --ac-diff-add-text: #2272eb;
+    --ac-diff-add-border: rgba(49, 130, 246, 0.4);
+    --ac-diff-del-bg: #ffefef;
+    --ac-diff-del-text: #de2b39;
+    --ac-diff-del-border: rgba(239, 51, 65, 0.4);
 
-    /* Status colors */
-    --ac-success: #22c55e;
-    --ac-warning: #f59e0b;
-    --ac-danger: #ef4444;
+    /* Status colors. Success is blue: Toss paints gains red, and a red
+       "success" would read as the failure color in this panel. */
+    --ac-success: #2272eb;
+    --ac-success-soft: #ebf4ff;
+    --ac-warning: #f57a00;
+    --ac-warning-soft: #fff4e5;
+    /* --ac-warning is decorative-icon/dot only (2.74:1 on white - fails
+       AA for text). Use this for any place --ac-warning paints actual
+       text: 5.02:1 on #ffffff, 4.68:1 on --ac-bg, 4.62:1 on
+       --ac-warning-soft. */
+    --ac-warning-text: #b45309;
+    --ac-danger: #ef3341;
+    --ac-danger-text: #de2b39;
+    --ac-danger-soft: #ffefef;
+    --ac-danger-subtle: var(--ac-danger-soft);
+
+    /* Toast */
+    --ac-toast-bg: rgba(0, 12, 30, 0.88);
+
+    /* Active tab underline */
+    --ac-tab-underline: rgba(0, 12, 30, 0.8);
 
     /* Scrollbar */
-    --ac-scrollbar-thumb: #e5e5e5;
-    --ac-scrollbar-thumb-hover: #d4d4d4;
-  }
-
-  /* ========================================
-     WARM EDITORIAL (Explicit for clarity)
-     ======================================== */
-  .agent-theme[data-agent-theme='warm-editorial'] {
-    --ac-font-body: var(--ac-font-sans);
-    --ac-font-heading: var(--ac-font-serif);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-bg: #fdfcf8;
-    --ac-bg-pattern: none;
-    --ac-header-bg: rgba(253, 252, 248, 0.95);
-    --ac-header-border: rgba(245, 245, 244, 0.5);
-    --ac-surface: #ffffff;
-    --ac-surface-muted: #f2f0eb;
-    --ac-text: #1a1a1a;
-    --ac-text-muted: #6e6e6e;
-    --ac-text-subtle: #a8a29e;
-    --ac-border: #e7e5e4;
-    --ac-accent: #d97757;
-    --ac-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --ac-radius-card: 12px;
-    --ac-border-width: 1px;
-  }
-
-  /* ========================================
-     BLUEPRINT ARCHITECT
-     ======================================== */
-  .agent-theme[data-agent-theme='blueprint-architect'] {
-    --ac-font-body: var(--ac-font-grotesk);
-    --ac-font-heading: var(--ac-font-grotesk);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-bg: #f7fbff;
-    --ac-bg-pattern:
-      linear-gradient(to right, rgba(37, 99, 235, 0.14) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(37, 99, 235, 0.14) 1px, transparent 1px);
-    --ac-bg-pattern-size: 24px 24px;
-
-    --ac-header-bg: rgba(247, 251, 255, 0.86);
-    --ac-header-border: rgba(37, 99, 235, 0.25);
-
-    --ac-surface: rgba(255, 255, 255, 0.92);
-    --ac-surface-muted: rgba(239, 246, 255, 0.9);
-    --ac-surface-inset: rgba(239, 246, 255, 0.9);
-
-    --ac-text: #0b1220;
-    --ac-text-muted: #1f2a44;
-    --ac-text-subtle: #475569;
-    --ac-text-inverse: #ffffff;
-    --ac-text-placeholder: #64748b;
-
-    --ac-border: rgba(37, 99, 235, 0.25);
-    --ac-border-strong: rgba(37, 99, 235, 0.45);
-
-    --ac-hover-bg: rgba(37, 99, 235, 0.08);
-    --ac-hover-bg-subtle: rgba(37, 99, 235, 0.05);
-
-    --ac-accent: #2563eb;
-    --ac-accent-hover: #1d4ed8;
-    --ac-accent-subtle: rgba(37, 99, 235, 0.12);
-    --ac-accent-contrast: #ffffff;
-
-    --ac-accent-2: #0ea5e9;
-    --ac-link: var(--ac-accent);
-    --ac-link-hover: var(--ac-accent-hover);
-
-    --ac-selection-bg: rgba(37, 99, 235, 0.16);
-    --ac-selection-text: #0b1220;
-
-    --ac-shadow-card: 0 1px 3px rgba(2, 6, 23, 0.12);
-    --ac-shadow-float: 0 10px 28px -10px rgba(2, 6, 23, 0.22);
-    --ac-focus-ring: rgba(37, 99, 235, 0.4);
-
-    --ac-timeline-line: rgba(37, 99, 235, 0.35);
-    --ac-timeline-node: rgba(37, 99, 235, 0.35);
-    --ac-timeline-node-hover: rgba(37, 99, 235, 0.55);
-    --ac-timeline-node-active: var(--ac-accent);
-    --ac-timeline-node-active-border: var(--ac-accent);
-    --ac-timeline-node-tool: rgba(37, 99, 235, 0.5);
-    --ac-timeline-node-pulse-shadow:
-      0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 12px rgba(37, 99, 235, 0.2);
-
-    --ac-chip-bg: rgba(239, 246, 255, 0.9);
-    --ac-chip-text: #0b1220;
-    --ac-chip-border: rgba(37, 99, 235, 0.25);
-
-    --ac-code-bg: rgba(255, 255, 255, 0.92);
-    --ac-code-text: #0b1220;
-    --ac-code-border: rgba(37, 99, 235, 0.25);
-
-    --ac-diff-add-bg: rgba(34, 197, 94, 0.12);
-    --ac-diff-add-text: #15803d;
-    --ac-diff-add-border: rgba(34, 197, 94, 0.4);
-    --ac-diff-del-bg: rgba(239, 68, 68, 0.12);
-    --ac-diff-del-text: #b91c1c;
-    --ac-diff-del-border: rgba(239, 68, 68, 0.4);
-
-    --ac-scrollbar-thumb: rgba(37, 99, 235, 0.2);
-    --ac-scrollbar-thumb-hover: rgba(37, 99, 235, 0.35);
-  }
-
-  /* ========================================
-     ZEN JOURNAL
-     ======================================== */
-  .agent-theme[data-agent-theme='zen-journal'] {
-    --ac-font-body: var(--ac-font-serif);
-    --ac-font-heading: var(--ac-font-serif);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-bg: #fafaf9;
-    --ac-bg-pattern: linear-gradient(to bottom, rgba(120, 113, 108, 0.07) 1px, transparent 1px);
-    --ac-bg-pattern-size: 100% 28px;
-
-    --ac-header-bg: rgba(250, 250, 249, 0.92);
-    --ac-header-border: rgba(231, 229, 228, 0.9);
-
-    --ac-surface: rgba(255, 255, 255, 0.92);
-    --ac-surface-muted: rgba(245, 245, 244, 0.92);
-    --ac-surface-inset: rgba(245, 245, 244, 0.92);
-
-    --ac-text: #1c1917;
-    --ac-text-muted: #44403c;
-    --ac-text-subtle: #78716c;
-    --ac-text-inverse: #ffffff;
-    --ac-text-placeholder: #a8a29e;
-
-    --ac-border: #e7e5e4;
-    --ac-border-strong: #d6d3d1;
-
-    --ac-hover-bg: rgba(120, 113, 108, 0.08);
-    --ac-hover-bg-subtle: rgba(120, 113, 108, 0.05);
-
-    --ac-accent: #57534e;
-    --ac-accent-hover: #44403c;
-    --ac-accent-subtle: rgba(87, 83, 78, 0.12);
-    --ac-accent-contrast: #ffffff;
-    --ac-accent-2: var(--ac-accent);
-
-    --ac-link: var(--ac-accent);
-    --ac-link-hover: var(--ac-accent-hover);
-
-    --ac-selection-bg: rgba(87, 83, 78, 0.18);
-    --ac-selection-text: #1c1917;
-
-    --ac-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
-    --ac-shadow-float: 0 14px 34px -18px rgba(0, 0, 0, 0.18);
-    --ac-focus-ring: rgba(87, 83, 78, 0.35);
-
-    --ac-timeline-line: #e7e5e4;
-    --ac-timeline-node: #d6d3d1;
-    --ac-timeline-node-hover: #a8a29e;
-    --ac-timeline-node-active: var(--ac-accent);
-    --ac-timeline-node-active-border: var(--ac-accent);
-    --ac-timeline-node-tool: #94a3b8;
-    --ac-timeline-node-pulse-shadow:
-      0 0 0 2px rgba(87, 83, 78, 0.25), 0 0 12px rgba(87, 83, 78, 0.2);
-
-    --ac-chip-bg: rgba(245, 245, 244, 0.92);
-    --ac-chip-text: #1c1917;
-    --ac-chip-border: #e7e5e4;
-
-    --ac-code-bg: rgba(255, 255, 255, 0.92);
-    --ac-code-text: #1c1917;
-    --ac-code-border: #e7e5e4;
-
-    --ac-diff-add-bg: rgba(34, 197, 94, 0.1);
-    --ac-diff-add-text: #15803d;
-    --ac-diff-add-border: rgba(34, 197, 94, 0.35);
-    --ac-diff-del-bg: rgba(239, 68, 68, 0.1);
-    --ac-diff-del-text: #b91c1c;
-    --ac-diff-del-border: rgba(239, 68, 68, 0.35);
-
-    --ac-scrollbar-thumb: rgba(120, 113, 108, 0.15);
-    --ac-scrollbar-thumb-hover: rgba(120, 113, 108, 0.25);
-  }
-
-  /* ========================================
-     NEO POP
-     ======================================== */
-  .agent-theme[data-agent-theme='neo-pop'] {
-    --ac-font-body: var(--ac-font-sans);
-    --ac-font-heading: var(--ac-font-grotesk);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-border-width: 4px;
-    --ac-border-width-strong: 4px;
-    --ac-radius-card: 0px;
-    --ac-radius-inner: 0px;
-    --ac-radius-button: 0px;
-
-    --ac-bg: #fff7ed;
-    --ac-bg-pattern: radial-gradient(rgba(17, 24, 39, 0.12) 1px, transparent 1px);
-    --ac-bg-pattern-size: 18px 18px;
-
-    --ac-header-bg: rgba(255, 247, 237, 0.92);
-    --ac-header-border: #111827;
-
-    --ac-surface: #ffffff;
-    --ac-surface-muted: #ffedd5;
-    --ac-surface-inset: #ffffff;
-
-    --ac-text: #111827;
-    --ac-text-muted: #374151;
-    --ac-text-subtle: #6b7280;
-    --ac-text-inverse: #ffffff;
-    --ac-text-placeholder: #9ca3af;
-
-    --ac-border: #111827;
-    --ac-border-strong: #111827;
-
-    --ac-hover-bg: rgba(17, 24, 39, 0.06);
-    --ac-hover-bg-subtle: rgba(17, 24, 39, 0.04);
-
-    --ac-accent: #ff3d7f;
-    --ac-accent-hover: #ff1f6a;
-    --ac-accent-subtle: rgba(255, 61, 127, 0.14);
-    --ac-accent-contrast: #ffffff;
-
-    --ac-accent-2: #22d3ee;
-    --ac-link: var(--ac-accent-2);
-    --ac-link-hover: #06b6d4;
-
-    --ac-selection-bg: rgba(255, 61, 127, 0.25);
-    --ac-selection-text: #111827;
-
-    --ac-shadow-card: 6px 6px 0 0 var(--ac-border);
-    --ac-shadow-float: 8px 8px 0 0 var(--ac-border);
-    --ac-focus-ring: rgba(17, 24, 39, 0.35);
-
-    --ac-timeline-line-width: 4px;
-    --ac-timeline-line: #111827;
-    --ac-timeline-node: #111827;
-    --ac-timeline-node-hover: #374151;
-    --ac-timeline-node-active: var(--ac-accent);
-    --ac-timeline-node-active-border: #111827;
-    --ac-timeline-node-tool: #6b7280;
-    --ac-timeline-node-pulse-shadow: 0 0 0 2px rgba(17, 24, 39, 1);
-
-    --ac-chip-bg: #ffffff;
-    --ac-chip-text: #111827;
-    --ac-chip-border: #111827;
-
-    --ac-code-bg: #ffffff;
-    --ac-code-text: #111827;
-    --ac-code-border: #111827;
-
-    --ac-diff-add-bg: rgba(34, 197, 94, 0.18);
-    --ac-diff-add-text: #15803d;
-    --ac-diff-add-border: #111827;
-    --ac-diff-del-bg: rgba(239, 68, 68, 0.18);
-    --ac-diff-del-text: #b91c1c;
-    --ac-diff-del-border: #111827;
-
-    --ac-scrollbar-thumb: rgba(17, 24, 39, 0.25);
-    --ac-scrollbar-thumb-hover: rgba(17, 24, 39, 0.4);
-  }
-
-  /* ========================================
-     DARK CONSOLE
-     ======================================== */
-  .agent-theme[data-agent-theme='dark-console'] {
-    --ac-font-body: var(--ac-font-mono);
-    --ac-font-heading: var(--ac-font-mono);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-bg: #0f1117;
-    --ac-bg-pattern: none;
-    --ac-bg-pattern-size: 16px 16px;
-
-    --ac-header-bg: #0f1117;
-    --ac-header-border: #1f2937;
-
-    --ac-surface: #0f1117;
-    --ac-surface-muted: #0a0c10;
-    --ac-surface-inset: #1a1d26;
-
-    --ac-text: #e5e7eb;
-    --ac-text-muted: #9ca3af;
-    --ac-text-subtle: #6b7280;
-    --ac-text-inverse: #0a0c10;
-    --ac-text-placeholder: #4b5563;
-
-    --ac-border: #1f2937;
-    --ac-border-strong: #374151;
-
-    --ac-hover-bg: rgba(255, 255, 255, 0.06);
-    --ac-hover-bg-subtle: rgba(255, 255, 255, 0.04);
-
-    --ac-accent: #c084fc;
-    --ac-accent-hover: #d8b4fe;
-    --ac-accent-subtle: rgba(192, 132, 252, 0.14);
-    --ac-accent-contrast: #0a0c10;
-
-    --ac-accent-2: #60a5fa;
-    --ac-link: var(--ac-accent-2);
-    --ac-link-hover: #93c5fd;
-
-    --ac-selection-bg: rgba(192, 132, 252, 0.25);
-    --ac-selection-text: #ffffff;
-
-    --ac-shadow-card: none;
-    --ac-shadow-float: none;
-    --ac-focus-ring: rgba(192, 132, 252, 0.35);
-
-    --ac-timeline-line-width: 2px;
-    --ac-timeline-line: #1f2937;
-    --ac-timeline-node: #374151;
-    --ac-timeline-node-hover: #6b7280;
-    --ac-timeline-node-active: var(--ac-accent);
-    --ac-timeline-node-active-border: var(--ac-accent);
-    --ac-timeline-node-tool: #64748b;
-    --ac-timeline-node-pulse-shadow:
-      0 0 0 2px rgba(192, 132, 252, 0.35), 0 0 14px rgba(192, 132, 252, 0.25);
-
-    --ac-chip-bg: rgba(255, 255, 255, 0.06);
-    --ac-chip-text: #e5e7eb;
-    --ac-chip-border: rgba(255, 255, 255, 0.1);
-
-    --ac-code-bg: #0a0c10;
-    --ac-code-text: #e5e7eb;
-    --ac-code-border: #1f2937;
-
-    --ac-diff-add-bg: rgba(74, 222, 128, 0.1);
-    --ac-diff-add-text: #4ade80;
-    --ac-diff-add-border: rgba(74, 222, 128, 0.35);
-
-    --ac-diff-del-bg: rgba(248, 113, 113, 0.1);
-    --ac-diff-del-text: #f87171;
-    --ac-diff-del-border: rgba(248, 113, 113, 0.35);
-
-    --ac-scrollbar-thumb: rgba(255, 255, 255, 0.12);
-    --ac-scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
-  }
-
-  /* ========================================
-     SWISS GRID
-     ======================================== */
-  .agent-theme[data-agent-theme='swiss-grid'] {
-    --ac-font-body: var(--ac-font-grotesk);
-    --ac-font-heading: var(--ac-font-grotesk);
-    --ac-font-code: var(--ac-font-mono);
-
-    --ac-bg: #ffffff;
-    --ac-bg-pattern: radial-gradient(#e5e7eb 1px, transparent 1px);
-    --ac-bg-pattern-size: 16px 16px;
-
-    --ac-header-bg: #ffffff;
-    --ac-header-border: #000000;
-
-    --ac-surface: #ffffff;
-    --ac-surface-muted: #f3f4f6;
-    --ac-surface-inset: #ffffff;
-
-    --ac-text: #000000;
-    --ac-text-muted: #374151;
-    --ac-text-subtle: #6b7280;
-    --ac-text-inverse: #ffffff;
-    --ac-text-placeholder: #9ca3af;
-
-    --ac-border: #000000;
-    --ac-border-strong: #000000;
-
-    --ac-hover-bg: #f3f4f6;
-    --ac-hover-bg-subtle: #f9fafb;
-
-    --ac-accent: #000000;
-    --ac-accent-hover: #111827;
-    --ac-accent-subtle: rgba(0, 0, 0, 0.06);
-    --ac-accent-contrast: #ffffff;
-    --ac-accent-2: #000000;
-
-    --ac-link: #000000;
-    --ac-link-hover: #111827;
-
-    --ac-selection-bg: #000000;
-    --ac-selection-text: #ffffff;
-
-    --ac-border-width: 2px;
-    --ac-border-width-strong: 2px;
-    --ac-radius-card: 0px;
-    --ac-radius-inner: 0px;
-    --ac-radius-button: 0px;
-
-    --ac-shadow-card: 4px 4px 0 0 rgba(0, 0, 0, 1);
-    --ac-shadow-float: 4px 4px 0 0 rgba(0, 0, 0, 1);
-    --ac-focus-ring: rgba(0, 0, 0, 0.5);
-
-    --ac-timeline-line-width: 2px;
-    --ac-timeline-line: #000000;
-    --ac-timeline-node: #000000;
-    --ac-timeline-node-hover: #111827;
-    --ac-timeline-node-active: #000000;
-    --ac-timeline-node-active-border: #000000;
-    --ac-timeline-node-tool: #4b5563;
-    --ac-timeline-node-pulse-shadow: 0 0 0 2px rgba(0, 0, 0, 1);
-
-    --ac-chip-bg: #ffffff;
-    --ac-chip-text: #000000;
-    --ac-chip-border: #000000;
-
-    --ac-code-bg: #ffffff;
-    --ac-code-text: #000000;
-    --ac-code-border: #000000;
-
-    --ac-diff-add-bg: #000000;
-    --ac-diff-add-text: #ffffff;
-    --ac-diff-add-border: #000000;
-
-    --ac-diff-del-bg: #f3f4f6;
-    --ac-diff-del-text: #6b7280;
-    --ac-diff-del-border: #000000;
-
-    --ac-scrollbar-thumb: rgba(0, 0, 0, 0.25);
-    --ac-scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
+    --ac-scrollbar-thumb: rgba(0, 27, 55, 0.2);
+    --ac-scrollbar-thumb-hover: rgba(0, 27, 55, 0.32);
+
+    /* Switch (off state track) and dialog backdrop - tokenized so they
+       stay themeable instead of being hardcoded on the components that
+       use them. */
+    --ac-switch-off: rgba(0, 27, 55, 0.2);
+    --ac-backdrop: rgba(0, 12, 30, 0.4);
   }
 
   /* ========================================
@@ -573,6 +212,11 @@
     background-image: var(--ac-bg-pattern);
     background-size: var(--ac-bg-pattern-size);
     font-family: var(--ac-font-body);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   .agent-theme ::selection {
@@ -581,29 +225,529 @@
   }
 
   /* ========================================
-     Scrollbar Styles
+     Shared primitives (2026-09-06 Toss pass)
+
+     These carry the look. Component files keep only layout so the two
+     never fight over the same property.
      ======================================== */
-  .agent-theme .ac-scroll {
+
+  /* --- Typography scale --- */
+  .agent-theme .ac-title {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 26px;
+    color: var(--ac-text);
+  }
+
+  .agent-theme .ac-heading {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+    color: var(--ac-text);
+  }
+
+  .agent-theme .ac-body {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    color: var(--ac-text);
+  }
+
+  .agent-theme .ac-sub {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+    color: var(--ac-text-secondary);
+  }
+
+  .agent-theme .ac-caption {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    /* Real caption copy (timestamps, hints, status lines) - contrast-safe
+       token, not the decorative --ac-text-tertiary. */
+    color: var(--ac-text-caption);
+  }
+
+  .agent-theme .ac-num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  .agent-theme .ac-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .agent-theme .ac-text-secondary {
+    color: var(--ac-text-secondary);
+  }
+  .agent-theme .ac-text-tertiary {
+    color: var(--ac-text-tertiary);
+  }
+  .agent-theme .ac-text-accent {
+    color: var(--ac-accent-text);
+  }
+  .agent-theme .ac-text-danger {
+    color: var(--ac-danger-text);
+  }
+  .agent-theme .ac-text-warning {
+    color: var(--ac-warning-text);
+  }
+  .agent-theme .ac-text-success {
+    color: var(--ac-success);
+  }
+
+  /* --- Card: white block on the page ground, no border, no shadow --- */
+  .agent-theme .ac-card {
+    background: var(--ac-surface);
+    border-radius: var(--ac-radius-card);
+    border: none;
+    box-shadow: none;
+  }
+
+  /* --- Buttons --- */
+  .agent-theme .ac-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    border: none;
+    border-radius: var(--ac-radius);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme .ac-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Keyboard-only focus indicator (mouse/touch activation never matches
+     :focus-visible). Outline, not the inset box-shadow the ghost/quiet/
+     danger variants already lean on, so the two never fight. */
+  .agent-theme .ac-button:focus-visible {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .agent-theme .ac-button--primary {
+    background-color: var(--ac-accent);
+    color: var(--ac-accent-contrast);
+  }
+
+  .agent-theme .ac-button--ghost {
+    background-color: var(--ac-surface-muted);
+    color: var(--ac-text);
+  }
+
+  .agent-theme .ac-button--quiet {
+    background-color: var(--ac-surface-muted);
+    color: var(--ac-accent-text);
+  }
+
+  .agent-theme .ac-button--danger {
+    background-color: var(--ac-danger-soft);
+    color: var(--ac-danger-text);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .agent-theme .ac-button--primary:hover:not(:disabled) {
+      background-color: var(--ac-accent-hover);
+    }
+
+    .agent-theme .ac-button--ghost:hover:not(:disabled) {
+      background-color: var(--ac-surface-hover);
+    }
+
+    .agent-theme .ac-button--quiet:hover:not(:disabled) {
+      background-color: var(--ac-accent-soft);
+    }
+
+    .agent-theme .ac-button--danger:hover:not(:disabled) {
+      background-color: var(--ac-danger-soft);
+      filter: brightness(0.97);
+    }
+  }
+
+  /* Small button: still 32px tall so it stays comfortably tappable. */
+  .agent-theme .ac-button--sm {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: var(--ac-radius-chip);
+  }
+
+  /* --- Icon button --- */
+  .agent-theme .ac-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    border-radius: var(--ac-radius-chip);
+    background-color: transparent;
+    color: var(--ac-icon);
+    cursor: pointer;
+    transition:
+      background-color var(--ac-motion-fast) ease,
+      color var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme .ac-icon-button:focus-visible {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .agent-theme .ac-icon-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-theme .ac-icon-button--primary {
+    background-color: var(--ac-accent);
+    color: var(--ac-accent-contrast);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .agent-theme .ac-icon-button:hover:not(:disabled) {
+      background-color: var(--ac-surface-muted);
+      color: var(--ac-text);
+    }
+
+    .agent-theme .ac-icon-button--primary:hover:not(:disabled) {
+      background-color: var(--ac-accent-hover);
+      color: var(--ac-accent-contrast);
+    }
+
+    .agent-theme .ac-icon-button--danger:hover:not(:disabled) {
+      background-color: var(--ac-danger-soft);
+      color: var(--ac-danger-text);
+    }
+  }
+
+  /* --- Chip (filter / choice) --- */
+  .agent-theme .ac-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: var(--ac-radius-chip);
+    background-color: var(--ac-surface-muted);
+    color: var(--ac-text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--ac-motion-fast) ease,
+      color var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme .ac-chip:focus-visible {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Order matters here: the hover-gated rule must stay ahead of
+     `.ac-chip--on` in source so the "on" state still wins the cascade
+     (equal specificity) when a chosen chip is hovered. */
+  @media (hover: hover) and (pointer: fine) {
+    .agent-theme .ac-chip:hover {
+      background-color: var(--ac-surface-hover);
+    }
+  }
+
+  .agent-theme .ac-chip--on,
+  .agent-theme .ac-chip--on:hover {
+    background-color: var(--ac-accent-soft);
+    color: var(--ac-accent-text);
+  }
+
+  /* --- Badge (pill, state) --- */
+  .agent-theme .ac-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--ac-radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    white-space: nowrap;
+    background-color: var(--ac-surface-muted);
+    color: var(--ac-text-secondary);
+  }
+
+  .agent-theme .ac-badge--accent {
+    background-color: var(--ac-accent-soft);
+    color: var(--ac-accent-text);
+  }
+  .agent-theme .ac-badge--warning {
+    background-color: var(--ac-warning-soft);
+    /* Text-safe token, not the decorative --ac-warning dot/icon color -
+       see contrast table in the theme block comment above. */
+    color: var(--ac-warning-text);
+  }
+  .agent-theme .ac-badge--danger {
+    background-color: var(--ac-danger-soft);
+    color: var(--ac-danger-text);
+  }
+
+  /* --- Form fields --- */
+  .agent-theme .ac-field {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    border: none;
+    outline: none;
+    border-radius: var(--ac-radius);
+    background-color: var(--ac-surface-inset);
+    color: var(--ac-text);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    transition:
+      background-color var(--ac-motion-fast) ease,
+      box-shadow var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme textarea.ac-field {
+    height: auto;
+    min-height: 80px;
+    padding: 10px 12px;
+    line-height: 20px;
+    resize: vertical;
+  }
+
+  .agent-theme .ac-field::placeholder {
+    color: var(--ac-text-disabled);
+  }
+
+  .agent-theme .ac-field:focus {
+    background-color: var(--ac-accent-soft);
+    box-shadow: inset 0 0 0 1.5px var(--ac-accent);
+  }
+
+  /* Outline rather than another inset box-shadow, so keyboard focus
+     doesn't fight the shadow :focus already sets above. */
+  .agent-theme .ac-field:focus-visible {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .agent-theme .ac-field--error,
+  .agent-theme .ac-field--error:focus {
+    background-color: var(--ac-danger-soft);
+    box-shadow: inset 0 0 0 1.5px var(--ac-danger);
+  }
+
+  .agent-theme .ac-field--mono {
+    font-family: var(--ac-font-mono);
+  }
+
+  /* Select: appearance stripped, arrow drawn as a background image so no
+     element needs a border trick to make a triangle.
+     `<select>` is a native/replaced element - CSS `mask-image` applied to it
+     masks the whole box (including its text), not just a decorative layer,
+     so the currentColor-mask trick used for the checkbox checkmark below
+     (a real ::after pseudo-element) doesn't apply here. With only one theme
+     left (toss-light), a baked-in stroke color is fine - it doesn't need to
+     react to a theme switch that no longer exists. */
+  .agent-theme select.ac-field {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 32px;
+    cursor: pointer;
+    background-color: var(--ac-surface-inset);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%23545E68' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px 16px;
+  }
+
+  .agent-theme .ac-error-text {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    color: var(--ac-danger-text);
+  }
+
+  /* --- Checkbox --- */
+  .agent-theme .ac-check {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    border-radius: 6px;
+    background-color: var(--ac-surface-inset);
+    cursor: pointer;
+    transition: background-color var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme .ac-check:focus-visible {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Checkmark drawn as a background image on the checkbox itself.
+     `<input>` is a native/replaced element - Chrome doesn't generate
+     `::after`/`::before` boxes on it at all, so a mask-image on a
+     pseudo-element here would silently render nothing. With only one
+     theme left (toss-light), a baked-in stroke color is fine. */
+  .agent-theme .ac-check:checked {
+    background-color: var(--ac-accent);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18' fill='none'%3E%3Cpath d='M4.5 9.2L7.5 12L13.5 6' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+
+  /* --- Switch (Toss toggle) --- */
+  /* Visual size intentionally kept at 44x24 per Toss spec - do not resize
+     this element. A larger tap target (item 6) is added by padding on the
+     wrapper that consumes `.ac-switch`, not by this class. */
+  .agent-theme .ac-switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .agent-theme .ac-switch input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .agent-theme .ac-switch-track {
+    width: 44px;
+    height: 24px;
+    border-radius: 16px;
+    background-color: var(--ac-switch-off);
+    transition: background-color var(--ac-motion-fast) ease;
+    pointer-events: none;
+  }
+
+  .agent-theme .ac-switch-track::after {
+    content: '';
+    display: block;
+    width: 20px;
+    height: 20px;
+    margin: 2px;
+    border-radius: var(--ac-radius-pill);
+    background-color: var(--ac-surface);
+    transition: transform var(--ac-motion-fast) ease;
+  }
+
+  .agent-theme .ac-switch input:checked + .ac-switch-track {
+    background-color: var(--ac-accent);
+  }
+
+  .agent-theme .ac-switch input:checked + .ac-switch-track::after {
+    transform: translateX(20px);
+  }
+
+  .agent-theme .ac-switch input:disabled + .ac-switch-track {
+    opacity: 0.4;
+  }
+
+  /* The real input is visually hidden (opacity: 0), so keyboard focus is
+     shown on the visible track sibling instead. */
+  .agent-theme .ac-switch input:focus-visible + .ac-switch-track {
+    outline: 2px solid var(--ac-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* --- Dialog shell --- */
+  .agent-theme .ac-dim {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background-color: var(--ac-backdrop);
+  }
+
+  /* .ac-dim already reserves 12px on every side (24px per axis), so
+     .ac-dialog does not need to subtract that margin a second time. */
+  .agent-theme .ac-dialog {
+    width: min(480px, 100%);
+    padding: 20px;
+    background-color: var(--ac-surface);
+    border: none;
+    border-radius: var(--ac-radius-card);
+    box-shadow: var(--ac-shadow-float);
+  }
+
+  /* --- Hairline divider. Drawn as a shadow, never a left-hand accent bar. --- */
+  .agent-theme .ac-hairline-top {
+    box-shadow: inset 0 0.75px 0 0 var(--ac-divider);
+  }
+
+  .agent-theme .ac-hairline-bottom {
+    box-shadow: inset 0 -0.75px 0 0 var(--ac-divider);
+  }
+
+  /* ========================================
+     Scrollbar Styles
+
+     Toss uses a 6px bar with a soft navy thumb. The rule covers every
+     scroll container in the panel, not only the ones tagged `.ac-scroll`.
+     ======================================== */
+  .agent-theme,
+  .agent-theme * {
     scrollbar-width: thin;
     scrollbar-color: var(--ac-scrollbar-thumb) transparent;
   }
 
-  .agent-theme .ac-scroll::-webkit-scrollbar {
+  .agent-theme ::-webkit-scrollbar {
     width: var(--ac-scrollbar-size);
     height: var(--ac-scrollbar-size);
   }
 
-  .agent-theme .ac-scroll::-webkit-scrollbar-track {
+  .agent-theme ::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .agent-theme .ac-scroll::-webkit-scrollbar-thumb {
+  .agent-theme ::-webkit-scrollbar-thumb {
     background-color: var(--ac-scrollbar-thumb);
-    border-radius: 999px;
+    border-radius: 10px;
   }
 
-  .agent-theme .ac-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: var(--ac-scrollbar-thumb-hover);
+  @media (hover: hover) and (pointer: fine) {
+    .agent-theme ::-webkit-scrollbar-thumb:hover {
+      background-color: var(--ac-scrollbar-thumb-hover);
+    }
+  }
+
+  .agent-theme ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   /* Hide scrollbar but keep functionality */
@@ -618,56 +762,34 @@
 
   /* ========================================
      Utility Classes
+
+     `.ac-focus-ring`, `.ac-hover-text`, `.ac-hover-link`, `.ac-hover-accent`,
+     `.ac-menu-item` and `.ac-chip-hover` were removed (2026-09-06): grep
+     confirmed zero elements under entrypoints/sidepanel use those classes.
+     Keyboard focus is now handled by real `:focus-visible` rules on the
+     interactive base classes themselves (`.ac-button`, `.ac-icon-button`,
+     `.ac-field`, `.ac-check`, `.ac-switch input`, `.ac-chip`) - see those
+     rules above.
      ======================================== */
 
-  /* Focus ring */
-  .agent-theme .ac-focus-ring:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--ac-focus-ring);
+  /* Hover utilities. Gated to real pointers so a tap on touch hardware
+     doesn't leave a "stuck" hover state behind. */
+  @media (hover: hover) and (pointer: fine) {
+    .agent-theme .ac-hover-bg:hover {
+      background-color: var(--ac-hover-bg);
+    }
+
+    /* Button/interactive element base */
+    .agent-theme .ac-btn:hover {
+      background-color: var(--ac-hover-bg);
+    }
   }
 
-  /* Hover utilities */
-  .agent-theme .ac-hover-bg:hover {
-    background-color: var(--ac-hover-bg);
-  }
-
-  .agent-theme .ac-hover-text:hover {
-    color: var(--ac-text);
-  }
-
-  .agent-theme .ac-hover-link:hover {
-    color: var(--ac-link);
-  }
-
-  .agent-theme .ac-hover-accent:hover {
-    color: var(--ac-accent);
-  }
-
-  /* Button/interactive element base */
   .agent-theme .ac-btn {
     cursor: pointer;
     transition:
       background-color var(--ac-motion-fast),
       color var(--ac-motion-fast);
-  }
-
-  .agent-theme .ac-btn:hover {
-    background-color: var(--ac-hover-bg);
-  }
-
-  /* Menu item */
-  .agent-theme .ac-menu-item {
-    cursor: pointer;
-    transition: background-color var(--ac-motion-fast);
-  }
-
-  .agent-theme .ac-menu-item:hover {
-    background-color: var(--ac-hover-bg);
-  }
-
-  /* Chip/pill hover */
-  .agent-theme .ac-chip-hover:hover {
-    color: var(--ac-link);
   }
 
   /* Pulse animation for streaming indicator */
@@ -692,145 +814,12 @@
     }
   }
 
-  /* ============================================================
-     Loading Animation - Shimmer Text & Scribble Icon
-     ============================================================ */
-
-  /* 文案 shimmer 渐变动画 - 光从左到右扫过效果 */
-  .agent-theme .text-shimmer {
-    display: inline-block;
-    background: linear-gradient(
-      90deg,
-      var(--ac-accent, #d97757) 0%,
-      var(--ac-accent, #d97757) 40%,
-      #ffe0d0 50%,
-      var(--ac-accent, #d97757) 60%,
-      var(--ac-accent, #d97757) 100%
-    );
-    background-size: 250% 100%;
-    background-repeat: no-repeat;
-    color: transparent;
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: ac-shimmer 1.8s ease-in-out infinite;
-  }
-
-  @keyframes ac-shimmer {
-    0% {
-      background-position: 100% 50%;
-    }
-    100% {
-      background-position: 0% 50%;
-    }
-  }
-
-  /* 螺旋图标 - 笔迹重绘动画 */
-  .agent-theme .loading-scribble path {
-    stroke-dasharray: 300;
-    stroke-dashoffset: 300;
-    animation: ac-scribble-draw 2s ease-in-out infinite;
-  }
-
-  .agent-theme .loading-scribble {
-    animation: ac-slight-rotate 8s linear infinite;
-  }
-
-  @keyframes ac-scribble-draw {
-    0% {
-      stroke-dashoffset: 300;
-    }
-    50% {
-      stroke-dashoffset: 0;
-    }
-    100% {
-      stroke-dashoffset: -300;
-    }
-  }
-
-  @keyframes ac-slight-rotate {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* Respect reduced motion preference for loading animations */
-  @media (prefers-reduced-motion: reduce) {
-    .agent-theme .text-shimmer {
-      animation: none;
-      background: none;
-      color: var(--ac-accent);
-    }
-
-    .agent-theme .loading-scribble,
-    .agent-theme .loading-scribble path {
-      animation: none;
-    }
-
-    .agent-theme .loading-scribble path {
-      stroke-dashoffset: 0;
-    }
-  }
-
-  /* ============================================================
-     Tooltip System - CSS-only tooltips using data-tooltip attribute
-     ============================================================ */
-  .agent-theme [data-tooltip] {
-    position: relative;
-  }
-
-  .agent-theme [data-tooltip]::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 4px 8px;
-    font-size: 11px;
-    font-family: var(--ac-font-sans);
-    font-weight: 400;
-    line-height: 1.3;
-    white-space: nowrap;
-    color: var(--ac-text-inverse);
-    background-color: var(--ac-text);
-    border-radius: var(--ac-radius-button);
-    opacity: 0;
-    visibility: hidden;
-    transition:
-      opacity 150ms ease,
-      visibility 150ms ease;
-    pointer-events: none;
-    z-index: 99999;
-  }
-
-  .agent-theme [data-tooltip]:hover::after {
-    opacity: 1;
-    visibility: visible;
-  }
-
-  /* Tooltip arrow */
-  .agent-theme [data-tooltip]::before {
-    content: '';
-    position: absolute;
-    bottom: calc(100% + 2px);
-    left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-top-color: var(--ac-text);
-    opacity: 0;
-    visibility: hidden;
-    transition:
-      opacity 150ms ease,
-      visibility 150ms ease;
-    pointer-events: none;
-    z-index: 99999;
-  }
-
-  .agent-theme [data-tooltip]:hover::before {
-    opacity: 1;
-    visibility: visible;
-  }
+  /* The "Loading Animation - Shimmer Text & Scribble Icon" block
+     (.text-shimmer, .loading-scribble, ac-shimmer/ac-scribble-draw/
+     ac-slight-rotate keyframes) and the "Tooltip System" block
+     ([data-tooltip] rules) were removed (2026-09-06): grep confirmed no
+     element under entrypoints/sidepanel sets `class="text-shimmer"`,
+     `class="loading-scribble"`, or a `data-tooltip` attribute. The one
+     `data-tooltip` match in the repo is entrypoints/popup/App.vue, which
+     ships its own unrelated stylesheet. */
 }

@@ -1,14 +1,21 @@
 <template>
-  <div class="wz-overlay" @click.self="$emit('close')">
-    <div class="wz-panel" :style="panelStyle">
+  <div class="ac-dim wz-dim" @click.self="$emit('close')">
+    <div
+      ref="dialogRef"
+      class="wz-panel"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
       <!-- 머리말 -->
-      <div class="wz-header" :style="headerStyle">
-        <span class="wz-title" :style="titleStyle">{{ getMessage('sidepanel_wizard_title') }}</span>
-        <button class="wz-close" :style="mutedStyle" @click="$emit('close')">
+      <div class="wz-header ac-hairline-bottom">
+        <span class="ac-title" :id="titleId">{{ getMessage('sidepanel_wizard_title') }}</span>
+        <button class="ac-icon-button" type="button" @click="$emit('close')">
           <svg
             viewBox="0 0 24 24"
-            width="18"
-            height="18"
+            width="20"
+            height="20"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
@@ -18,63 +25,52 @@
         </button>
       </div>
 
-      <div v-if="loading" class="wz-body wz-center" :style="mutedStyle">
+      <div v-if="loading" class="wz-body wz-center ac-sub">
         {{ getMessage('sidepanel_wizard_loading') }}
       </div>
 
-      <div v-else-if="loadError" class="wz-body wz-center" :style="dangerStyle">
+      <div v-else-if="loadError" class="wz-body wz-center ac-error-text">
         {{ loadError }}
       </div>
 
       <div v-else class="wz-body">
         <!-- 이름 -->
         <label class="wz-field">
-          <span class="wz-label" :style="mutedStyle">{{
-            getMessage('sidepanel_wizard_name_label')
-          }}</span>
-          <input v-model="name" class="wz-input" :style="inputStyle" type="text" />
+          <span class="wz-label">{{ getMessage('sidepanel_wizard_name_label') }}</span>
+          <input v-model="name" class="ac-field" type="text" />
         </label>
 
         <!-- 시작 URL -->
         <label class="wz-field">
-          <span class="wz-label" :style="mutedStyle">{{
-            getMessage('sidepanel_wizard_start_url_label')
-          }}</span>
-          <input v-model="startUrl" class="wz-input" :style="inputStyle" type="text" />
-          <span class="wz-help" :style="mutedStyle">{{
-            getMessage('sidepanel_wizard_start_url_hint')
-          }}</span>
+          <span class="wz-label">{{ getMessage('sidepanel_wizard_start_url_label') }}</span>
+          <input v-model="startUrl" class="ac-field" type="text" />
+          <span class="ac-caption">{{ getMessage('sidepanel_wizard_start_url_hint') }}</span>
         </label>
 
         <!-- 감지된 변수 -->
         <div class="wz-section">
-          <div class="wz-section-title" :style="titleStyle">
+          <div class="ac-heading">
             {{ getMessage('sidepanel_wizard_variables_title') }}
           </div>
-          <div v-if="variables.length === 0" class="wz-empty" :style="mutedStyle">
+          <div v-if="variables.length === 0" class="ac-sub">
             {{ getMessage('sidepanel_wizard_variables_empty') }}
           </div>
-          <div v-else class="wz-var-list">
-            <div v-for="(v, idx) in variables" :key="idx" class="wz-var" :style="rowStyle">
+          <div v-else class="wz-rows">
+            <div v-for="(v, idx) in variables" :key="idx" class="wz-row">
               <input
                 type="checkbox"
-                class="wz-check"
+                class="ac-check"
                 :checked="v.selected"
                 @change="v.selected = ($event.target as HTMLInputElement).checked"
               />
               <div class="wz-var-main">
-                <input
-                  v-model="v.key"
-                  class="wz-input wz-input-sm"
-                  :style="inputStyle"
-                  type="text"
-                />
-                <span class="wz-var-src" :style="mutedStyle">{{ v.label || '' }}</span>
+                <input v-model="v.key" class="ac-field wz-field-sm" type="text" />
+                <span class="ac-caption ac-clip">{{ v.label || '' }}</span>
               </div>
-              <label class="wz-sens" :style="mutedStyle">
+              <label class="wz-sens ac-caption">
                 <input
                   type="checkbox"
-                  class="wz-check"
+                  class="ac-check"
                   :checked="v.sensitive"
                   @change="v.sensitive = ($event.target as HTMLInputElement).checked"
                 />
@@ -82,39 +78,34 @@
               </label>
             </div>
           </div>
-          <div v-if="hasSensitive" class="wz-help" :style="mutedStyle">
+          <div v-if="hasSensitive" class="ac-caption">
             {{ getMessage('sidepanel_wizard_variable_sensitive_hint') }}
           </div>
         </div>
 
         <!-- 단계 목록 -->
         <div class="wz-section">
-          <div class="wz-section-title" :style="titleStyle">
+          <div class="ac-heading">
             {{ getMessage('sidepanel_wizard_steps_title', [String(visibleNodes.length)]) }}
           </div>
-          <div v-if="visibleNodes.length === 0" class="wz-empty" :style="mutedStyle">
+          <div v-if="visibleNodes.length === 0" class="ac-sub">
             {{ getMessage('sidepanel_wizard_no_steps') }}
           </div>
-          <ol v-else class="wz-steps">
-            <li
-              v-for="(node, idx) in visibleNodes"
-              :key="node.id"
-              class="wz-step"
-              :style="rowStyle"
-            >
-              <span class="wz-step-no" :style="mutedStyle">{{ idx + 1 }}</span>
-              <span class="wz-step-type" :style="titleStyle">{{ stepTypeLabel(node.type) }}</span>
-              <span class="wz-step-desc" :style="mutedStyle">{{ describeNode(node) }}</span>
+          <ol v-else class="wz-rows wz-steps">
+            <li v-for="(node, idx) in visibleNodes" :key="node.id" class="wz-row">
+              <span class="wz-step-no ac-caption ac-num">{{ idx + 1 }}</span>
+              <span class="wz-step-type">{{ stepTypeLabel(node.type) }}</span>
+              <span class="wz-step-desc" :title="describeNode(node)">{{ describeNode(node) }}</span>
               <button
-                class="wz-step-del"
-                :style="dangerStyle"
+                class="ac-icon-button ac-icon-button--danger wz-step-del"
+                type="button"
                 :title="getMessage('sidepanel_wizard_step_delete')"
                 @click="removeStep(node.id)"
               >
                 <svg
                   viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
+                  width="16"
+                  height="16"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
@@ -129,8 +120,8 @@
         <!-- 시험 실행 -->
         <div class="wz-section">
           <button
-            class="wz-btn wz-btn-plain"
-            :style="plainStyle"
+            class="ac-button ac-button--ghost wz-test-btn"
+            type="button"
             :disabled="busy"
             @click="onTestRun"
           >
@@ -140,40 +131,44 @@
                 : getMessage('sidepanel_wizard_test_run')
             }}
           </button>
-          <div v-if="testMessage" class="wz-test" :style="testOk ? okStyle : dangerStyle">
+          <div
+            v-if="testMessage"
+            class="ac-sub"
+            :class="testOk ? 'ac-text-success' : 'ac-text-danger'"
+          >
             {{ testMessage }}
           </div>
-          <ul v-if="testFailures.length" class="wz-test-fails">
-            <li v-for="(f, i) in testFailures" :key="i" class="wz-test-fail" :style="dangerStyle">
+          <ul v-if="testFailures.length" class="wz-fails">
+            <li v-for="(f, i) in testFailures" :key="i" class="ac-caption ac-text-danger">
               {{ f }}
             </li>
           </ul>
         </div>
 
-        <div v-if="formError" class="wz-test" :style="dangerStyle">{{ formError }}</div>
+        <div v-if="formError" class="ac-error-text">{{ formError }}</div>
       </div>
 
       <!-- 바닥 버튼 -->
-      <div v-if="!loading && !loadError" class="wz-footer" :style="headerStyle">
+      <div v-if="!loading && !loadError" class="wz-footer ac-hairline-top">
         <button
-          class="wz-btn wz-btn-plain"
-          :style="plainStyle"
+          class="ac-button ac-button--ghost"
+          type="button"
           :disabled="busy"
           @click="$emit('close')"
         >
           {{ getMessage('sidepanel_wizard_close') }}
         </button>
         <button
-          class="wz-btn wz-btn-plain"
-          :style="plainStyle"
+          class="ac-button ac-button--ghost"
+          type="button"
           :disabled="busy"
           @click="onSave(false)"
         >
           {{ getMessage('sidepanel_wizard_save_only') }}
         </button>
         <button
-          class="wz-btn wz-btn-primary"
-          :style="primaryStyle"
+          class="ac-button ac-button--primary"
+          type="button"
           :disabled="busy"
           @click="onSave(true)"
         >
@@ -194,6 +189,7 @@
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
+import { useDialogA11y } from '../../composables/useDialogA11y';
 import RunVariablesDialog from './RunVariablesDialog.vue';
 import * as rr from '../../utils/rr-messages';
 import { runFlowInTemporaryTab } from '../../utils/test-run';
@@ -228,6 +224,10 @@ const loadError = ref('');
 const formError = ref('');
 const saving = ref(false);
 const testing = ref(false);
+
+const dialogRef = ref<HTMLElement | null>(null);
+const titleId = 'save-flow-wizard-title';
+useDialogA11y(dialogRef, titleId, () => emit('close'));
 
 const source = ref<WizardFlow | null>(null);
 const name = ref('');
@@ -471,59 +471,22 @@ async function doTestRun(args: Record<string, string>) {
 }
 
 onMounted(load);
-
-// ==================== 스타일 ====================
-
-const panelStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-  borderRadius: 'var(--ac-radius-card, 12px)',
-  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-}));
-const headerStyle = computed(() => ({ borderColor: 'var(--ac-border, #e7e5e4)' }));
-const titleStyle = computed(() => ({ color: 'var(--ac-text)' }));
-const mutedStyle = computed(() => ({ color: 'var(--ac-text-subtle)' }));
-const dangerStyle = computed(() => ({ color: 'var(--ac-danger, #ef4444)' }));
-const okStyle = computed(() => ({ color: 'var(--ac-success, #16a34a)' }));
-const rowStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  borderRadius: 'var(--ac-radius-inner, 8px)',
-}));
-const plainStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-const primaryStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent)',
-  color: 'var(--ac-accent-contrast)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
 </script>
 
 <style scoped>
-.wz-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+.wz-dim {
   z-index: 50;
 }
 
 .wz-panel {
-  width: 100%;
-  max-width: 420px;
+  width: min(480px, 100% - 24px);
   max-height: 92%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--ac-surface);
+  border-radius: var(--ac-radius-card);
+  box-shadow: var(--ac-shadow-float);
 }
 
 .wz-header,
@@ -531,72 +494,44 @@ const primaryStyle = computed(() => ({
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 16px 20px;
   flex-shrink: 0;
 }
 
 .wz-header {
   justify-content: space-between;
-  border-bottom: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
 }
 
 .wz-footer {
   justify-content: flex-end;
-  border-top: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-}
-
-.wz-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.wz-close {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
 }
 
 .wz-body {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 16px 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .wz-center {
   align-items: center;
   justify-content: center;
-  font-size: 13px;
 }
 
 .wz-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
-.wz-label,
-.wz-help {
-  font-size: 12px;
-}
-
-.wz-input {
-  height: 36px;
-  padding: 0 10px;
-  border: none;
-  outline: none;
+/* 섹션 라벨 */
+.wz-label {
   font-size: 13px;
-  font-family: inherit;
-  width: 100%;
-}
-
-.wz-input-sm {
-  height: 30px;
-  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ac-text-secondary);
 }
 
 .wz-section {
@@ -605,17 +540,7 @@ const primaryStyle = computed(() => ({
   gap: 8px;
 }
 
-.wz-section-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.wz-empty {
-  font-size: 12px;
-}
-
-.wz-var-list,
-.wz-steps {
+.wz-rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -624,12 +549,14 @@ const primaryStyle = computed(() => ({
   list-style: none;
 }
 
-.wz-var,
-.wz-step {
+.wz-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-row);
 }
 
 .wz-var-main {
@@ -640,83 +567,59 @@ const primaryStyle = computed(() => ({
   gap: 2px;
 }
 
-.wz-var-src,
-.wz-step-desc {
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.wz-field-sm {
+  height: 32px;
+  font-size: 13px;
+  padding: 0 10px;
 }
 
 .wz-sens {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.wz-check {
-  width: 14px;
-  height: 14px;
+  gap: 6px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .wz-step-no {
-  font-size: 11px;
-  width: 18px;
+  width: 20px;
   flex-shrink: 0;
 }
 
 .wz-step-type {
-  font-size: 12px;
-  font-weight: 600;
   flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ac-text);
 }
 
+/* 셀렉터가 섞인 설명은 고정폭으로 회색. 긴 것은 한 줄로 자른다. */
 .wz-step-desc {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ac-font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ac-text-secondary);
 }
 
 .wz-step-del {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
   flex-shrink: 0;
 }
 
-.wz-btn {
-  border: none;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
+.wz-test-btn {
+  align-self: flex-start;
 }
 
-.wz-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.wz-test {
-  font-size: 12px;
-}
-
-.wz-test-fails {
+.wz-fails {
   margin: 0;
-  padding: 0 0 0 14px;
+  padding: 0 0 0 16px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-}
-
-.wz-test-fail {
-  font-size: 11px;
+  gap: 4px;
 }
 </style>

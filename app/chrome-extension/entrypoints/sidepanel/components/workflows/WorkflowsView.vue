@@ -1,16 +1,16 @@
 <template>
-  <div class="h-full flex flex-col" :style="containerStyle">
-    <!-- Fixed Header: Search + Actions -->
-    <div class="flex-shrink-0 px-4 py-3 border-b" :style="headerStyle">
-      <div class="flex items-center gap-2">
-        <!-- Search Input -->
-        <div class="flex-1 relative">
+  <div class="wf-root">
+    <!-- 고정 머리말: 검색 + 새로고침 + 가져오기 -->
+    <div class="wf-header">
+      <div class="wf-header-row">
+        <div class="wf-search">
           <svg
-            class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4"
-            :style="{ color: 'var(--ac-text-subtle)' }"
+            class="wf-search-icon"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
+            width="16"
+            height="16"
           >
             <path
               stroke-linecap="round"
@@ -22,26 +22,25 @@
           <input
             :value="search"
             type="text"
+            class="ac-field wf-search-input"
             :placeholder="getMessage('sidepanel_search_flows_placeholder')"
-            class="w-full pl-9 pr-3 py-2 text-sm"
-            :style="inputStyle"
             @input="$emit('update:search', ($event.target as HTMLInputElement).value)"
           />
         </div>
 
-        <!-- Refresh Button -->
         <button
-          class="flex-shrink-0 p-2"
-          :style="refreshButtonStyle"
+          class="ac-icon-button wf-header-icon"
+          type="button"
           @click="$emit('refresh')"
           :title="getMessage('sidepanel_refresh_button')"
         >
           <svg
-            class="w-4 h-4"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             stroke-width="2"
+            width="20"
+            height="20"
           >
             <path
               stroke-linecap="round"
@@ -53,8 +52,8 @@
 
         <!-- 가져오기: JSON 파일을 골라 흐름을 들여온다 -->
         <button
-          class="flex-shrink-0 px-3 py-2 text-xs font-medium"
-          :style="refreshButtonStyle"
+          class="ac-button ac-button--ghost ac-button--sm"
+          type="button"
           @click="$emit('import')"
           :title="getMessage('sidepanel_daily_import_button')"
         >
@@ -73,8 +72,7 @@
       -->
       <div class="wf-filter-bar">
         <select
-          class="wf-filter-select"
-          :style="filterSelectStyle"
+          class="ac-field wf-filter-select"
           :value="filter.site"
           @change="patchFilter({ site: ($event.target as HTMLSelectElement).value })"
         >
@@ -82,91 +80,65 @@
           <option v-for="site in sites" :key="site" :value="site">{{ site }}</option>
         </select>
         <button
-          class="wf-chip"
-          :style="filter.published ? chipOnStyle : chipStyle"
+          class="ac-chip"
+          :class="{ 'ac-chip--on': filter.published }"
+          type="button"
           @click="patchFilter({ published: !filter.published })"
         >
           {{ getMessage('sidepanel_daily_filter_published') }}
         </button>
         <button
-          class="wf-chip"
-          :style="filter.scheduled ? chipOnStyle : chipStyle"
+          class="ac-chip"
+          :class="{ 'ac-chip--on': filter.scheduled }"
+          type="button"
           @click="patchFilter({ scheduled: !filter.scheduled })"
         >
           {{ getMessage('sidepanel_daily_filter_scheduled') }}
         </button>
         <button
-          class="wf-chip"
-          :style="filter.recentFailed ? chipOnStyle : chipStyle"
+          class="ac-chip"
+          :class="{ 'ac-chip--on': filter.recentFailed }"
+          type="button"
           @click="patchFilter({ recentFailed: !filter.recentFailed })"
         >
           {{ getMessage('sidepanel_daily_filter_recent_failed') }}
         </button>
         <button
           v-if="filterActive"
-          class="wf-chip"
-          :style="chipStyle"
+          class="ac-chip"
+          type="button"
           @click="$emit('update:filter', { ...EMPTY_FLOW_FILTER })"
         >
           {{ getMessage('sidepanel_daily_filter_clear') }}
         </button>
       </div>
 
-      <!-- Filter Bar -->
-      <div class="flex items-center justify-between mt-3">
-        <label
-          class="flex items-center gap-2 text-sm cursor-pointer"
-          :style="{ color: 'var(--ac-text-muted)' }"
-        >
+      <!-- 범위 표시: 현재 페이지만 볼 것인가와 지금 보이는 개수 -->
+      <div class="wf-scope">
+        <label class="wf-scope-check ac-sub">
           <input
             type="checkbox"
+            class="ac-check"
             :checked="onlyBound"
             @change="$emit('update:onlyBound', ($event.target as HTMLInputElement).checked)"
-            class="workflow-checkbox"
           />
           <span>{{ getMessage('sidepanel_current_page_only') }}</span>
         </label>
-        <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">
+        <span class="ac-caption ac-num">
           {{ getMessage('sidepanel_flow_count', [String(flows.length)]) }}
         </span>
       </div>
     </div>
 
-    <!-- Scrollable Content -->
-    <div class="flex-1 overflow-y-auto ac-scroll">
-      <!-- Empty State -->
-      <div v-if="flows.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
-        <div
-          class="w-16 h-16 rounded-full flex items-center justify-center mb-4"
-          :style="{ backgroundColor: 'var(--ac-surface-muted)' }"
-        >
-          <svg
-            class="w-8 h-8"
-            :style="{ color: 'var(--ac-text-subtle)' }"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-            />
-          </svg>
-        </div>
-        <div class="text-sm font-medium mb-1" :style="{ color: 'var(--ac-text)' }">
+    <!-- 목록 -->
+    <div class="wf-body ac-scroll">
+      <!-- 빈 상태: 아이콘 없이 제목 + 보조 + 주 버튼 -->
+      <div v-if="flows.length === 0" class="wf-empty">
+        <div class="ac-heading">
           {{
             search
               ? getMessage('sidepanel_no_matching_flows')
               : getMessage('sidepanel_no_flows_yet')
-          }}
-        </div>
-        <div class="text-xs text-center mb-4" :style="{ color: 'var(--ac-text-muted)' }">
-          {{
-            search
-              ? getMessage('sidepanel_search_hides_flows', [String(totalCount)])
-              : getMessage('sidepanel_record_first_flow')
           }}
         </div>
         <!--
@@ -174,26 +146,28 @@
           목록이 비어 보인 원인이 이것이었다 (2026-09-05 시연 지적 4항). 전체 개수를 함께
           알리고 한 번에 되돌릴 버튼을 둔다.
         -->
+        <div class="ac-sub wf-empty-hint">
+          {{
+            search
+              ? getMessage('sidepanel_search_hides_flows', [String(totalCount)])
+              : getMessage('sidepanel_record_first_flow')
+          }}
+        </div>
         <button
           v-if="search"
-          class="px-4 py-2 text-sm font-medium"
-          :style="newButtonStyle"
+          class="ac-button ac-button--primary"
+          type="button"
           @click="$emit('update:search', '')"
         >
           {{ getMessage('sidepanel_clear_search_button') }}
         </button>
-        <button
-          v-else
-          class="px-4 py-2 text-sm font-medium"
-          :style="newButtonStyle"
-          @click="$emit('create')"
-        >
+        <button v-else class="ac-button ac-button--primary" type="button" @click="$emit('create')">
           {{ getMessage('sidepanel_create_flow_button') }}
         </button>
       </div>
 
-      <!-- Workflow List -->
-      <div v-else class="px-4 py-3 space-y-3">
+      <!-- 흐름 카드 -->
+      <div v-else class="wf-list">
         <WorkflowListItem
           v-for="flow in flows"
           :key="flow.id"
@@ -211,137 +185,98 @@
         />
       </div>
 
-      <!-- Advanced Settings (Collapsible) -->
-      <div class="px-4 pb-4">
-        <div class="advanced-divider" :style="dividerStyle">
-          <span
-            :style="{
-              backgroundColor: 'var(--ac-surface)',
-              padding: '0 12px',
-              color: 'var(--ac-text-subtle)',
-            }"
-          >
-            {{ getMessage('sidepanel_advanced_section') }}
-          </span>
+      <!-- 접어 둔 실행 이력 -->
+      <div class="wf-advanced">
+        <div class="wf-advanced-label ac-caption">
+          {{ getMessage('sidepanel_advanced_section') }}
         </div>
 
-        <!-- Run History Section -->
-        <div class="advanced-section" :style="sectionStyle">
-          <button
-            class="advanced-section-header"
-            :style="sectionHeaderStyle"
-            @click="toggleSection('runs')"
-          >
-            <div class="flex items-center gap-2">
+        <div class="ac-card wf-section">
+          <button class="wf-section-header" type="button" @click="toggleSection('runs')">
+            <span class="wf-section-title">
               <svg
-                class="w-4 h-4 transition-transform"
-                :class="{ 'rotate-90': expandedSections.has('runs') }"
+                class="wf-caret"
+                :class="{ 'wf-caret-open': expandedSections.has('runs') }"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
                 stroke-width="2"
+                width="16"
+                height="16"
               >
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
               </svg>
               <span>{{ getMessage('sidepanel_run_history_title') }}</span>
-            </div>
-            <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">{{
-              runs.length
-            }}</span>
+            </span>
+            <span class="ac-caption ac-num">{{ runs.length }}</span>
           </button>
 
           <Transition name="section-expand">
-            <div v-if="expandedSections.has('runs')" class="advanced-section-content">
-              <div
-                v-if="runs.length === 0"
-                class="text-sm py-3"
-                :style="{ color: 'var(--ac-text-muted)' }"
-              >
+            <div v-if="expandedSections.has('runs')" class="wf-section-body">
+              <div v-if="runs.length === 0" class="ac-sub wf-section-empty">
                 {{ getMessage('sidepanel_no_run_history') }}
               </div>
               <!--
                 예전에는 최근 5건만 보여 줬다. 실패를 찾으려면 그 5건 밖을 봐야 하는 일이
                 잦아 제한을 없앴다 (2026-09-05 사이드패널 2단계).
               -->
-              <div v-else class="space-y-2 py-2">
+              <div v-else class="wf-runs">
                 <div
                   v-for="run in runs"
                   :key="run.id"
-                  class="run-item"
-                  :style="runItemStyle"
+                  class="wf-run"
                   @click="$emit('toggleRun', run.id)"
                 >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class="w-2 h-2 rounded-full"
-                        :class="{ 'animate-pulse': run.isInProgress }"
-                        :style="{ backgroundColor: getRunStatusColor(run) }"
-                      ></span>
-                      <span class="text-sm" :style="{ color: 'var(--ac-text)' }">{{
-                        getFlowName(run.flowId)
-                      }}</span>
-                      <span
-                        v-if="run.status"
-                        class="text-xs px-1.5 py-0.5 rounded"
-                        :style="{
-                          backgroundColor: run.isInProgress
-                            ? 'var(--ac-primary-light, #dbeafe)'
-                            : run.success
-                              ? 'var(--ac-success-light, #dcfce7)'
-                              : 'var(--ac-danger-light, #fee2e2)',
-                          color: getRunStatusColor(run),
-                        }"
-                      >
-                        {{ getRunStatusText(run) }}
-                      </span>
-                    </div>
-                    <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">
+                  <div class="wf-run-head">
+                    <span
+                      class="wf-run-dot"
+                      :class="{ 'ac-pulse': run.isInProgress }"
+                      :style="{ backgroundColor: getRunStatusColor(run) }"
+                    ></span>
+                    <span class="wf-run-name ac-body ac-clip">{{ getFlowName(run.flowId) }}</span>
+                    <span
+                      v-if="run.status"
+                      class="wf-run-status ac-caption"
+                      :style="{ color: getRunStatusColor(run) }"
+                    >
+                      {{ getRunStatusText(run) }}
+                    </span>
+                    <span class="wf-run-time ac-caption ac-num">
                       {{ formatTime(run.startedAt) }}
                     </span>
                   </div>
-                  <!-- Run details (if expanded) -->
-                  <div
-                    v-if="openRunId === run.id"
-                    class="mt-2 pt-2 border-t"
-                    :style="{ borderColor: 'var(--ac-border)' }"
-                  >
-                    <!-- V3: Show status info when no entries -->
-                    <div
-                      v-if="run.entries.length === 0 && run.status"
-                      class="text-xs py-1"
-                      :style="{ color: 'var(--ac-text-muted)' }"
-                    >
-                      <div class="flex items-center gap-2">
-                        <span
-                          >{{ getMessage('sidepanel_status_label') }}:
-                          {{ getRunStatusText(run) }}</span
-                        >
-                        <span v-if="run.finishedAt"
-                          >• {{ getMessage('sidepanel_elapsed_time_label') }}:
-                          {{
-                            Math.round(
-                              (new Date(run.finishedAt).getTime() -
-                                new Date(run.startedAt).getTime()) /
-                                1000,
-                            )
-                          }}s</span
-                        >
-                      </div>
+
+                  <!-- 펼친 실행의 자세한 내용 -->
+                  <div v-if="openRunId === run.id" class="wf-run-detail ac-hairline-top">
+                    <!-- V3: 기록이 없으면 상태만이라도 보여 준다 -->
+                    <div v-if="run.entries.length === 0 && run.status" class="ac-caption">
+                      <span
+                        >{{ getMessage('sidepanel_status_label') }}:
+                        {{ getRunStatusText(run) }}</span
+                      >
+                      <span v-if="run.finishedAt" class="wf-run-elapsed">
+                        {{ getMessage('sidepanel_elapsed_time_label') }}:
+                        {{
+                          Math.round(
+                            (new Date(run.finishedAt).getTime() -
+                              new Date(run.startedAt).getTime()) /
+                              1000,
+                          )
+                        }}s
+                      </span>
                     </div>
-                    <!-- V2: Show entries -->
+                    <!-- V2: 단계 기록 -->
                     <div
                       v-for="(entry, idx) in run.entries"
                       :key="idx"
-                      class="text-xs py-1"
-                      :style="{
-                        color:
-                          entry.status === 'failed' ? 'var(--ac-danger)' : 'var(--ac-text-muted)',
-                      }"
+                      class="ac-caption wf-run-entry"
+                      :class="{ 'ac-text-danger': entry.status === 'failed' }"
                     >
-                      #{{ idx + 1 }} {{ entry.status }} ·
+                      <span class="ac-num">#{{ idx + 1 }}</span> {{ entry.status }} ·
                       {{ getMessage('sidepanel_step_label') }}={{ entry.stepId }}
-                      <span v-if="entry.tookMs" class="ml-2">{{ entry.tookMs }}ms</span>
+                      <span v-if="entry.tookMs" class="ac-num wf-run-took"
+                        >{{ entry.tookMs }}ms</span
+                      >
                     </div>
                     <!--
                       수동 실행의 실패 화면은 흐름 엔진이 base64 로 남긴다(파일이 아니다).
@@ -350,7 +285,7 @@
                     -->
                     <img
                       v-if="failureShot(run)"
-                      class="run-shot"
+                      class="wf-run-shot"
                       :src="failureShot(run)"
                       :alt="getMessage('sidepanel_daily_screenshot_alt')"
                     />
@@ -480,25 +415,19 @@ function getFlowName(flowId: string): string {
 }
 
 /**
- * Get the status color for a run
- * - In progress (queued/running/paused): blue/primary
- * - Succeeded: green/success
- * - Failed/canceled: red/danger
+ * 실행 한 건의 상태 색. 토큰만 돌려준다.
+ * - 진행 중(queued/running/paused): 강조 파랑
+ * - 성공: 성공 파랑
+ * - 실패·취소: 위험 빨강
  */
 function getRunStatusColor(run: RunLite): string {
-  // V3 style: check isInProgress first
-  if (run.isInProgress) {
-    return 'var(--ac-primary, #3b82f6)';
-  }
-  // V3 style: check status
+  if (run.isInProgress) return 'var(--ac-accent)';
   if (run.status) {
-    if (run.status === 'succeeded') return 'var(--ac-success, #22c55e)';
-    if (run.status === 'failed' || run.status === 'canceled') return 'var(--ac-danger, #ef4444)';
-    // queued/running/paused - should be caught by isInProgress but just in case
-    return 'var(--ac-primary, #3b82f6)';
+    if (run.status === 'succeeded') return 'var(--ac-success)';
+    if (run.status === 'failed' || run.status === 'canceled') return 'var(--ac-danger-text)';
+    return 'var(--ac-accent)';
   }
-  // V2 fallback: use success boolean
-  return run.success ? 'var(--ac-success, #22c55e)' : 'var(--ac-danger, #ef4444)';
+  return run.success ? 'var(--ac-success)' : 'var(--ac-danger-text)';
 }
 
 /**
@@ -535,191 +464,249 @@ function toggleSection(section: string) {
   }
   expandedSections.value = new Set(expandedSections.value);
 }
-
-// Computed styles
-const containerStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface)',
-}));
-
-const headerStyle = computed(() => ({
-  borderColor: 'var(--ac-border)',
-  backgroundColor: 'var(--ac-surface)',
-}));
-
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  border: 'var(--ac-border-width) solid var(--ac-border)',
-  borderRadius: 'var(--ac-radius-button)',
-  color: 'var(--ac-text)',
-  outline: 'none',
-}));
-
-const refreshButtonStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text-muted)',
-  borderRadius: 'var(--ac-radius-button)',
-  border: 'none',
-}));
-
-const newButtonStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent)',
-  color: 'var(--ac-accent-contrast)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-
-const dividerStyle = computed(() => ({
-  borderColor: 'var(--ac-border)',
-}));
-
-const sectionStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface)',
-  border: 'var(--ac-border-width) solid var(--ac-border)',
-  borderRadius: 'var(--ac-radius-inner)',
-}));
-
-const sectionHeaderStyle = computed(() => ({
-  color: 'var(--ac-text)',
-}));
-
-const runItemStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-
-const filterSelectStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  border: 'var(--ac-border-width) solid var(--ac-border)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-
-const chipStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text-muted)',
-  borderRadius: 'var(--ac-radius-button, 999px)',
-}));
-
-const chipOnStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent)',
-  color: 'var(--ac-accent-contrast)',
-  borderRadius: 'var(--ac-radius-button, 999px)',
-}));
 </script>
 
 <style scoped>
-/* 필터 바: 늘 보이는 한 줄 */
+.wf-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--ac-bg);
+}
+
+/* 머리말은 바탕색 위에 그대로 앉는다. 카드가 아니라 배경으로 구분한다. */
+.wf-header {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.wf-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.wf-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--ac-text-tertiary);
+  pointer-events: none;
+}
+
+.wf-search-input {
+  padding-left: 36px;
+}
+
+.wf-header-icon {
+  flex-shrink: 0;
+}
+
 .wf-filter-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
   overflow-x: auto;
   padding-bottom: 2px;
 }
 
 .wf-filter-select {
-  height: 28px;
-  font-size: 12px;
-  padding: 0 6px;
-  font-family: inherit;
-  outline: none;
+  width: auto;
+  height: 32px;
   flex-shrink: 0;
-  max-width: 40%;
-}
-
-.wf-chip {
-  border: none;
-  padding: 5px 10px;
-  font-size: 12px;
+  max-width: 42%;
+  font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
-  flex-shrink: 0;
+  padding-left: 10px;
+  padding-right: 28px;
+  background-position: right 8px center;
 }
 
-/* 실패 화면 썸네일 */
-.run-shot {
-  margin-top: 6px;
-  max-width: 100%;
-  max-height: 160px;
-  border-radius: var(--ac-radius-inner, 8px);
-  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-}
-
-.workflow-checkbox {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-  appearance: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.workflow-checkbox:checked {
-  background-color: var(--ac-accent, #d97757);
-  border-color: var(--ac-accent, #d97757);
-  background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
-}
-
-.advanced-divider {
+.wf-scope {
   display: flex;
   align-items: center;
-  text-align: center;
-  margin: 20px 0 16px;
-  font-size: 12px;
-  font-weight: 500;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.advanced-divider::before,
-.advanced-divider::after {
-  content: '';
+.wf-scope-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.wf-body {
   flex: 1;
-  border-bottom: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 24px;
 }
 
-.advanced-section {
+.wf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.wf-empty-hint {
   margin-bottom: 8px;
+}
+
+.wf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-advanced {
+  margin-top: 24px;
+}
+
+.wf-advanced-label {
+  padding: 0 4px 8px;
+}
+
+.wf-section {
   overflow: hidden;
 }
 
-.advanced-section-header {
+.wf-section-header {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 8px;
+  min-height: 44px;
+  padding: 12px 16px;
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background-color var(--ac-motion-fast, 120ms) ease;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--ac-text);
+  text-align: left;
+  transition: background-color var(--ac-motion-fast) ease;
 }
 
-.advanced-section-header:hover {
-  background-color: var(--ac-hover-bg, #f5f5f4);
+.wf-section-header:hover {
+  background-color: var(--ac-surface-hover);
 }
 
-.advanced-section-content {
-  padding: 0 12px 12px;
+.wf-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.run-item {
-  padding: 10px 12px;
+.wf-caret {
+  flex-shrink: 0;
+  color: var(--ac-icon);
+  transition: transform var(--ac-motion-fast) ease;
+}
+
+.wf-caret-open {
+  transform: rotate(90deg);
+}
+
+.wf-section-body {
+  padding: 0 16px 16px;
+}
+
+.wf-section-empty {
+  padding: 4px 0 8px;
+}
+
+.wf-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-run {
+  padding: 8px 12px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-row);
   cursor: pointer;
-  transition: background-color var(--ac-motion-fast, 120ms) ease;
+  transition: background-color var(--ac-motion-fast) ease;
 }
 
-.run-item:hover {
-  background-color: var(--ac-hover-bg, #f5f5f4) !important;
+.wf-run:hover {
+  background-color: var(--ac-surface-hover);
+}
+
+.wf-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wf-run-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ac-radius-pill);
+  flex-shrink: 0;
+}
+
+.wf-run-name {
+  flex: 1;
+}
+
+.wf-run-status,
+.wf-run-time {
+  flex-shrink: 0;
+}
+
+.wf-run-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-run-elapsed {
+  margin-left: 8px;
+}
+
+.wf-run-entry {
+  word-break: break-word;
+}
+
+.wf-run-took {
+  margin-left: 8px;
+}
+
+/* 실패 화면 썸네일 */
+.wf-run-shot {
+  margin-top: 6px;
+  max-width: 100%;
+  max-height: 160px;
+  border-radius: var(--ac-radius);
 }
 
 /* Section expand transition */
 .section-expand-enter-active,
 .section-expand-leave-active {
-  transition: all var(--ac-motion-normal, 180ms) ease;
+  transition: all var(--ac-motion-normal) ease;
   overflow: hidden;
 }
 

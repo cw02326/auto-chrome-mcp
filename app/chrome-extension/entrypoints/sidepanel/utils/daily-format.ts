@@ -169,21 +169,43 @@ export function formatRunStatus(status: string | undefined, t: Translate = getMe
   return key ? t(key) : status;
 }
 
-/** 상태별 색. 성공은 초록, 진행 중은 파랑, 로그인 필요·건너뜀은 주의색, 나머지는 빨강. */
+/**
+ * 상태별 색. 성공은 초록, 진행 중은 파랑, 로그인 필요·건너뜀은 주의색, 나머지는 빨강.
+ *
+ * 토큰 이름만 돌려준다 - 하드코드 폴백(`var(--x, #hex)`)을 쓰면 토큰이 없어져도(오타 포함)
+ * 화면이 조용히 옛 색으로 버텨서 문제를 못 알아챈다. 토큰은 `styles/agent-chat.css` 에 있다.
+ */
 export function runStatusColor(status: string | undefined): string {
   switch (status) {
     case 'success':
-      return 'var(--ac-success, #16a34a)';
+      return 'var(--ac-success)';
     case 'running':
-      return 'var(--ac-primary, #3b82f6)';
+      return 'var(--ac-accent)';
     case 'login_required':
     case 'skipped_queue':
     case 'user_took_over_tab':
     case 'stopped':
-      return 'var(--ac-warning, #b45309)';
+      return 'var(--ac-warning)';
     default:
-      return 'var(--ac-danger, #ef4444)';
+      return 'var(--ac-danger)';
   }
+}
+
+/**
+ * 예약 한 줄의 켜짐 상태 문구. 꺼져 있으면 "꺼짐", 켜져 있으면 다음 실행 시각.
+ *
+ * 화면(DailyView.vue)의 v-if/v-else 두 갈래를 여기 한 함수로 모아 테스트로 고정한다
+ * (2026-09-06 실기기 확인: 펼친 줄에서 이 분기가 뒤집혀 enabled:true 인데도 "꺼짐" 이
+ * 나온 적이 있었다).
+ */
+export function formatScheduleEnabledLine(
+  enabled: boolean,
+  nextAt: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (!enabled) return t('sidepanel_daily_paused');
+  return t('sidepanel_daily_next_run', [formatNextRun(nextAt, now, t)]);
 }
 
 /** 걸린 시간. 초 단위로 한 자리까지. */
