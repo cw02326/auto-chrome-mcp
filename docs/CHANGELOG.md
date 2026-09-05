@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`chrome_shortcut` 을 Claude 없이 예약 실행할 수 있다 (`schedule`·`unschedule`·`schedules`).**
+  저장한 shortcut 에 시각을 붙이면 크롬 확장이 알람으로 스스로 깨워 실행하고 결과를 이력에
+  남긴다. 표현은 `{ every: "15m"|"1h"|"6h"|"24h" }` 또는 `{ daily: ["08:00"], days?: [...] }`
+  둘 중 하나이고 cron 은 쓰지 않는다. 예약은 최대 20개, shortcut 하나에 하나이며 다시 걸면
+  덮어쓴다. 검증은 전부 예약 시점에 한다(파라미터, 저장된 탭 번호, 첫 step 규칙) - 새벽에
+  실패하면 아무도 보지 못하기 때문이다. 첫 step 은 반드시 `chrome_navigate` 여야 한다.
+  작업 탭이 없는 세션에서 탭을 만드는 길이 그것뿐이다.
+- **예약 실행은 사용자 화면을 건드리지 않는다.** 전역 무간섭 토글이 꺼져 있어도 예약 실행만은
+  항상 background 규칙으로 돌고, 자기 세션 버킷(`scheduled::<이름>`)의 탭만 대상으로 삼는다.
+  실행 중 탭 그룹 라벨이 `예약: <이름>` 으로 바뀌고 끝나면 `MCP` 로 돌아온다. 실행이 만든
+  탭은 끝나면 닫히고, 사용자가 그 탭을 활성화하면 실행이 `user_took_over_tab` 으로 멈추며
+  그 탭은 닫지 않고 소유만 해제한다. 예약은 직렬로 돌고(한 번에 하나), 큐에서 10분을 넘긴
+  항목은 `skipped_queue` 로 기록만 남긴다.
+- **비밀번호는 예약할 수 없다.** `required` 인 `secret` 을 선언한 shortcut 은 예약 자체가
+  거절되고(`secret_required_unschedulable`), 예약 `params` 에 secret 이름을 넣으면
+  `secret_param_in_schedule` 이다. 저장소에 넣는 순간 평문 노출이라 선택지를 만들지 않았다.
+  로그인이 필요한 작업은 크롬 프로필의 기존 세션 쿠키를 그대로 쓴다. 세션이 끊긴 것은
+  `loginCheck` 로 지목한 step 의 `stopIf` 로 잡아 `login_required` 상태와 알림으로 알린다.
+- **워커가 깨어날 때마다 예약 상태를 맞춘다.** `running` 으로 남은 이력을 `interrupted` 로
+  바꾸고, 하트비트가 30초 넘게 멈춘 실행 잠금을 회수하고, `scheduled::` 고아 탭을 정리하고
+  (사용자가 보고 있는 탭이면 닫지 않고 소유만 해제), 없어진 알람을 다시 걸고, 지난 예약을
+  **한 번만** 따라잡는다. 8시간 꺼져 있던 `every: "1h"` 예약도 실행은 1회다. 알람과 따라잡기가
+  같은 시각을 동시에 집어도 `runId` 가 `<이름>:<due ISO>` 로 같아 이력은 1건이다.
+  타임존이 바뀌면 모든 `nextAt` 을 다시 계산하고, DST 로 없어진 시각은 그 다음 존재하는
+  분에 1회, 두 번 오는 시각은 앞선 것 1회만 돈다.
+- **실패 알림과 report 파일.** 실패(`failed`·`timeout`·`interrupted`·`login_required`·
+  `user_took_over_tab`)에는 스크린샷 1장을 남기고, 연속 실패가 1회째와 3회째일 때만 크롬 알림을
+  보낸다(15분마다 도는 예약이 밤새 실패해도 알림 30개가 쌓이지 않는다). 알림 본문에는 이름·
+  오류 코드·step 번호만 싣는다 - 오류 문구에는 페이지 텍스트가 섞이고 알림은 마스킹 경로를
+  거치지 않기 때문이다. `report: true` 면 실행 기록 전체를
+  `Downloads/mcp-screenshots/YYYY-MM-DD/report_<이름>_<HHmmss>.json` 으로도 남긴다(결과는
+  256KiB 까지, 이력의 24,000자로 모자랄 때만 켠다).
+- **`chrome_shortcut` 의 `save` 가 `return` 이름을 함께 저장한다.** 예약 실행에는 값을 요청할
+  호출자가 없어, 무엇을 이력에 남길지 저장 시점에 정해 둬야 한다. 수동 `run` 은 인자로 준
+  `return` 이 저장된 값보다 우선이다.
+- 데일리 자동화 가이드 [`docs/DAILY-AUTOMATION-ko.md`](./DAILY-AUTOMATION-ko.md) 를 추가했다.
+- **`chrome_shortcut` 에 실행 이력이 생겼다 (`action: "history"`).** 실행할 때마다 결과를
+  `chrome.storage.local` 에 남기고, 나중에 `history` 로 읽는다. `runId` 를 주면 그 실행 하나를
+  `results` 까지 통째로, 없으면 요약 목록(`name`·`since`·`status` 로 거르고 `limit` 은 기본 20,
+  상한 100)만 돌려준다. 목록에 결과 본문을 싣지 않는 이유는 밤새 쌓인 30건이 그대로 대화
+  컨텍스트를 밀어내기 때문이다. 보관 상한은 shortcut 당 100건, 전체 1,000건, 전체 3MiB 이고
+  넘으면 가장 오래된 것부터 지운다. `secret` 으로 선언한 파라미터 값은 저장 직전에 원문과
+  JSON escaped 형태 둘 다 `***` 로 가린다. 수동 `run` 의 응답에도 방금 실행의 `runId` 가 실린다.
+- **실행 컨텍스트 백그라운드 모드.** 전역 무간섭 토글과 무관하게 "이 실행은 항상 무간섭" 이어야
+  하는 호출을 위해, 모드를 전역 상태가 아니라 호출 체인에 실어 보낸다. 게이트·URL 대상 해석·
+  `chrome_navigate` 탭 재사용·활성화 가드·`chrome_close_tabs` 가 모두 전역 토글보다 이 값을 먼저
+  읽으므로, 판정 지점마다 답이 갈리지 않는다. 인자 `background: true` 만 덮으면 전역 토글이 꺼진
+  상태의 게이트가 작업 탭 주입을 건너뛰어 도구가 사용자의 활성 탭으로 흘러가던 것을 막는다.
+  내부 전용이라 스키마에 없고, 바깥에서 같은 이름의 키를 적어 보내도 버린다.
+- **MCP 탭 그룹이 지금 하는 작업을 보여 준다 (`task`).** `chrome_batch`·`chrome_shortcut`(run)·
+  `chrome_navigate` 에 `task` 를 주면 실행하는 동안 탭 그룹 라벨이 그 문구가 되고(24자에서 자름),
+  끝나면 `MCP` 로 돌아온다. shortcut 은 문구를 생략하면 shortcut 이름을 쓴다. 무간섭 모드에서는
+  작업 탭이 배경에 조용히 열리므로 사용자가 무엇이 도는지 알 수 있는 표시가 이 라벨뿐이다.
+  라벨 변경은 `chrome.tabGroups.update` 만 쓴다 - 탭 활성화도 창 포커스도 하지 않는다.
 - **`record_replay_flow_run` / `record_replay_list_published` 를 MCP 도구 목록에 다시 실었다.**
   사이드패널에서 녹화·발행한 흐름을 도구 호출로 실행할 수 있다. 실행 탭은 엔진이 고르지 않고
   작업 탭 게이트가 정한다: `tabId` 를 생략하면 이 세션·레인의 작업 탭이 주입되고, 작업 탭이
@@ -17,7 +71,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   탭을 남긴다. 결과는 요약(성공 여부, 스텝 수, 실패한 스텝, 흐름 출력)이고 스텝 로그는
   `returnLogs:true` 일 때만 4000자까지 싣는다. `chrome_batch` 안에 중첩하는 것은 계속 막는다.
 
+### Changed
+
+- **`chrome_find` 응답에서 매치마다 반복되던 `hint` 문구를 없앴다.** 118자짜리 안내(`ref` 로
+  `chrome_click_element`/`chrome_fill_or_select` 를 쓰라는 문구)가 `match` 항목마다 실려
+  `maxResults` 가 5면 다섯 번 반복됐다. 이제 응답 최상위에 매치가 하나 이상일 때만 1회 싣는다.
+  매치가 없으면(`suggestion` 만 있을 때) `hint` 자체를 뺀다.
+- **`chrome_screenshot` 의 `storeBase64` 응답에서 254자짜리 `note` 문구를 뺐다.** 이미지가
+  base64 텍스트가 아니라 별도 MCP image 블록으로 온다는 것과 `imageScale` 로 좌표를 환산하는
+  법을 매 호출 반복해서 실었었다. 같은 설명은 `chrome_screenshot` 도구 description 으로
+  옮겨야 하는데, `packages/shared/src/tools.ts` 는 이 작업 범위 밖이라 여기서는 응답에서만
+  뺐다. **TODO(다른 에이전트가 tools.ts 담당): description 에 "이미지는 MCP image 블록으로
+  오고, base64 는 텍스트에 없다. 좌표는 이미지 픽셀 기준이며 `chrome_computer` 가 자동
+  환산한다. 수동 환산은 `cssX = imageX / imageScale`." 내용을 추가해 달라.**
+- **`chrome_read_page` 응답에서 폴백을 안 썼을 때의 자리표시자 필드를 뺐다.** 정상 경로
+  (트리 성공, sparse 아님)에서는 `elements:[]`/`count:0`/`fallbackUsed:false`/
+  `fallbackSource:null`/`reason:null` 이 항상 실렸는데, 이 다섯은 실제로 interactive-elements
+  폴백을 탔을 때만 값이 있다. 이제 폴백 분기에서만 채워 넣고, 안 채워지면 응답에서 아예
+  빠진다. `stats` 도 같은 이유로: 트리 실패 등으로 실제 값이 없을 때의 0-필드 기본값
+  (`{processed:0, included:0, durationMs:0}`) 대신, `resp.stats` 가 진짜 있을 때만 싣는다.
+  소비처 그렙 결과 record-replay 의 여러 handler/node 는 `chrome_read_page` 를
+  `handleCallTool` 로만 호출하고 반환값을 버리며(ref map 갱신이 목적), `batch-runner.ts` 도
+  이 필드들을 참조하지 않아 안전하다.
+- **자동화 가드(`automationGuardEnabled`) 가 매 액션성 도구 호출마다 `chrome.storage.local`
+  을 조회하던 것을 인메모리 캐시로 바꿨다.** 동작은 그대로다 — 팝업에서 토글을 바꾸면
+  `chrome.storage.onChanged` 로 캐시가 즉시 갱신된다. 조회 실패는 캐시하지 않고 다음 호출에서
+  다시 시도한다.
+
 ### Fixed
+
+- **`chrome_get_web_content`/`chrome_inject_script` 가 새 탭을 만든 뒤 고정 3000ms 를 무조건
+  쉬던 것을 관측 기반 대기로 바꿨다.** `url` 로 기존 탭이 없어 새로 만들 때 `chrome_navigate`
+  가 쓰는 것과 같은 유틸(`wait-for.ts` 의 `waitForPageLoad`)로 `domcontentloaded` 신호를
+  기다린다. 로드가 3000ms 보다 일찍 끝나면 그만큼 빨리 돌아온다. 관측 자체가 실패하면(예:
+  예상치 못한 에러) 예전과 같은 고정 3000ms 로 폴백한다.
 
 - **백그라운드 작업 모드가 켜져 있어도 `background:false` 로 호출하면 사용자가 보던 탭을
   작업 탭으로 채가던 문제를 고쳤다.** `chrome_navigate` 의 "이미 열린 탭" 재사용 필터가 호출
@@ -36,6 +123,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **리다이렉트로 `file:` 문서에 도달했는데 파일 URL 접근 권한이 없으면 결과에
   `fileSchemeAccessWarning` 경고를 함께 돌려준다.** 이동은 이미 끝난 상황이라 오류가 아니라
   안내다.
+- **흐름 실행이 도는 동안 작업 탭을 통째로 쥐는 재진입 리스를 만들었다
+  (`utils/tab-lock.ts` 의 `withTabLease`).** `record_replay_flow_run` 은 도구를 수십 번 부르는
+  하나의 작업인데 바깥 잠금이 없어, 노드와 노드 사이의 빈틈에 다른 세션이 같은 탭을 조작할 수
+  있었다. 리스는 한 번짜리 `withTabLock` 과 잠금 테이블을 공유하고, 같은 owner token 을 들고
+  온 호출(= run 자신의 노드 호출)만 줄을 서지 않고 통과한다. 토큰은 `RunTabContext.leaseToken`
+  으로 내려가 노드가 부르는 모든 도구 호출에 `_leaseToken` 으로 실린다. 다만 토큰 없는 바깥
+  호출을 실제로 대기시키는 것은 아직 켜지 않았다(`LEASE_BLOCKS_UNTOKENED_CALLS = false`):
+  도구 파이프라인이 `args._leaseToken` 을 `withTabLock` 에 넘겨주기 시작하면 그때 켠다.
+  지금은 리스가 재진입 식별과 busy 표시까지만 하고, 바깥 호출은 예전처럼 스텝 단위로
+  직렬화된다.
+- **워치독이 예산을 넘겨 응답을 끊어도 흐름 실행은 계속 돌던 좀비 run 을 없앴다.**
+  `Promise.race` 는 취소 수단이 아니라, 호출자는 실패를 받았는데 브라우저에서는 클릭과 이동이
+  계속 일어났다. 이제 `record_replay_flow_run` 이 `timeoutMs`(상한 10분)로 자기 마감을 들고,
+  마감이 지나면 `AbortSignal` 로 실행을 멈춘다. 신호는 스텝 경계, subflow 루프, 이동·네트워크
+  유휴 대기까지 전달된다. 멈춘 run 은 `run_aborted` 로 끝나고, 그 run 이 열었던 탭을 닫은 뒤에
+  리스를 놓는다.
+- **`setRunTab()` 이 실행 컨텍스트만 바꾸고 오케스트레이터는 옛 탭에 남아 있던 문제를
+  고쳤다.** `openTab`·`switchTab` 뒤에도 로그 오버레이, 정리(네트워크 캡처 종료), 응답의
+  `tabId` 는 이전 탭을 가리켰다. 이제 로거·스케줄러·스텝이 **같은 `RunTabContext` 객체**를
+  공유하므로 탭이 옮겨가면 세 곳이 함께 따라간다. 탭이 바뀔 때 프레임 커서도 초기화한다
+  (다른 문서의 프레임 번호는 의미가 없다).
+- **흐름 결과에 스크린샷 이미지 바이트가 실려 나가던 것을 막았다.** `screenshot` 스텝이
+  base64 문자열을 변수에 넣었고, 변수는 `outputs` 로 그대로 응답에 실렸다. 이제 스크린샷을
+  파일로 저장하고 변수에는 참조(`{kind:'screenshot', filename, fullPath, bytes}`)만 남긴다.
+  응답 쪽에도 상한을 뒀다: `outputs` 직렬화가 16KB 를 넘으면 넘긴 항목을 빼고
+  `outputsTruncated: true` 를 붙이고, `failedStep.message` 는 2000자에서 자른다.
+- **흐름의 actions 경로에서 나가던 도구 호출이 세션·레인 정보를 잃던 문제를 고쳤다.**
+  `{ tabId }` 만 실어 보내 작업 탭 게이트가 익명 세션으로 보았고, 잠금·소유 탭 기록·레인
+  라우팅이 엉뚱한 버킷으로 갔다. 이제 공통 `actionToolArgs(ctx, args)` 가 탭·세션·레인·리스
+  토큰을 한꺼번에 싣는다.
 
 ### Security
 
@@ -45,6 +162,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   공백이 붙은 주소가 통과했다. 이제 URL 파서로 스킴을 판별한다. ③ 권한 조회 API 호출이
   실패하면 허용으로 넘어갔다. 이제 권한 상태를 모르면 거부한다(API 자체가 없는 옛 크롬은
   종전대로 통과).
+- **흐름의 `closeTab` 스텝이 사용자가 보던 탭을 닫을 수 있던 문제를 막았다.** 인자 없는
+  `closeTab` 이 `tabId` 를 단수로 보냈는데 `chrome_close_tabs` 는 `tabIds` 배열만 읽는다.
+  그래서 지목이 통째로 무시됐고, 무간섭 모드가 꺼져 있으면 활성 탭이 닫혔다. 이제 실행 탭
+  하나를 배열로 보낸다. 탭 id 나 url 로 닫는 경우도 run 이 연 탭(과 실행을 시작한 탭) 안에서만
+  허용하고, 벗어나면 `close_scope_violation` 으로 거절한다.
+- **URL 트리거·DOM 트리거·알람 스케줄이 사용자가 보던 탭에서 자동 실행되던 것을 막았다.**
+  사용자가 실행을 누른 적이 없는데도 방금 연 페이지에서 클릭과 입력이 일어났고, 알람은
+  활성 탭을 잡아 그 위에서 돌았다. 이제 이 셋은 트리거가 난 창에 세션 소유 백그라운드 탭을
+  새로 열어 거기서 돌고, 끝나면 닫는다. 사용자 탭에서 직접 돌리려면 흐름이
+  `meta.runInTriggeringTab: true` 를 켜야 한다(기본값 꺼짐). 활성 탭 조회
+  (`queryEntryPointTab`)는 사이드패널 실행 버튼, 컨텍스트 메뉴, 단축키에만 남았다. 새로 연
+  탭도 같은 주소로 이동하므로 트리거가 자기 자신을 다시 켤 수 있는데, 자동 실행 탭 목록을
+  두고 그 탭에서 온 이동·DOM 신호는 무시한다.
+- **`openTab`·`switchTab` 이 실행 격리를 벗어나던 경로를 닫았다.** `switchTab` 은 `urlContains`
+  ·`titleContains` 로 브라우저의 모든 탭을 뒤져 사용자의 탭을 고를 수 있었다. 이제 run 이 연
+  탭의 id 로만 옮겨가고, 벗어나면 `tab_scope_violation` 이다. 새 탭은 실행 중인 창에
+  백그라운드로 열고 run 소유로 등록하며, 어느 경우에도 탭을 앞으로 끌어내지 않는다
+  (`foreground: true` 로도 활성화하지 않는다). 탭이 바뀌면 반드시 재고정하고 프레임 커서를
+  비운다.
+- **발행하지 않은 흐름을 도구 호출로 실행할 수 있던 것을 막았다.** `record_replay_flow_run` 이
+  id 만 맞으면 저장만 된 초안이나 가져오기만 한 흐름도 그대로 돌렸다. 이제
+  `record_replay_list_published` 의 id·slug 목록을 허용 목록으로 확인하고, 없으면
+  `flow_not_published` 로 거절한다.
 
 ## [v1.11.2] file:// 이동 수정 (2026-09-05)
 

@@ -19,7 +19,7 @@ import { listRuns } from './flow-store';
 import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
-import { queryEntryPointTab, runTabFromId } from './engine/tab-context';
+import { queryEntryPointTab, runTabFromId, type RunTabContext } from './engine/tab-context';
 import { RecorderManager } from './recording/recorder-manager';
 import { recordingSession } from './recording/session-manager';
 // Browser/content listeners are initialized via RecorderManager.init
@@ -60,6 +60,108 @@ async function rescheduleAlarms() {
 }
 
 // legacy injection helpers removed — use recording/content-injection when needed
+
+/**
+ * 자동 진입점(URL 트리거·DOM 트리거·알람 스케줄)이 쓰는 실행 탭 (2026-09-05 Codex 검토 항목 2).
+ *
+ * 이 셋은 사용자가 "지금 실행" 을 누른 것이 아니다. 그런데도 예전에는 트리거가 발생한
+ * 사용자 탭(또는 알람의 경우 활성 탭)을 그대로 빌려 그 위에서 클릭·입력·이동을 했다.
+ * 사용자가 보고 있는 페이지를 자동화가 조작해 버리는 것이다.
+ *
+ * 이제는 세션 소유의 **새 백그라운드 탭**을 트리거 탭의 창에 열어 거기서 돌고, 끝나면
+ * 닫는다. 사용자 탭에서 직접 돌리려면 흐름이 `meta.runInTriggeringTab: true` 를 켜야 한다
+ * (트리거 쪽에 같은 값을 둬도 된다).
+ */
+function wantsTriggeringTab(flow: any, trigger?: any): boolean {
+  return flow?.meta?.runInTriggeringTab === true || trigger?.runInTriggeringTab === true;
+}
+
+/**
+ * 자동 진입점이 만든 탭들.
+ *
+ * 이 탭도 트리거 URL 로 이동하므로 `webNavigation.onCommitted` 가 다시 뜨고, DOM 감시자도
+ * 다시 붙는다. 걸러 내지 않으면 트리거가 자기 자신을 재귀 실행해 탭이 무한히 늘어난다.
+ */
+const autoRunTabIds = new Set<number>();
+
+/** 이 탭이 자동 실행용으로 만들어진 탭인가 (트리거 재귀 차단용). */
+function isAutoRunTab(tabId: number | undefined): boolean {
+  return typeof tabId === 'number' && autoRunTabIds.has(tabId);
+}
+
+interface AutoRunTab {
+  tab: RunTabContext;
+  /** 실행 후 닫아야 하는 탭인지. */
+  disposable: boolean;
+}
+
+/**
+ * 트리거 실행용 탭을 준비한다.
+ *
+ * @param sourceTabId  트리거가 발생한 탭 (알람에는 없다).
+ * @param url          그 탭이 보고 있던 주소. 새 탭을 이 주소로 연다.
+ */
+async function openAutoRunTab(
+  sourceTabId: number | undefined,
+  windowId: number | undefined,
+  url: string | undefined,
+): Promise<AutoRunTab> {
+  let targetWindowId = windowId;
+  if (targetWindowId === undefined && typeof sourceTabId === 'number') {
+    try {
+      targetWindowId = (await chrome.tabs.get(sourceTabId)).windowId;
+    } catch {
+      targetWindowId = undefined;
+    }
+  }
+  // tab-create-ok: 자동 트리거는 자기 탭을 만들어 쓴다. 백그라운드로 열고 실행이 끝나면
+  // 닫으므로 사용자가 보고 있는 탭에는 닿지 않는다.
+  const created = await chrome.tabs.create({
+    url: url && /^(https?:|file:)/i.test(url) ? url : 'about:blank',
+    active: false,
+    ...(typeof targetWindowId === 'number' ? { windowId: targetWindowId } : {}),
+  });
+  if (typeof created?.id !== 'number') {
+    throw new Error('trigger: could not open a background tab for this run');
+  }
+  autoRunTabIds.add(created.id);
+  return {
+    tab: runTabFromId(created.id, 'explicit', created.windowId),
+    disposable: true,
+  };
+}
+
+/** 자동 진입점의 실행 한 건. 빌린 탭이 아니라 자기 탭에서 돌고, 끝나면 치운다. */
+async function runFlowFromTrigger(
+  flow: any,
+  trigger: any,
+  source: { tabId?: number; windowId?: number; url?: string },
+): Promise<void> {
+  let target: AutoRunTab;
+  if (wantsTriggeringTab(flow, trigger) && typeof source.tabId === 'number') {
+    target = {
+      tab: runTabFromId(source.tabId, 'explicit', source.windowId),
+      disposable: false,
+    };
+  } else {
+    target = await openAutoRunTab(source.tabId, source.windowId, source.url);
+  }
+
+  try {
+    await runFlow(flow, target.tab, { args: trigger?.args || {}, returnLogs: false });
+  } finally {
+    if (target.disposable) {
+      try {
+        await chrome.tabs.remove(target.tab.tabId);
+      } catch {
+        // 흐름이 이미 닫았을 수 있다.
+      }
+      // 탭을 닫은 뒤에 등록을 지운다. 순서를 바꾸면 그 사이에 도착한 이동 이벤트가
+      // 트리거를 한 번 더 켠다.
+      autoRunTabIds.delete(target.tab.tabId);
+    }
+  }
+}
 
 async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
   return await RecorderManager.start(meta);
@@ -322,6 +424,9 @@ export function initRecordReplayListeners() {
   chrome.webNavigation.onCommitted.addListener(async (details) => {
     try {
       if (details.frameId !== 0) return;
+      // 자동 실행용으로 우리가 연 탭은 트리거 대상이 아니다. 이 탭도 같은 주소로 이동하므로
+      // 거르지 않으면 트리거가 자기 자신을 다시 켜서 탭이 무한히 늘어난다.
+      if (isAutoRunTab(details.tabId)) return;
       const url = details.url || '';
       // Ensure core content scripts are injected for this tab (pre-heat for replay)
       await ensureCoreInjected(details.tabId);
@@ -359,11 +464,8 @@ export function initRecordReplayListeners() {
         if (matchUrl(url, (t as any).match || [])) {
           const flow = await getFlow(t.flowId);
           if (!flow) continue;
-          // The navigation event names its own tab; no lookup needed.
-          await runFlow(flow, runTabFromId(details.tabId, 'explicit'), {
-            args: t.args || {},
-            returnLogs: false,
-          });
+          // 사용자가 보고 있는 탭을 빌리지 않는다: 같은 주소로 세션 소유 탭을 열어 거기서 돈다.
+          await runFlowFromTrigger(flow, t, { tabId: details.tabId, url });
         }
       }
     } catch {}
@@ -374,6 +476,11 @@ export function initRecordReplayListeners() {
         const id = message.triggerId;
         const senderTabId = sender?.tab?.id;
         const senderWindowId = sender?.tab?.windowId;
+        // 자동 실행 탭에서 올라온 신호는 무시한다 (재귀 방지).
+        if (isAutoRunTab(senderTabId)) {
+          sendResponse({ ok: true, skipped: 'auto-run-tab' });
+          return true;
+        }
         listTriggers().then(async (arr) => {
           const t = arr.find((x) => x.id === id && x.type === 'dom');
           if (!t || t.enabled === false) return;
@@ -381,9 +488,16 @@ export function initRecordReplayListeners() {
           if (!flow) return;
           // The content script that fired the trigger identifies its own tab.
           if (typeof senderTabId !== 'number') return;
-          await runFlow(flow, runTabFromId(senderTabId, 'explicit', senderWindowId), {
-            args: t.args || {},
-            returnLogs: false,
+          let senderUrl: string | undefined;
+          try {
+            senderUrl = (await chrome.tabs.get(senderTabId)).url ?? undefined;
+          } catch {
+            senderUrl = undefined;
+          }
+          await runFlowFromTrigger(flow, t, {
+            tabId: senderTabId,
+            windowId: senderWindowId,
+            url: senderUrl,
           });
         });
         sendResponse({ ok: true });
@@ -528,11 +642,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (!s) return;
     const flow = await getFlow(s.flowId);
     if (!flow) return;
-    // Scheduled runs have no originating tab. Until batch flows get their own
-    // work tab (stage 2), pin the user's current tab once here rather than
-    // letting the engine reach for it at every step.
-    const tab = await queryEntryPointTab('sidepanel');
-    await runFlow(flow, tab, { args: s.args || {}, returnLogs: false });
+    // 스케줄 실행에는 시작 탭이 없다. 예전에는 사용자의 활성 탭을 잡아 거기서 돌렸다 —
+    // 사용자가 뭘 보고 있든 자동화가 그 페이지를 조작했다. 이제는 자기 백그라운드 탭을
+    // 열어 돌고 닫는다.
+    await runFlowFromTrigger(flow, s, {});
   } catch (e) {
     // swallow to not spam logs
   }

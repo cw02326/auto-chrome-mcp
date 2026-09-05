@@ -27,13 +27,42 @@ export const handleDownloadNode: NodeRuntime<any> = {
   },
 };
 
+/**
+ * 스크린샷 변수는 이미지 바이트가 아니라 **artifact 참조**다 (2026-09-05 Codex 검토 항목 7).
+ *
+ * 예전에는 base64 문자열을 그대로 변수에 넣었다. 변수는 run 결과의 `outputs` 로 나가므로
+ * 스크린샷 한 장이 응답을 수 MB 로 부풀렸다. 이제 파일로 저장하고 경로만 남긴다.
+ */
+export interface ScreenshotArtifactRef {
+  kind: 'screenshot';
+  filename?: string;
+  fullPath?: string;
+  bytes: number;
+}
+
+function toScreenshotRef(payload: any): ScreenshotArtifactRef {
+  const base64 = typeof payload?.base64Data === 'string' ? payload.base64Data : '';
+  return {
+    kind: 'screenshot',
+    filename: payload?.filename || payload?.savedFilename || undefined,
+    fullPath: payload?.fullPath || undefined,
+    // base64 4자 = 3바이트. 문자열 자체는 버리고 크기만 남긴다.
+    bytes: Math.floor((base64.length * 3) / 4),
+  };
+}
+
 export const screenshotNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    // auto-chrome-mcp fork: includeBase64InText 는 확장 내부 전용 플래그.
-    // 스크린샷 도구는 base64 를 MCP image 블록으로만 내보내므로, 변수에 이미지 바이트를
-    // 저장해야 하는 워크플로 노드만 텍스트 동봉을 요청한다.
-    const args: any = { name: 'workflow', storeBase64: true, includeBase64InText: true };
+    // saveToDownloads: 참조로 남기려면 파일이 실제로 있어야 한다.
+    // includeBase64InText 는 확장 내부 전용 플래그다. 여기서는 크기(bytes)를 계산하는
+    // 데만 쓰고 문자열은 변수에 넣지 않는다.
+    const args: any = {
+      name: 'workflow',
+      storeBase64: true,
+      saveToDownloads: true,
+      includeBase64InText: true,
+    };
     if (s.fullPage) args.fullPage = true;
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
       args.selector = s.selector;
@@ -44,7 +73,7 @@ export const screenshotNode: NodeRuntime<any> = {
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
       const payload = text ? JSON.parse(text) : null;
-      if (s.saveAs && payload && payload.base64Data) ctx.vars[s.saveAs] = payload.base64Data;
+      if (s.saveAs && payload) ctx.vars[s.saveAs] = toScreenshotRef(payload);
     } catch {}
     return {} as ExecResult;
   },

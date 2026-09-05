@@ -95,13 +95,21 @@ export function execCtxToActionCtx(
 ): ActionExecutionContext {
   // Use provided stepId for proper log attribution, fallback to 'action' only if not provided
   const logStepId = options?.stepId || 'action';
+  // The owned-tab set is shared by reference: a tab opened by a handler has to
+  // show up in the run context too, or the next step could not close it.
+  if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
   return {
     vars: ctx.vars as VariableStore,
     tabId,
+    windowId: ctx.windowId,
     frameId: ctx.frameId,
     runId: options?.runId,
     mcpSessionId: ctx.mcpSessionId,
     lane: ctx.lane,
+    leaseToken: ctx.leaseToken,
+    ownedTabIds: ctx.ownedTabIds,
+    entryTabId: ctx.entryTabId,
+    signal: ctx.signal,
     log: (message: string, level?: 'info' | 'warn' | 'error') => {
       ctx.logger({
         stepId: logStepId,
@@ -485,11 +493,18 @@ export function createStepExecutor(registry: ActionRegistry) {
 
     // Re-pin the run when openTab/switchTab moved it to another tab.
     // setRunTab is the only sanctioned way the run tab changes mid-flow;
-    // nothing infers the tab from whatever became active.
+    // nothing infers the tab from whatever became active. It also clears the
+    // frame cursor, which only meant something in the previous document.
     if (result.status === 'success') {
       const nextTabId = result.newTabId;
       if (typeof nextTabId === 'number') {
-        setRunTab(ctx, nextTabId);
+        let windowId: number | undefined;
+        try {
+          windowId = (await chrome.tabs.get(nextTabId))?.windowId;
+        } catch {
+          // 창 정보는 진단용이라 못 읽어도 재고정은 한다.
+        }
+        setRunTab(ctx, nextTabId, windowId);
       }
     }
 

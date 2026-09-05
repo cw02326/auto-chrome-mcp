@@ -512,7 +512,9 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
   // ===========================================================================
 
   describe('screenshot action', () => {
-    it('stores base64 data in ctx.vars when saveAs is specified', async () => {
+    it('stores an artifact reference in ctx.vars when saveAs is specified', async () => {
+      // 2026-09-05 Codex 검토 항목 7: 변수에 base64 를 넣으면 run 결과의 outputs 로 그대로
+      // 흘러나가 응답이 수 MB 가 된다. 이제는 파일로 저장하고 참조만 남긴다.
       const executor = createExecutor();
       const ctx = createMockExecCtx({ frameId: FRAME_ID });
 
@@ -526,11 +528,16 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
 
       expect(result.executor).toBe('actions');
-      expect(ctx.vars.capturedImage).toBe('dGVzdGRhdGE=');
+      expect(ctx.vars.capturedImage).toMatchObject({ kind: 'screenshot' });
+      expect(JSON.stringify(ctx.vars.capturedImage)).not.toContain('dGVzdGRhdGE=');
       expect(mocks.handleCallTool).toHaveBeenCalledWith(
         expect.objectContaining({
           name: TOOL_NAMES.BROWSER.SCREENSHOT,
-          args: expect.objectContaining({ tabId: TAB_ID, storeBase64: true }),
+          args: expect.objectContaining({
+            tabId: TAB_ID,
+            storeBase64: true,
+            saveToDownloads: true,
+          }),
         }),
       );
     });

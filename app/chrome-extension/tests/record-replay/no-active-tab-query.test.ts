@@ -20,6 +20,11 @@
  *      annotated with a `tab-scan-ok:` marker comment stating why enumerating
  *      every tab is legitimate there.
  *   3. A call to a helper literally named getActiveTab().
+ *   4. chrome.tabs.create(...) without a `tab-create-ok:` marker comment. Opening
+ *      a tab is how the engine gets a work surface of its own instead of
+ *      borrowing the user's; each site has to say so in writing, so a stray
+ *      "just open a tab here" cannot slip in unreviewed
+ *      (2026-09-05 Codex review, item 2).
  *
  * The single allowed exception is the entry-point module engine/tab-context.ts:
  *   that is where a user-initiated launch (side panel Run button, context menu,
@@ -43,10 +48,13 @@ const ACTIVE_TAB_MARKERS = ['active', 'currentWindow', 'lastFocusedWindow'];
 /** Comment marker that documents an intentional full-tab enumeration. */
 const SCAN_OK_MARKER = 'tab-scan-ok';
 
+/** Comment marker that documents an intentional chrome.tabs.create. */
+const CREATE_OK_MARKER = 'tab-create-ok';
+
 interface Violation {
   file: string;
   line: number;
-  kind: 'active-tab-query' | 'unmarked-tab-scan' | 'get-active-tab';
+  kind: 'active-tab-query' | 'unmarked-tab-scan' | 'get-active-tab' | 'unmarked-tab-create';
   snippet: string;
 }
 
@@ -83,9 +91,9 @@ function lineNumberAt(source: string, index: number): number {
   return line;
 }
 
-function hasScanOkMarker(lines: string[], lineNumber: number): boolean {
+function hasMarker(lines: string[], lineNumber: number, marker: string): boolean {
   const from = Math.max(0, lineNumber - 4);
-  return lines.slice(from, lineNumber).some((l) => l.includes(SCAN_OK_MARKER));
+  return lines.slice(from, lineNumber).some((l) => l.includes(marker));
 }
 
 function scanFile(absPath: string): Violation[] {
@@ -104,10 +112,34 @@ function scanFile(absPath: string): Violation[] {
     const line = lineNumberAt(source, m.index);
     const snippet = args.replace(/\s+/g, ' ').trim().slice(0, 120);
     if (ACTIVE_TAB_MARKERS.some((marker) => args.includes(marker))) {
-      violations.push({ file: rel, line, kind: 'active-tab-query', snippet });
-    } else if (!hasScanOkMarker(lines, line)) {
-      violations.push({ file: rel, line, kind: 'unmarked-tab-scan', snippet });
+      violations.push({
+        file: rel,
+        line,
+        kind: 'active-tab-query',
+        snippet: `chrome.tabs.query(${snippet})`,
+      });
+    } else if (!hasMarker(lines, line, SCAN_OK_MARKER)) {
+      violations.push({
+        file: rel,
+        line,
+        kind: 'unmarked-tab-scan',
+        snippet: `chrome.tabs.query(${snippet})`,
+      });
     }
+  }
+
+  // Opening a tab is allowed, but only where the file says why: the run needs a
+  // surface of its own instead of borrowing the user's (2026-09-05 review, item 2).
+  const createPattern = /chrome\s*\.\s*tabs\s*\.\s*create\s*\(/g;
+  while ((m = createPattern.exec(source)) !== null) {
+    const line = lineNumberAt(source, m.index);
+    if (hasMarker(lines, line, CREATE_OK_MARKER)) continue;
+    violations.push({
+      file: rel,
+      line,
+      kind: 'unmarked-tab-create',
+      snippet: 'chrome.tabs.create(',
+    });
   }
 
   const getActivePattern = /\bgetActiveTab\s*\(/g;
@@ -124,9 +156,7 @@ function scanFile(absPath: string): Violation[] {
 }
 
 function formatViolations(violations: Violation[]): string {
-  return violations
-    .map((v) => `  ${v.file}:${v.line} [${v.kind}] chrome.tabs.query(${v.snippet})`)
-    .join('\n');
+  return violations.map((v) => `  ${v.file}:${v.line} [${v.kind}] ${v.snippet}`).join('\n');
 }
 
 describe('record-replay engine never queries the user active tab', () => {
@@ -147,7 +177,8 @@ describe('record-replay engine never queries the user active tab', () => {
             violations,
           )}\n\nUse the run tab from RunTabContext (resolveRunTab(ctx)) instead. ` +
           `Only engine/tab-context.ts may resolve a tab from the user's window, ` +
-          `and only at a user-initiated entry point.`;
+          `and only at a user-initiated entry point. A deliberate chrome.tabs.create ` +
+          `needs a "${CREATE_OK_MARKER}:" comment saying why the run opens its own tab.`;
     expect(violations, message).toEqual([]);
   });
 

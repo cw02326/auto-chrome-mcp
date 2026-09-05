@@ -103,6 +103,21 @@ const P_REPEAT =
 const P_GROUP_STEPS = 'Steps of a repeat group (no repeat inside a repeat).';
 const P_PARAMS =
   'save: declare { user: { required: true }, pw: { secret: true } }. run: values for {{params.user}}.';
+const P_TASK =
+  'Short label for what this run is doing (max 24 chars). Shows on the MCP tab group while it runs, then goes back to "MCP".';
+const P_HISTORY_RUN_ID = 'action="history": return this one run in full, including its "results".';
+const P_HISTORY_LIMIT = 'action="history": how many runs to list (default 20, max 100).';
+const P_HISTORY_SINCE =
+  'action="history": only runs started at or after this time (ISO string or epoch ms).';
+const P_SCHEDULE =
+  'action="schedule": { every: "15m"|"1h"|"6h"|"24h" } or { daily: ["08:00"], days?: ["mon"] }.';
+const P_NOTIFY = 'action="schedule": show a Chrome notification when a run fails (default true).';
+const P_REPORT =
+  'action="schedule": also write the run record to Downloads/mcp-screenshots (default false).';
+const P_LOGIN_CHECK =
+  'action="schedule": "as" name of the top level step whose stopIf means the login expired.';
+const P_HISTORY_STATUS =
+  'action="history": keep only these statuses: running, success, failed, stopped, timeout, interrupted, skipped_queue, login_required, user_took_over_tab.';
 
 const tabIdProp = { type: 'number' as const, description: P_TAB_ID };
 const windowIdProp = { type: 'number' as const, description: P_WINDOW_ID };
@@ -150,6 +165,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           items: { type: 'string' },
           description: P_RETURN,
         },
+        task: { type: 'string', description: P_TASK },
       },
       required: ['steps'],
     },
@@ -178,16 +194,19 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SHORTCUT,
     description:
-      'Save and run named macros (a chrome_batch step list stored under a name). action: save {name, steps, description} | run (through the normal pipeline) | list | delete. Use for flows you repeat across sessions (logins, routine collection).',
+      'Save, run and schedule named macros (a chrome_batch step list stored under a name). action: save {name, steps, description} | run (through the normal pipeline) | list | delete | history (past runs) | schedule (run it on a timer with no MCP session) | unschedule | schedules. Use for flows you repeat across sessions (logins, routine collection, overnight checks).',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['save', 'run', 'list', 'delete'],
+          enum: ['save', 'run', 'list', 'delete', 'history', 'schedule', 'unschedule', 'schedules'],
           description: 'What to do',
         },
-        name: { type: 'string', description: 'Shortcut name (save/run/delete)' },
+        name: {
+          type: 'string',
+          description: 'Shortcut name (save/run/delete/schedule/unschedule)',
+        },
         steps: {
           type: 'array',
           description:
@@ -217,6 +236,19 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: P_RETURN,
         },
         params: { type: 'object', description: P_PARAMS },
+        task: { type: 'string', description: P_TASK },
+        runId: { type: 'string', description: P_HISTORY_RUN_ID },
+        limit: { type: 'number', description: P_HISTORY_LIMIT },
+        since: { type: 'string', description: P_HISTORY_SINCE },
+        status: {
+          type: 'array',
+          items: { type: 'string' },
+          description: P_HISTORY_STATUS,
+        },
+        schedule: { type: 'object', description: P_SCHEDULE },
+        notify: { type: 'boolean', description: P_NOTIFY },
+        report: { type: 'boolean', description: P_REPORT },
+        loginCheck: { type: 'string', description: P_LOGIN_CHECK },
       },
       required: ['action'],
     },
@@ -679,6 +711,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description: 'Refresh the active tab instead of navigating (url ignored). Default false.',
         },
+        task: { type: 'string', description: P_TASK },
       },
       required: [],
     },

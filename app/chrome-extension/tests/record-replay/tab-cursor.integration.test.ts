@@ -191,30 +191,13 @@ describe('tab cursor integration (M3-full batch 2)', () => {
 
     it('switchTab updates ctx.tabId for subsequent steps', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab', 'click']) });
-      const ctx = createMockExecCtx({ tabId: TAB_ID });
-
-      // Setup tabs.query to return multiple tabs
-      mocks.tabsQuery.mockResolvedValueOnce([
-        {
-          id: TAB_ID,
-          url: 'https://example.com/',
-          title: 'Example',
-          windowId: 1,
-          status: 'complete',
-        },
-        {
-          id: TARGET_TAB_ID,
-          url: 'https://docs.example.com/',
-          title: 'Docs',
-          windowId: TARGET_WINDOW_ID,
-          status: 'complete',
-        },
-      ]);
+      // 2026-09-05 검토 항목 5: 대상은 run 이 연 탭(= 소유 탭)이어야 한다.
+      const ctx = createMockExecCtx({ tabId: TAB_ID, ownedTabIds: new Set([TARGET_TAB_ID]) });
 
       const switchStep: TestStep = {
         id: 'switchTab_updates_ctx_tabId',
         type: 'switchTab',
-        urlContains: 'docs.example.com',
+        tabId: TARGET_TAB_ID,
       };
 
       await executor.execute(ctx, switchStep as never, { tabId: ctx.tabId ?? TAB_ID });
@@ -291,96 +274,45 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       );
     });
 
-    it('switchTab finds tab by urlContains', async () => {
+    it('switchTab 은 url·title 로 브라우저 전체를 뒤지지 않는다', async () => {
+      // 2026-09-05 Codex 검토 항목 5: url/title 검색은 사용자의 탭을 골라 조작하게 만든다.
+      // 이제는 run 이 연 탭의 id 로만 옮겨간다.
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
       const ctx = createMockExecCtx();
 
-      // Setup tabs.query to return multiple tabs
-      mocks.tabsQuery.mockResolvedValueOnce([
-        {
-          id: TAB_ID,
-          url: 'https://example.com/',
-          title: 'Example',
-          windowId: 1,
-          status: 'complete',
-        },
-        {
-          id: TARGET_TAB_ID,
-          url: 'https://docs.example.com/',
-          title: 'Docs',
-          windowId: TARGET_WINDOW_ID,
-          status: 'complete',
-        },
-      ]);
+      for (const step of [
+        { id: 'switchTab_urlContains_refused', type: 'switchTab', urlContains: 'docs.example.com' },
+        { id: 'switchTab_titleContains_refused', type: 'switchTab', titleContains: 'Settings' },
+      ] as TestStep[]) {
+        await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+          /tab_scope_violation/,
+        );
+      }
 
-      // Setup tabs.get to return the target tab
-      mocks.tabsGet.mockResolvedValueOnce({
-        id: TARGET_TAB_ID,
-        url: 'https://docs.example.com/',
-        windowId: TARGET_WINDOW_ID,
-        status: 'complete',
-      });
-
-      const step: TestStep = {
-        id: 'switchTab_urlContains_success',
-        type: 'switchTab',
-        urlContains: 'docs.example.com',
-      };
-
-      const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
-
-      expect(result.executor).toBe('actions');
-      // auto-chrome-mcp fork v1.9.0(설계 D): 백그라운드 작업 모드(기본 ON)에서는 탭을 앞으로
-      // 끌어내지 않는다 — 작업 탭 포인터만 바뀐다.
+      // 전역 탭 조회 자체가 일어나지 않는다.
+      expect(mocks.tabsQuery).not.toHaveBeenCalled();
       expect(mocks.tabsUpdate).not.toHaveBeenCalled();
       expect(mocks.windowsUpdate).not.toHaveBeenCalled();
     });
 
-    it('switchTab finds tab by titleContains', async () => {
+    it('switchTab 은 run 소유가 아닌 탭 id 를 거절한다', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
-      const ctx = createMockExecCtx();
-
-      // Setup tabs.query to return multiple tabs
-      mocks.tabsQuery.mockResolvedValueOnce([
-        {
-          id: TAB_ID,
-          url: 'https://example.com/',
-          title: 'Home Page',
-          windowId: 1,
-          status: 'complete',
-        },
-        {
-          id: TARGET_TAB_ID,
-          url: 'https://example.com/settings',
-          title: 'Settings - My Account',
-          windowId: TARGET_WINDOW_ID,
-          status: 'complete',
-        },
-      ]);
-
-      mocks.tabsGet.mockResolvedValueOnce({
-        id: TARGET_TAB_ID,
-        url: 'https://example.com/settings',
-        windowId: TARGET_WINDOW_ID,
-        status: 'complete',
-      });
+      const ctx = createMockExecCtx({ tabId: TAB_ID });
 
       const step: TestStep = {
-        id: 'switchTab_titleContains_success',
+        id: 'switchTab_foreign_tab_refused',
         type: 'switchTab',
-        titleContains: 'Settings',
+        tabId: TARGET_TAB_ID,
       };
 
-      const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
-
-      expect(result.executor).toBe('actions');
-      // v1.9.0: 백그라운드 작업 모드 기본 ON — 활성화하지 않는다.
-      expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+      await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+        /tab_scope_violation/,
+      );
     });
 
     it('switchTab by explicit tabId', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
-      const ctx = createMockExecCtx();
+      const ctx = createMockExecCtx({ ownedTabIds: new Set([TARGET_TAB_ID]) });
 
       mocks.tabsGet.mockResolvedValueOnce({
         id: TARGET_TAB_ID,
@@ -404,10 +336,11 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       expect(mocks.windowsUpdate).not.toHaveBeenCalled();
     });
 
-    // auto-chrome-mcp fork v1.9.0(설계 D): 플로우 단계가 foreground:true 를 명시하면 예외.
-    it('switchTab with foreground:true still activates the tab', async () => {
+    // 2026-09-05 검토 항목 5: 재생은 탭을 앞으로 끌어내지 않는다. foreground:true 도 마찬가지다
+    // (예전에는 이 값으로 활성화 게이트를 우회할 수 있었다).
+    it('switchTab with foreground:true no longer activates the tab', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
-      const ctx = createMockExecCtx();
+      const ctx = createMockExecCtx({ ownedTabIds: new Set([TARGET_TAB_ID]) });
 
       mocks.tabsGet.mockResolvedValue({
         id: TARGET_TAB_ID,
@@ -426,23 +359,13 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
 
       expect(result.executor).toBe('actions');
-      expect(mocks.tabsUpdate).toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
+      expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+      expect(mocks.windowsUpdate).not.toHaveBeenCalled();
     });
 
-    it('switchTab fails when no matching tab found', async () => {
+    it('switchTab 은 사정권 밖 요청에 사정권을 알려 준다', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
-      const ctx = createMockExecCtx();
-
-      // Setup tabs.query to return only tabs that don't match
-      mocks.tabsQuery.mockResolvedValueOnce([
-        {
-          id: TAB_ID,
-          url: 'https://example.com/',
-          title: 'Example',
-          windowId: 1,
-          status: 'complete',
-        },
-      ]);
+      const ctx = createMockExecCtx({ tabId: TAB_ID });
 
       const step: TestStep = {
         id: 'switchTab_not_found',
@@ -451,7 +374,7 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       };
 
       await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
-        /TAB_NOT_FOUND|no matching tab/i,
+        /tabs it opened itself/,
       );
     });
   });

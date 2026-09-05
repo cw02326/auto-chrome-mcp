@@ -12,6 +12,7 @@ import { createTab as createTabGuarded } from '@/utils/activation-guard';
 import { EDGE_LABELS } from 'auto-chrome-mcp-shared';
 import {
   RunTabError,
+  markRunOwnedTab,
   resolveRunTab,
   runToolArgs,
   setRunTab,
@@ -73,9 +74,14 @@ function isWebUrl(u?: string | null): boolean {
  * Wait until the given tab stops loading. Returns early if the tab is gone or
  * was never loading, so this can never block on a mocked or closed tab.
  */
-async function waitForTabSettled(tabId: number, timeoutMs: number): Promise<void> {
+async function waitForTabSettled(
+  tabId: number,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   const deadline = Date.now() + Math.max(0, timeoutMs);
   for (;;) {
+    if (signal?.aborted) return;
     let tab: chrome.tabs.Tab | undefined;
     try {
       tab = await chrome.tabs.get(tabId);
@@ -114,17 +120,19 @@ export async function prepareRunTab(
     const urlToOpen =
       options.startUrl ||
       (isWebUrl(current?.url) ? (current as chrome.tabs.Tab).url! : 'about:blank');
-    // v1.9.0: activation-guard decides whether the new tab may take focus.
+    // 재생용 탭은 run 창에 백그라운드로 연다 — 사용자의 화면을 빼앗지 않는다.
     const created = await createTabGuarded(
-      { url: urlToOpen, active: true },
+      { url: urlToOpen, active: false, windowId: current?.windowId },
       { reason: 'flow:prepare-new-tab' },
     );
     if (typeof created?.id !== 'number') {
       throw new RunTabError('run_tab_missing', 'Could not open a work tab for this run.');
     }
+    // 이 탭은 run 이 만든 것이다. 그래야 이후 스텝이 닫을 수 있고, abort 정리가 치운다.
+    markRunOwnedTab(tab, created.id);
     setRunTab(tab, created.id, created.windowId);
     tabId = created.id;
-    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
     try {
       current = await chrome.tabs.get(tabId);
     } catch {
@@ -135,10 +143,10 @@ export async function prepareRunTab(
 
   if (options.startUrl) {
     await chrome.tabs.update(tabId, { url: options.startUrl });
-    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
   } else if (options.refresh && isWebUrl(current?.url)) {
     await chrome.tabs.reload?.(tabId);
-    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS);
+    await waitForTabSettled(tabId, PREPARE_TAB_TIMEOUT_MS, tab.signal);
   }
 
   try {
@@ -164,6 +172,8 @@ export async function waitForNetworkIdle(
   const deadline = Date.now() + Math.max(500, totalTimeoutMs);
   const threshold = Math.max(200, idleThresholdMs);
   while (Date.now() < deadline) {
+    // 취소되면 더 기다리지 않는다 (검토 항목 4).
+    if (tab.signal?.aborted) return;
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
       args: runToolArgs(tab, {
@@ -213,6 +223,8 @@ export async function waitForNavigation(
   const tabId = await resolveRunTab(tab);
   const timeout = Math.max(1000, Math.min(timeoutMs || 15000, 30000));
   const startedAt = Date.now();
+  // 이미 취소됐으면 기다리지 않는다 (검토 항목 4).
+  if (tab.signal?.aborted) return;
 
   await new Promise<void>((resolve, reject) => {
     let done = false;
@@ -232,12 +244,17 @@ export async function waitForNavigation(
       try {
         chrome.tabs.onUpdated.removeListener(onTabUpdated);
       } catch {}
+      try {
+        tab.signal?.removeEventListener('abort', onAbort);
+      } catch {}
       if (timer) {
         try {
           clearTimeout(timer);
         } catch {}
       }
     };
+    // 취소되면 대기를 끝낸다 — 아무도 기다리지 않는 페이지 로딩을 붙잡고 있지 않는다.
+    const onAbort = () => finish();
     const finish = () => {
       if (done) return;
       done = true;
@@ -293,6 +310,9 @@ export async function waitForNavigation(
       (chrome.webNavigation as any).onHistoryStateUpdated?.addListener?.(onHistoryStateUpdated);
     } catch {}
     chrome.tabs.onUpdated.addListener(onTabUpdated);
+    try {
+      tab.signal?.addEventListener('abort', onAbort, { once: true });
+    } catch {}
     timer = setTimeout(onTimeout, timeout);
   });
 }

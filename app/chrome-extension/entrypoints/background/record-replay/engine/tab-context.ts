@@ -17,6 +17,8 @@
  * `tests/record-replay/no-active-tab-query.test.ts` enforces that.
  */
 
+import { LEASE_TOKEN_ARG } from '@/utils/tab-lock';
+
 /** Where the pinned tab came from. Recorded for diagnostics only. */
 export type RunTabSource = 'mcp' | 'sidepanel' | 'explicit';
 
@@ -45,10 +47,80 @@ export interface RunTabContext {
   mcpSessionId?: string;
   /** Parallel-agent lane of the caller, for the same reason as mcpSessionId. */
   lane?: string;
+  /**
+   * Owner token of the tab lease this run holds (utils/tab-lock.ts).
+   *
+   * Rides along on every tool call the engine makes (`_leaseToken`) so the tool
+   * pipeline can tell "this is the run that already owns the tab" from "another
+   * session wants the same tab" and let the former through without waiting.
+   */
+  leaseToken?: string;
+  /**
+   * Tabs this run created. Only these (plus the pinned tab itself) may be
+   * closed or switched to; everything else is somebody's browsing session.
+   *
+   * A Set so the mutable context shared by logger/scheduler/steps sees every
+   * registration, whichever layer made the tab.
+   */
+  ownedTabIds?: Set<number>;
+  /**
+   * Tab the run started on.
+   *
+   * Stays in scope after openTab/switchTab move the run elsewhere, so a flow can
+   * come back to it. It is not in `ownedTabIds` because the run did not create
+   * it: abort cleanup must not close the caller's work tab.
+   */
+  entryTabId?: number;
+  /**
+   * Cancellation signal for the run.
+   *
+   * Lives here because every node, policy and wait loop already receives this
+   * context, so the abort reaches the places that would otherwise keep looping
+   * after the caller gave up (2026-09-05 Codex review, item 4).
+   */
+  signal?: AbortSignal;
 }
 
-/** Structured error codes surfaced to callers and run logs. */
-export type RunTabErrorCode = 'run_tab_missing' | 'run_tab_required';
+/**
+ * Tabs the run may close or switch to: what it created, the tab it is on now,
+ * and the tab it started on.
+ */
+export function runOwnedTabIds(ctx: RunTabContext): Set<number> {
+  const owned = new Set<number>(ctx.ownedTabIds ?? []);
+  if (isUsableTabId(ctx.tabId)) owned.add(ctx.tabId);
+  if (isUsableTabId(ctx.entryTabId)) owned.add(ctx.entryTabId);
+  return owned;
+}
+
+/** Remember that this run created the tab, so it is allowed to drive and close it. */
+export function markRunOwnedTab(ctx: RunTabContext, tabId: number): void {
+  if (!isUsableTabId(tabId)) return;
+  if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
+  ctx.ownedTabIds.add(tabId);
+}
+
+/** Is this tab inside the run's scope? */
+export function isRunOwnedTab(ctx: RunTabContext, tabId: number): boolean {
+  return runOwnedTabIds(ctx).has(tabId);
+}
+
+/** True once the caller asked for the run to stop. */
+export function isRunAborted(ctx: Pick<RunTabContext, 'signal'> | null | undefined): boolean {
+  return ctx?.signal?.aborted === true;
+}
+
+/**
+ * Structured error codes surfaced to callers and run logs.
+ *
+ * `close_scope_violation` / `tab_scope_violation` mark a step that tried to
+ * reach a tab outside the run: closing or switching to a tab the run neither
+ * received nor created (2026-09-05 Codex review, items 1 and 5).
+ */
+export type RunTabErrorCode =
+  | 'run_tab_missing'
+  | 'run_tab_required'
+  | 'close_scope_violation'
+  | 'tab_scope_violation';
 
 /**
  * Error thrown when the run tab cannot be used.
@@ -121,6 +193,9 @@ export function setRunTab(ctx: RunTabContext, tabId: number, windowId?: number):
   if (!isUsableTabId(tabId)) return;
   ctx.tabId = tabId;
   if (isUsableTabId(windowId)) ctx.windowId = windowId;
+  // A frame index only means something inside one document. Carrying it over to
+  // another tab would aim the next step at a frame that does not exist there.
+  (ctx as { frameId?: number }).frameId = undefined;
 }
 
 /** Snapshot of the run tab, used by policies and loggers that need the URL. */
@@ -179,10 +254,25 @@ export async function queryEntryPointTab(
   return { tabId: tab.id, windowId: tab.windowId, source };
 }
 
-/** Session/lane identity of the caller that started a run. */
+/**
+ * Identity and lifetime a derived run context must keep: which session/lane the
+ * work is attributed to, which tab lease it re-enters, which tabs it owns and
+ * the signal that stops it.
+ */
 export interface RunSessionContext {
   mcpSessionId?: string;
   lane?: string;
+  leaseToken?: string;
+  ownedTabIds?: Set<number>;
+  /**
+   * Tab the run started on.
+   *
+   * Stays in scope after openTab/switchTab move the run elsewhere, so a flow can
+   * come back to it. It is not in `ownedTabIds` because the run did not create
+   * it: abort cleanup must not close the caller's work tab.
+   */
+  entryTabId?: number;
+  signal?: AbortSignal;
 }
 
 /** Build a pinned context from a tab id the caller already knows. */
@@ -201,6 +291,12 @@ export function runTabFromId(
     source,
     mcpSessionId: typeof session?.mcpSessionId === 'string' ? session.mcpSessionId : undefined,
     lane: typeof session?.lane === 'string' ? session.lane : undefined,
+    leaseToken: typeof session?.leaseToken === 'string' ? session.leaseToken : undefined,
+    // The owned-tab set is shared by reference on purpose: a tab opened through
+    // a derived context still belongs to the run that opened it.
+    ownedTabIds: session?.ownedTabIds,
+    entryTabId: session?.entryTabId,
+    signal: session?.signal,
   };
 }
 
@@ -227,5 +323,11 @@ export function runToolArgs<T extends Record<string, any>>(
     out._mcpSessionId = ctx.mcpSessionId;
   }
   if (typeof ctx.lane === 'string' && out.lane === undefined) out.lane = ctx.lane;
+  // Lease token: says "the run that already owns this tab is calling", so the
+  // tool pipeline can let the call re-enter instead of queueing it behind the
+  // lease the same run is holding.
+  if (typeof ctx.leaseToken === 'string' && out[LEASE_TOKEN_ARG] === undefined) {
+    out[LEASE_TOKEN_ARG] = ctx.leaseToken;
+  }
   return out as T & { tabId: number };
 }

@@ -13,6 +13,7 @@ import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler, ElementTarget } from '../types';
 import {
+  actionToolArgs,
   ensureElementVisible,
   logSelectorFallback,
   resolveString,
@@ -95,7 +96,7 @@ export const keyHandler: ActionHandler<'key'> = {
     // Handle optional target focusing
     const target = action.params.target as ElementTarget | undefined;
     if (target) {
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+      await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
       const {
         selectorTarget,
@@ -171,13 +172,13 @@ export const keyHandler: ActionHandler<'key'> = {
     // Execute keyboard input
     const keyboardResult = await handleCallTool({
       name: TOOL_NAMES.BROWSER.KEYBOARD,
-      args: {
+      args: actionToolArgs(ctx, {
         keys,
         selector: selectorForTool,
         selectorType: selectorForTool ? 'css' : undefined,
         tabId,
         frameId,
-      },
+      }),
     });
 
     if ((keyboardResult as { isError?: boolean })?.isError) {

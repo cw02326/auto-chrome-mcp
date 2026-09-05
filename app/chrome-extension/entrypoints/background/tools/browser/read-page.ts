@@ -391,24 +391,25 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         return out.join('\n');
       };
 
-      // Unified base payload structure - consistent keys for stable contract
+      // auto-chrome-mcp fork(2026-09): base payload — 항상 의미 있는 키만 담는다.
+      // 예전에는 elements:[]/count:0/fallbackUsed:false/fallbackSource:null/reason:null 을
+      // 매 호출 무조건 실었는데, 이건 실제로 interactive-elements 폴백을 탔을 때만 값이 있고
+      // 나머지(대부분)는 그냥 no-op 자리표시자였다. 이제 그 5개는 폴백 분기에서만 채워 넣는다
+      // (아래 `basePayload.fallbackUsed = true; …` 참고) — 안 채워지면 JSON 에서 아예 빠진다.
+      // stats 도 같은 이유로: resp.stats 가 실제로 없을 때(트리 실패 등)의 0-필드 기본값은 빼고,
+      // 진짜 값이 있을 때만 싣는다.
       const basePayload: Record<string, any> = {
         success: true,
         filter: filter || 'all',
         pageContent: mergedPageContent,
         viewport: treeOk ? resp.viewport : { width: null, height: null, dpr: null },
-        stats: stats || { processed: 0, included: 0, durationMs: 0 },
         refMapCount: refCount,
         sparse: treeOk ? effectiveSparse : false,
         depth: requestedDepth ?? null,
         focus: focusRefId ? { refId: focusRefId, found: treeOk } : null,
         markedElements,
-        elements: [],
-        count: 0,
-        fallbackUsed: false,
-        fallbackSource: null,
-        reason: null,
       };
+      if (stats) basePayload.stats = stats;
 
       // auto-chrome-mcp fork: allFrames 를 켠 경우에만 프레임 메타데이터/안내를 덧붙인다.
       // (기본 경로의 응답 형식은 그대로 유지)

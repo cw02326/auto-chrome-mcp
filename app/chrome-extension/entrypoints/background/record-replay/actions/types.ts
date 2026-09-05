@@ -771,8 +771,28 @@ export interface ExecutionFlags {
 export interface ActionExecutionContext {
   vars: VariableStore;
   tabId: number;
+  /** Window the run's tab lives in. New tabs are opened here, in the background. */
+  windowId?: number;
   frameId?: number;
   runId?: string;
+  /**
+   * Tabs this run opened (shared by reference with the run context).
+   *
+   * switchTab/closeTab may only address these plus the pinned tab; everything
+   * else belongs to the user's browsing session (2026-09-05 Codex review,
+   * items 1 and 5).
+   */
+  ownedTabIds?: Set<number>;
+  /** Tab the run started on; stays addressable after the run moves tabs. */
+  entryTabId?: number;
+  /**
+   * Owner token of the run's tab lease. Passed to `handleCallTool` as
+   * `_leaseToken` so the pipeline can tell the lease owner's own calls from
+   * another session competing for the same tab.
+   */
+  leaseToken?: string;
+  /** Cancellation signal of the run; long waits must check it. */
+  signal?: AbortSignal;
   /**
    * MCP session/lane of the caller that started the run.
    *

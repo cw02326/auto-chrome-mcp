@@ -13,6 +13,7 @@ import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
 import {
+  actionToolArgs,
   ensureElementVisible,
   logSelectorFallback,
   resolveString,
@@ -55,7 +56,7 @@ export const fillHandler: ActionHandler<'fill'> = {
 
     // Ensure page is read before locating element
     // auto-chrome-mcp fork: click.ts 와 같은 이유로 재생 중인 탭을 명시한다.
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
     // Resolve fill value
     const valueResolved = resolveString(action.params.value, vars);
@@ -105,7 +106,11 @@ export const fillHandler: ActionHandler<'fill'> = {
       if (inputType === 'file') {
         const uploadResult = await handleCallTool({
           name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-          args: { selector: selectorForTypeCheck, filePath: value, tabId },
+          args: actionToolArgs(ctx, {
+            selector: selectorForTypeCheck,
+            filePath: value,
+            tabId,
+          }),
         });
 
         if ((uploadResult as { isError?: boolean })?.isError) {
@@ -134,11 +139,11 @@ export const fillHandler: ActionHandler<'fill'> = {
       try {
         await handleCallTool({
           name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-          args: {
+          args: actionToolArgs(ctx, {
             type: 'MAIN',
             jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});}}catch(e){}`,
             tabId,
-          },
+          }),
         });
       } catch {
         // Ignore scroll errors
@@ -151,24 +156,24 @@ export const fillHandler: ActionHandler<'fill'> = {
     } else if (cssSelector) {
       await handleCallTool({
         name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-        args: {
+        args: actionToolArgs(ctx, {
           type: 'MAIN',
           jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el&&el.focus){el.focus();}}catch(e){}`,
           tabId,
-        },
+        }),
       });
     }
 
     // Execute fill
     const fillResult = await handleCallTool({
       name: TOOL_NAMES.BROWSER.FILL,
-      args: {
+      args: actionToolArgs(ctx, {
         ref: refToUse,
         selector: cssSelector,
         value,
         frameId,
         tabId,
-      },
+      }),
     });
 
     if ((fillResult as { isError?: boolean })?.isError) {

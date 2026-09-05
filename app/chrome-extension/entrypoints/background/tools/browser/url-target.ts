@@ -17,7 +17,7 @@
  *     작업 탭이 없으면 예전대로 크롬 기본값에 맡긴다(current 모드 규칙).
  */
 import { createTab as createTabGuarded } from '@/utils/activation-guard';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { isBackgroundModeEnabledFor } from '@/utils/background-mode';
 import { URL_SELECTS_TARGET_TOOLS } from '@/utils/work-tab-gate';
 import {
   addOwnedTab,
@@ -144,7 +144,7 @@ export async function findTabByUrlInSessionScope(
   const target = normalizeUrlForMatch(url);
   if (target === null) return null;
 
-  const scoped = await isBackgroundModeEnabled();
+  const scoped = await isBackgroundModeEnabledFor(args);
   const candidates: chrome.tabs.Tab[] = [];
 
   if (scoped) {
@@ -177,7 +177,7 @@ async function resolveTargetWindowId(
   args: any,
 ): Promise<number | undefined> {
   if (typeof explicitWindowId === 'number' && explicitWindowId > 0) return explicitWindowId;
-  if (!(await isBackgroundModeEnabled())) return undefined;
+  if (!(await isBackgroundModeEnabledFor(args))) return undefined;
   try {
     const workTabId = await getWorkTabId(sessionKeyOf(args));
     if (workTabId === null) return undefined;

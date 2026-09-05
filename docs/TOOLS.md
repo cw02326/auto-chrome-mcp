@@ -144,6 +144,10 @@ Navigate to a URL with optional viewport control.
   reading or clicking an empty page right after navigating. Use `networkidle` for data-heavy
   SPAs, `none` to return immediately.
 - `waitTimeoutMs` (number, optional, default `15000`, max `60000`): cap for `waitUntil`
+- `task` (string, optional, max 24 chars): label for the MCP tab group in the target tab's
+  window, so a background tab says what it is doing. It stays until the next `task` or the
+  end of the surrounding `chrome_batch` / `chrome_shortcut` run, and never activates a tab
+  or focuses a window
 
 The observed load state comes back in the result as a `load` object
 (`{ waitUntil, reached, timedOut, waitedMs, readyState, networkInFlight }`). A timeout is
@@ -938,6 +942,8 @@ already persisted script, and `export` pulls every stored script body into the f
 
 - `steps` (array, required, max 20): `{ tool: string, args?: object }` in order
 - `continueOnError` (boolean, optional, default `false`): run the rest even after a failure
+- `task` (string, optional, max 24 chars): label shown on the MCP tab group while this run is in
+  flight, so a background run says what it is doing; the group goes back to `MCP` when it ends
 
 **Value passing and flow control** (all optional, and all of them switch substitution on):
 
@@ -1040,13 +1046,26 @@ workflows (login flows, routine collection) survive across sessions.
 
 **Parameters**:
 
-- `action` (string, required): `save` | `run` | `list` | `delete`
-- `name` (string, optional): shortcut name (`save` / `run` / `delete`)
+- `action` (string, required): `save` | `run` | `list` | `delete` | `history` | `schedule` |
+  `unschedule` | `schedules`
+- `name` (string, optional): shortcut name (`save` / `run` / `delete` / `schedule` /
+  `unschedule`; filters `history`)
 - `steps` (array, optional, max 20): for `save` — steps in `chrome_batch` format
 - `description` (string, optional): for `save` — what this shortcut does
 - `continueOnError` (boolean, optional, default `false`): for `run`
 - `params` (object, optional): for `save`, the declaration; for `run`, the values
 - `templates` (boolean, optional) / `return` (array, optional): same meaning as in `chrome_batch`
+- `task` (string, optional): same meaning as in `chrome_batch`; for `run`, defaults to the
+  shortcut name
+- `return` (array, optional): for `save`, the names a scheduled run records; for `run`, the names
+  this call returns (a `run` value wins over the saved one)
+- `history` reads past runs: `runId` returns that one run in full (with its `results`), otherwise
+  you get summaries only, filtered by `name`, `since` (ISO or epoch ms) and `status`, `limit`
+  runs at a time (default 20, max 100)
+- `schedule` (object, optional): for `action: "schedule"`, either
+  `{ every: "15m"|"1h"|"6h"|"24h" }` or `{ daily: ["08:00"], days?: ["mon", ...] }`
+- `notify` (boolean, optional, default `true`) / `report` (boolean, optional, default `false`) /
+  `loginCheck` (string, optional): schedule options, described below
 
 Saved steps take every `chrome_batch` flow key (`as`, `when`, `stopIf`, `repeat`), including a
 `{ repeat: {...}, steps: [...] }` group as a top level item. A record that
@@ -1106,6 +1125,174 @@ written to storage, and is replaced with `***` everywhere in the response.
 ```json
 { "action": "run", "name": "site-login", "params": { "user": "me@example.com", "pw": "..." } }
 ```
+
+#### Scheduling a shortcut
+
+`action: "schedule"` makes the extension run a saved shortcut on its own, with no MCP session
+open. Chrome is the only thing that is always running, so the timer lives there: one
+single-shot `chrome.alarms` entry per schedule, re-armed after every run.
+
+- Pick exactly one of `every` (`15m`, `1h`, `6h`, `24h`) or `daily` (up to 4 local `HH:mm` times,
+  at least 5 minutes apart within the same day). `days` (`mon`..`sun`) narrows `daily` to certain
+  weekdays. There is no cron syntax on purpose: it is unreadable, and a parser is an error
+  surface that buys nothing for daily work.
+- One schedule per shortcut, at most 20 in total (`too_many_schedules`). Scheduling the same name
+  again replaces it (`replaced: true`) and leaves exactly one alarm. `unschedule` removes the
+  record and the alarm; deleting the shortcut removes both as well.
+- Everything is validated when you schedule, not when it runs. A failure at 3am is a failure
+  nobody sees. That includes `params` (`unknown_param`, `missing_param`), stored tab targets
+  (`stale_target_forbidden`, applied even to records saved before this feature), and the first
+  step.
+- **The first step must be a plain `chrome_navigate` with a `url`**, not a repeat group, not
+  conditional, not `refresh` (`schedule_first_step_invalid`). A scheduled run starts with no work
+  tab, and navigate is the only way to open one. Every later step targets that tab.
+- **Secrets cannot be scheduled.** A shortcut with a `required` secret is rejected outright
+  (`secret_required_unschedulable`), and passing a secret value in the schedule is
+  `secret_param_in_schedule`. Storing a password in extension storage is storing it in plain
+  text, so there is no option to do it. For sites that need a login, rely on the Chrome profile
+  cookies: sign in once by hand, and the scheduled run shares that session.
+- `loginCheck` is the `as` name of a top level step. When that step ends the run through its
+  `stopIf`, the status is `login_required` instead of `stopped`, and you get a notification.
+  Other `stopIf` stops are normal early exits and stay quiet.
+- Runs are serial, always background, and always in their own session bucket
+  (`scheduled::<name>`). They never activate a tab or focus a window. When the run ends its tabs
+  are closed, and if you open one of them mid-run the run stops with `user_took_over_tab` and
+  leaves the tab alone.
+- Limits: 100 tool calls and 100 seconds per run (same as `chrome_batch`), 120 seconds end to
+  end, and a run that waited more than 10 minutes in the queue is recorded as `skipped_queue`
+  instead of running late. Missed runs are caught up **once**, not once per missed slot.
+- Failures write one screenshot and, with `report: true`, a JSON copy of the run record to
+  `Downloads/mcp-screenshots/YYYY-MM-DD/report_<name>_<HHmmss>.json` (up to 256KiB of results,
+  versus 24,000 characters in `history`). Notifications only fire on the 1st and 3rd consecutive
+  failure, and carry nothing but the name, an error code and a step number.
+
+**Example (a)**, collect dashboard numbers every weekday at 08:00. Save first, then schedule.
+
+```json
+{
+  "action": "save",
+  "name": "daily-dashboard",
+  "return": ["kpi"],
+  "params": { "site": { "default": "https://dash.example.com/overview" } },
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "{{params.site}}" } },
+    { "tool": "chrome_wait_for", "args": { "selector": ".kpi-card", "timeout": 10000 } },
+    {
+      "tool": "chrome_extract",
+      "as": "kpi",
+      "args": {
+        "fields": {
+          "visitors": ".kpi-card.visitors .value",
+          "orders": ".kpi-card.orders .value",
+          "revenue": ".kpi-card.revenue .value"
+        }
+      }
+    }
+  ]
+}
+```
+
+```json
+{
+  "action": "schedule",
+  "name": "daily-dashboard",
+  "schedule": { "daily": ["08:00"], "days": ["mon", "tue", "wed", "thu", "fri"] },
+  "report": true
+}
+```
+
+In the morning, `{ "action": "history", "name": "daily-dashboard", "limit": 1 }` gives the
+summary, and opening it by `runId` gives `results.kpi.values`.
+
+**Example (b)**, check a board for new posts every hour. No new post means the `stopIf` ends the
+run as `stopped`, which is silent.
+
+```json
+{
+  "action": "save",
+  "name": "board-watch",
+  "return": ["latest"],
+  "params": { "lastSeen": { "required": true, "description": "마지막으로 본 글 번호" } },
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "https://board.example.com/list" } },
+    {
+      "tool": "chrome_extract",
+      "as": "latest",
+      "args": {
+        "fields": {
+          "id": { "selector": ".row:first-child .id" },
+          "title": { "selector": ".row:first-child .title" }
+        }
+      },
+      "stopIf": { "path": "latest.values.id", "op": "eq", "value": "{{params.lastSeen}}" }
+    },
+    { "tool": "chrome_screenshot" }
+  ]
+}
+```
+
+```json
+{
+  "action": "schedule",
+  "name": "board-watch",
+  "schedule": { "every": "1h" },
+  "params": { "lastSeen": "10422" }
+}
+```
+
+**Example (c)**, notice that a login expired instead of silently collecting an empty page.
+
+```json
+{
+  "action": "save",
+  "name": "crm-export",
+  "return": ["rows"],
+  "steps": [
+    { "tool": "chrome_navigate", "args": { "url": "https://crm.example.com/reports/today" } },
+    {
+      "tool": "chrome_find",
+      "as": "loginForm",
+      "args": { "query": "비밀번호 입력창", "maxResults": 1 },
+      "stopIf": { "path": "loginForm.matches", "op": "notEmpty" }
+    },
+    {
+      "tool": "chrome_extract",
+      "as": "rows",
+      "args": { "fields": { "names": { "selector": "table td.name", "all": true } } }
+    }
+  ]
+}
+```
+
+```json
+{
+  "action": "schedule",
+  "name": "crm-export",
+  "schedule": { "daily": ["07:30", "12:30"] },
+  "loginCheck": "loginForm"
+}
+```
+
+The password box showing up means the session expired: the run is recorded as `login_required`
+and a notification says `crm-export: login_required (step 1)`. Sign in again in Chrome and the
+next run is normal.
+
+**Example**, the morning routine:
+
+```json
+{ "action": "schedules" }
+```
+
+```json
+{ "action": "history", "since": "2026-09-04T22:00:00", "limit": 50 }
+```
+
+```json
+{ "action": "history", "runId": "daily-dashboard:2026-09-05T08:00:00.000Z" }
+```
+
+A step by step walkthrough in Korean is in
+[`docs/DAILY-AUTOMATION-ko.md`](./DAILY-AUTOMATION-ko.md).
 
 ### `record_replay_list_published`
 

@@ -102,7 +102,8 @@ describe('공용 실행기 호환 (1)', () => {
     recordInvoker(() => ok('done'));
 
     const body = summary(await shortcutTool.execute({ action: 'run', name: 'legacy' } as any));
-    expect(Object.keys(body)).toEqual(['success', 'name', 'steps']);
+    // 2026-09-05: 실행 이력이 붙으면서 방금 실행의 손잡이 runId 가 하나 늘었다.
+    expect(Object.keys(body)).toEqual(['success', 'name', 'runId', 'steps']);
     expect(body.steps[0]).toEqual({
       index: 0,
       tool: 'chrome_screenshot',

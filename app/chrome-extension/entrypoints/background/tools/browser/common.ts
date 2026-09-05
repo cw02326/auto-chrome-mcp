@@ -19,7 +19,8 @@ import {
   setWorkTab,
 } from '@/utils/work-tab-manager';
 import { isTabBusy, markTabBusy, unmarkTabBusy } from '@/utils/tab-lock';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { effectiveBackgroundModeOf, isBackgroundModeEnabledFor } from '@/utils/background-mode';
+import { beginMcpGroupTask, setMcpGroupTitle } from '@/utils/mcp-tab-group';
 import { noWorkTabErrorText } from '@/utils/work-tab-gate';
 import {
   applyWorkWindowPlacement,
@@ -155,6 +156,11 @@ interface NavigateToolParams {
   // 기본 'domcontentloaded' — 이동 직후 read_page/click 이 빈 페이지를 보는 문제를 없앤다.
   waitUntil?: NavigateWaitUntil;
   waitTimeoutMs?: number;
+  /**
+   * auto-chrome-mcp fork(2026-09-05): 지금 하는 작업을 한 문구로. 작업 탭이 속한 창의
+   * MCP 탭 그룹 제목이 이 문구가 되고, 다음 task 나 batch 종료 전까지 유지된다.
+   */
+  task?: string;
 }
 
 /**
@@ -221,8 +227,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
     url: string,
     mcpSessionId: string,
     patternQueryable: boolean,
+    contextArgs: unknown,
   ): Promise<chrome.tabs.Tab[]> {
-    const scoped = await isBackgroundModeEnabled();
+    // 실행 컨텍스트 모드가 전역 토글보다 우선이다 (2026-09-05 설계 2절).
+    const scoped = await isBackgroundModeEnabledFor(contextArgs);
 
     if (patternQueryable) {
       const urlPatterns = buildUrlPatterns(url);
@@ -317,6 +325,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
     tabId: number | undefined,
     windowId: number | undefined,
     sessionKey: string,
+    contextArgs: unknown,
   ): Promise<chrome.tabs.Tab | null> {
     const explicit = await this.tryGetTab(tabId);
     if (explicit) return explicit;
@@ -328,7 +337,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
     }
 
     // 모드가 켜져 있으면 사용자 탭으로 흘려보내지 않는다 (fail-closed).
-    if (await isBackgroundModeEnabled()) return null;
+    if (await isBackgroundModeEnabledFor(contextArgs)) return null;
     return await this.getActiveTabOrThrowInWindow(windowId);
   }
 
@@ -376,6 +385,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
    * 모든 반환 경로(새 탭/기존 탭/새 창/새로고침/뒤로가기)를 한곳에서 처리하기 위해 래핑한다.
    */
   async execute(args: NavigateToolParams): Promise<ToolResult> {
+    // auto-chrome-mcp fork(2026-09-05): task 를 주면 MCP 탭 그룹 제목이 그 문구가 된다.
+    // 탭이 이 호출에서 새로 만들어지는 경우도 있으므로 **이동 전에** 현재 작업 제목을
+    // 먼저 정해 둔다 (그룹이 생기는 순간 그 제목으로 만들어진다).
+    const taskTitle =
+      typeof args?.task === 'string' && args.task.trim().length > 0 ? args.task : null;
+    if (taskTitle !== null) beginMcpGroupTask(taskTitle);
+
     // 내비게이션 시작 신호는 이동을 걸기 **전에** 잡아 둬야 한다 — 커밋 전에는 이전 문서가
     // 'complete' 로 남아 있어 대기가 즉시 성공으로 끝나 버린다(이전 URL·제목을 그대로 보고).
     const navigation = watchNavigationStart();
@@ -426,6 +442,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
     if (typeof tabId !== 'number') {
       navigation.stop();
       return result;
+    }
+
+    // 대상 탭이 정해졌으니 그 창의 MCP 그룹 제목을 작업 문구로 맞춘다.
+    // 제목 변경은 tabGroups.update 만 쓴다 - 탭 활성화·창 포커스는 건드리지 않는다.
+    if (taskTitle !== null) {
+      const windowId =
+        typeof payload?.windowId === 'number'
+          ? payload.windowId
+          : await this.tryGetTab(tabId).then((tab) => tab?.windowId);
+      await setMcpGroupTitle(windowId, taskTitle);
     }
 
     // v1.9.0(설계 B.1): width/height 는 새 창 크기가 아니라 **작업 탭의 뷰포트**로 적용한다.
@@ -512,7 +538,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // Handle refresh option first
       if (refresh) {
         // auto-chrome-mcp fork(F3): 명시 tabId → 이 레인의 작업 탭 → (모드 OFF 일 때만) 활성 탭
-        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId);
+        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId, args);
         if (targetTab === null) return createErrorResponse(noWorkTabErrorText(this.name));
         if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
         console.log(`Refreshing tab ${targetTab.id}`);
@@ -564,7 +590,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // Handle history navigation: url="back" or url="forward"
       if (url === 'back' || url === 'forward') {
         // auto-chrome-mcp fork(F3): refresh 와 같은 해석 순서를 쓴다.
-        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId);
+        const targetTab = await this.resolveExistingTargetTab(tabId, windowId, mcpSessionId, args);
         if (targetTab === null) return createErrorResponse(noWorkTabErrorText(this.name));
         if (!targetTab.id) {
           return createErrorResponse('No target tab found for history navigation');
@@ -610,7 +636,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // 1. Check if URL is already open
       console.log(`Checking if URL is already open: ${redactUrlForLog(url)}`);
       const patternQueryable = isPatternQueryableUrl(url);
-      const candidateTabs = await this.collectReuseCandidates(url, mcpSessionId, patternQueryable);
+      const candidateTabs = await this.collectReuseCandidates(
+        url,
+        mcpSessionId,
+        patternQueryable,
+        args,
+      );
 
       // Prefer strict match when user specifies a concrete path/query.
       // Only fall back to host-level activation when the target is site root.
@@ -805,7 +836,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             // 전용 작업 창 안의 탭은 background 인자와 무관하게 활성이어야 렌더링이 멈추지 않는다.
             const inDedicatedWindow = await isMcpWindow(reusedTab.windowId);
             if (background !== true || inDedicatedWindow) {
-              await activateTab(ownedTabId, { reason: 'navigate:reuse' });
+              await activateTab(ownedTabId, { reason: 'navigate:reuse', contextArgs: args });
             }
             if (background !== true) {
               await focusWindowIfAllowed(reusedTab.windowId);
@@ -861,7 +892,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   windowId: workWindow.id,
                   active: true,
                 },
-                { reason: 'navigate:work-window' },
+                { reason: 'navigate:work-window', contextArgs: args },
               );
               // 표지 갱신이 먼저다 — 곧 닫는 about:blank 탭만 표지에 남으면 다음 isMcpWindow 가
               // "우리 창이 아니다" 로 판정해 버린다.
@@ -886,7 +917,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 windowId: workWindow.id,
                 active: false,
               },
-              { reason: 'navigate:work-window' },
+              { reason: 'navigate:work-window', contextArgs: args },
             );
           }
 
@@ -935,7 +966,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               windowId: targetWindow.id,
               active: false,
             },
-            { reason: 'navigate:last-focused-fallback' },
+            { reason: 'navigate:last-focused-fallback', contextArgs: args },
           );
           if (background !== true) {
             // auto-chrome-mcp fork: 강제포커스 정책 통과 시에만 OS 윈도우 포커스.
@@ -1182,7 +1213,41 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
       // auto-chrome-mcp fork: 인자 없이 호출되면 원래는 사용자의 활성 탭을 닫았다.
       // 백그라운드 작업 모드 ON 이면 사용자 탭 대신 MCP 작업 탭만 닫는다 (없으면 에러).
       // 닫힌 탭이 작업 탭이면 work-tab-manager 의 onRemoved 리스너가 알아서 정리한다.
-      if (await isBackgroundModeEnabled()) {
+      if (await isBackgroundModeEnabledFor(args)) {
+        // 실행 컨텍스트가 background 를 강제하는 실행(예약)에서는 이 세션·레인이 소유한
+        // 탭을 모두 닫는다. 예약 실행은 자기 탭만 갖고 있으므로 사용자 탭은 후보가 아니다.
+        if (effectiveBackgroundModeOf(args) === true) {
+          const ownedIds = await getSessionScopedTabIds(sessionKeyOf(args));
+          if (ownedIds.length === 0) {
+            return createErrorResponse(
+              'Background work mode: this session owns no tab to close; pass tabIds explicitly',
+            );
+          }
+          const closed: number[] = [];
+          for (const id of ownedIds) {
+            try {
+              await chrome.tabs.remove(id);
+              closed.push(id);
+            } catch {
+              // 이미 닫힌 탭은 건너뛴다.
+            }
+          }
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  message: 'Closed tabs owned by this session',
+                  closedCount: closed.length,
+                  closedTabIds: closed,
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
+
         const workTabId = await getWorkTabId(sessionKeyOf(args));
         if (workTabId === null) {
           return createErrorResponse(

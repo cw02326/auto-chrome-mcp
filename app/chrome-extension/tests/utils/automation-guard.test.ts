@@ -17,6 +17,8 @@ interface ChromeHarness {
   tabUrls: Map<number, string>;
   localGet: ReturnType<typeof vi.fn>;
   localSet: ReturnType<typeof vi.fn>;
+  /** popup 등 외부에서 값을 바꾼 것처럼 onChanged 리스너를 직접 울린다 (localSet 을 거치지 않고). */
+  fireChanged: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => void;
 }
 
 const T0 = new Date('2026-01-01T00:00:00Z').getTime();
@@ -24,6 +26,11 @@ const T0 = new Date('2026-01-01T00:00:00Z').getTime();
 function installChromeMocks(): ChromeHarness {
   const localStore: Record<string, unknown> = {};
   const tabUrls = new Map<number, string>();
+  type ChangeListener = (
+    changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+    areaName: string,
+  ) => void;
+  const changeListeners: ChangeListener[] = [];
 
   const toKeys = (keys: unknown): string[] =>
     Array.isArray(keys) ? (keys as string[]) : typeof keys === 'string' ? [keys] : [];
@@ -36,8 +43,17 @@ function installChromeMocks(): ChromeHarness {
     return out;
   });
   const localSet = vi.fn(async (items: Record<string, unknown>) => {
+    const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+    for (const key of Object.keys(items)) {
+      changes[key] = { oldValue: localStore[key], newValue: items[key] };
+    }
     Object.assign(localStore, items);
+    // 실제 chrome.storage.onChanged 는 변경을 발생시킨 컨텍스트에도 발화한다.
+    for (const listener of changeListeners) listener(changes, 'local');
   });
+  const fireChanged: ChromeHarness['fireChanged'] = (changes) => {
+    for (const listener of changeListeners) listener(changes, 'local');
+  };
 
   (globalThis as unknown as { chrome: unknown }).chrome = {
     storage: {
@@ -46,6 +62,13 @@ function installChromeMocks(): ChromeHarness {
         get: vi.fn(async () => ({})),
         set: vi.fn(async () => undefined),
         remove: vi.fn(async () => undefined),
+      },
+      onChanged: {
+        addListener: vi.fn((fn: ChangeListener) => changeListeners.push(fn)),
+        removeListener: vi.fn((fn: ChangeListener) => {
+          const idx = changeListeners.indexOf(fn);
+          if (idx >= 0) changeListeners.splice(idx, 1);
+        }),
       },
     },
     tabs: {
@@ -62,7 +85,7 @@ function installChromeMocks(): ChromeHarness {
     },
   };
 
-  return { localStore, tabUrls, localGet, localSet };
+  return { localStore, tabUrls, localGet, localSet, fireChanged };
 }
 
 async function loadModule(): Promise<AutomationGuard> {
@@ -102,7 +125,9 @@ describe('automation-guard (auto-chrome-mcp fork — 밴 예방 안전장치)', 
       const mod = await loadModule();
       h.localStore[mod.AUTOMATION_GUARD_STORAGE_KEY] = false;
       expect(await mod.isAutomationGuardEnabled()).toBe(false);
-      h.localStore[mod.AUTOMATION_GUARD_STORAGE_KEY] = true;
+      // 캐시가 생겼으므로 storage 를 직접 고쳐도 반영되지 않는다 — onChanged 로 알려야 한다
+      // (실제 chrome 에서는 storage.local.set 이 이 이벤트를 발생시킨다).
+      h.fireChanged({ [mod.AUTOMATION_GUARD_STORAGE_KEY]: { oldValue: false, newValue: true } });
       expect(await mod.isAutomationGuardEnabled()).toBe(true);
     });
 
@@ -117,6 +142,58 @@ describe('automation-guard (auto-chrome-mcp fork — 밴 예방 안전장치)', 
       await mod.setAutomationGuardEnabled(false);
       expect(h.localSet).toHaveBeenCalledWith({ automationGuardEnabled: false });
       expect(mod.AUTOMATION_GUARD_STORAGE_KEY).toBe('automationGuardEnabled');
+    });
+  });
+
+  describe('캐시 (task E4)', () => {
+    it('두 번째 호출부터는 storage.local.get 을 다시 부르지 않는다', async () => {
+      const mod = await loadModule();
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(h.localGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('storage 읽기 실패는 캐시하지 않는다 (다음 호출에서 다시 시도)', async () => {
+      const mod = await loadModule();
+      h.localGet.mockRejectedValueOnce(new Error('storage down'));
+      expect(await mod.isAutomationGuardEnabled()).toBe(true); // fail-safe, 캐시 안 됨
+      expect(h.localGet).toHaveBeenCalledTimes(1);
+
+      h.localStore[mod.AUTOMATION_GUARD_STORAGE_KEY] = false;
+      expect(await mod.isAutomationGuardEnabled()).toBe(false); // 재조회 성공 → 이제 캐시됨
+      expect(h.localGet).toHaveBeenCalledTimes(2);
+    });
+
+    it('setAutomationGuardEnabled 직후 재조회 없이 새 값을 즉시 반영한다', async () => {
+      const mod = await loadModule();
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(h.localGet).toHaveBeenCalledTimes(1);
+
+      await mod.setAutomationGuardEnabled(false);
+      expect(await mod.isAutomationGuardEnabled()).toBe(false);
+      // set() 이 즉시 캐시를 갱신하므로 get 은 여전히 처음 1회뿐이어야 한다
+      expect(h.localGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('popup 등 외부에서 storage.local.set 으로 값을 바꾸면 onChanged 로 캐시가 즉시 갱신된다', async () => {
+      const mod = await loadModule();
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(h.localGet).toHaveBeenCalledTimes(1);
+
+      // 이 모듈의 setter 를 거치지 않고, popup 이 직접 storage 에 쓰는 상황을 재현한다.
+      await h.localSet({ [mod.AUTOMATION_GUARD_STORAGE_KEY]: false });
+
+      expect(await mod.isAutomationGuardEnabled()).toBe(false);
+      expect(h.localGet).toHaveBeenCalledTimes(1); // onChanged 로 갱신됐으니 재조회 없음
+    });
+
+    it('다른 키의 변경은 캐시를 건드리지 않는다', async () => {
+      const mod = await loadModule();
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      await h.localSet({ someUnrelatedKey: 123 });
+      expect(await mod.isAutomationGuardEnabled()).toBe(true);
+      expect(h.localGet).toHaveBeenCalledTimes(1);
     });
   });
 

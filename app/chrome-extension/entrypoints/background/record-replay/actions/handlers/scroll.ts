@@ -12,7 +12,13 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok, tryResolveNumber } from '../registry';
 import type { ActionHandler, ElementTarget } from '../types';
-import { logSelectorFallback, selectorLocator, sendMessageToTab, toSelectorTarget } from './common';
+import {
+  actionToolArgs,
+  logSelectorFallback,
+  selectorLocator,
+  sendMessageToTab,
+  toSelectorTarget,
+} from './common';
 
 /** Check if target has valid selector specification */
 function hasTargetSpec(target: unknown): boolean {
@@ -142,7 +148,7 @@ export const scrollHandler: ActionHandler<'scroll'> = {
       return failed('VALIDATION_ERROR', `Scroll mode "${mode}" requires a target`);
     }
 
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
     const { selectorTarget, firstCandidateType, firstCssOrAttr } = toSelectorTarget(target, vars);
     const located = await selectorLocator.locate(tabId, selectorTarget, {

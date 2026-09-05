@@ -12,6 +12,9 @@ import { initQuickPanelAgentHandler } from './quick-panel/agent-handler';
 import { initQuickPanelCommands } from './quick-panel/commands';
 import { initQuickPanelTabsHandler } from './quick-panel/tabs-handler';
 import { initializeTogglesIfMissing } from '@/utils/consent-storage';
+// auto-chrome-mcp fork(2026-09-05): chrome_shortcut 예약 실행. import 만으로 최상위
+// onAlarm 리스너가 등록된다 - 늦게 등록한 리스너는 워커를 깨우지 못한다.
+import { initShortcutScheduleRunner } from './schedule-runner';
 
 /**
  * v1.0.32+: 비민감 4종 site-level contentSettings 를 모든 사이트 (`<all_urls>`) 에 대해
@@ -98,6 +101,10 @@ export default defineBackground(() => {
         .catch((e) => console.error('[site-perms] 토글 초기화 실패:', e));
     }
   });
+
+  // auto-chrome-mcp fork: 워커가 평가될 때마다 예약 상태를 맞춘다 (running -> interrupted,
+  // 고아 탭 정리, 없어진 알람 재생성, 지난 예약 1회 따라잡기).
+  initShortcutScheduleRunner();
 
   // Initialize core services
   initNativeHostListener();

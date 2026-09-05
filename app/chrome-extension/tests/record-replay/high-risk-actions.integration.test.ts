@@ -300,12 +300,14 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
 
     it('switchTab routes to legacy', async () => {
       const executor = createExecutor();
-      const ctx = createMockExecCtx({ frameId: FRAME_ID });
+      // 2026-09-05 검토 항목 5: switchTab 은 run 이 만든 탭 id 로만 옮겨간다.
+      // 여기서는 라우팅만 보므로 사정권 안의 탭을 지목한다.
+      const ctx = createMockExecCtx({ frameId: FRAME_ID, ownedTabIds: new Set([TAB_ID]) });
 
       const step: TestStep = {
         id: 'switchTab_routing_legacy',
         type: 'switchTab',
-        urlContains: 'other.example.com',
+        tabId: TAB_ID,
       };
 
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });

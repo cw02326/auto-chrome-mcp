@@ -23,6 +23,7 @@ import type {
   VariableStore,
 } from '../types';
 import {
+  actionToolArgs,
   interpolateBraces,
   logSelectorFallback,
   resolveString,
@@ -221,7 +222,7 @@ export const triggerEventHandler: ActionHandler<'triggerEvent'> = {
     const cancelable = action.params.cancelable === true;
 
     // Ensure page is read for element location
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
     // Resolve target selector
     const targetResolved = await resolveTargetSelector(tabId, action.params.target, vars, frameId);
@@ -352,7 +353,7 @@ export const setAttributeHandler: ActionHandler<'setAttribute'> = {
     }
 
     // Ensure page is read for element location
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
     // Resolve target selector
     const targetResolved = await resolveTargetSelector(tabId, action.params.target, vars, frameId);

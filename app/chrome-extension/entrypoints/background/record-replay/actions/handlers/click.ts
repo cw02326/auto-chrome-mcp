@@ -24,6 +24,7 @@ import type {
   ActionHandler,
 } from '../types';
 import {
+  actionToolArgs,
   clampInt,
   ensureElementVisible,
   logSelectorFallback,
@@ -52,7 +53,7 @@ async function executeClick<T extends 'click' | 'dblclick'>(
   // Ensure page is read before locating element
   // auto-chrome-mcp fork: tabId 를 빼면 게이트가 이 세션의 작업 탭을 주입하거나(모드 ON)
   // 도구 구현이 사용자의 활성 탭으로 fallback 한다(모드 OFF). 재생 중인 탭을 명시한다.
-  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
   // Only read beforeUrl if we need to do nav-wait
   const beforeUrl = skipNavWait ? '' : await readTabUrl(tabId);
@@ -88,7 +89,7 @@ async function executeClick<T extends 'click' | 'dblclick'>(
 
   const clickResult = await handleCallTool({
     name: TOOL_NAMES.BROWSER.CLICK,
-    args: {
+    args: actionToolArgs(ctx, {
       ref: refToUse,
       selector: selectorToUse,
       waitForNavigation: false,
@@ -96,7 +97,7 @@ async function executeClick<T extends 'click' | 'dblclick'>(
       frameId,
       tabId,
       double: action.type === 'dblclick',
-    },
+    }),
   });
 
   if ((clickResult as { isError?: boolean })?.isError) {

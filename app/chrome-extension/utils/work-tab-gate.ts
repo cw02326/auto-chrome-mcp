@@ -20,10 +20,14 @@
  *     통째로 뚫렸다. 이제 invalid_tab_id 로 즉시 거절한다.
  *   - 명시적 windowId(양의 정수)가 있으면 사용자가 대상 창을 고른 것이므로 통과시킨다.
  *   - background mode 가 꺼져 있으면 예전 동작을 그대로 둔다.
+ *   - **실행 컨텍스트 모드가 전역 토글보다 우선이다** (2026-09-05 데일리 자동화 설계 2절).
+ *     예약 실행처럼 전역 토글이 OFF 여도 항상 무간섭이어야 하는 호출은 args 에 실린
+ *     내부 전용 값(`_effectiveBackgroundMode`)으로 그 사실을 알린다. 이 키는 스키마에
+ *     없고, handleCallTool 이 ToolCallParam 에서 받은 값만 실어 준다.
  */
 
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { isBackgroundModeEnabledFor } from '@/utils/background-mode';
 import { getWorkTabId, sessionKeyOf } from '@/utils/work-tab-manager';
 
 const B = TOOL_NAMES.BROWSER;
@@ -462,7 +466,7 @@ export async function applyBackgroundModeGate(
   // ③ 모드가 꺼져 있으면 인자를 보정하지 않는다(예전 동작). 작업 탭 조회는
   //   handleCallTool 의 팝업 감지(opener 후보)가 쓰므로 남긴다 — 단, 호출자가 대상
   //   탭을 직접 지정했으면 그 탭이 이미 첫 후보라 조회를 생략해도 잃는 것이 없다.
-  if (!(await isBackgroundModeEnabled())) {
+  if (!(await isBackgroundModeEnabledFor(args))) {
     const workTabId = explicitTab ? null : await getWorkTabId(sessionKeyOf(ownSessionArgs(args)));
     return {
       args,

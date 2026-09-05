@@ -10,6 +10,14 @@ import { diffCheck } from '@/utils/content-cache';
 // auto-chrome-mcp fork: iframe 안의 interactive elements 까지 수집하기 위한 프레임 열거 유틸
 import { FRAME_COLLECT_MAX_FRAMES, listChildFrames } from './frame-resolver';
 import { redactedArgsForLog, redactUrlForLog } from '@/utils/log-redact';
+// auto-chrome-mcp fork: 새 탭 생성 후 고정 대기 대신 실제 로드 신호를 관측하기 위해 import
+// (navigate 가 쓰는 것과 같은 유틸 — wait-for.ts 는 이 작업 범위 밖이라 수정하지 않는다).
+import { waitForPageLoad } from './wait-for';
+
+/** auto-chrome-mcp fork: 새 탭 생성 후 로드 관측 상한 (예전 고정 대기보다 넉넉히 잡는다) */
+const WEB_FETCHER_LOAD_TIMEOUT_MS = 15000;
+/** auto-chrome-mcp fork: 관측 대기가 실패했을 때의 폴백 — 예전 고정 대기와 동일한 값 */
+const WEB_FETCHER_LOAD_FALLBACK_MS = 3000;
 
 interface WebFetcherToolParams {
   htmlContent?: boolean; // get the visible HTML content of the current page. default: false
@@ -83,7 +91,26 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
           // Wait for page to load
           console.log('Waiting for page to load...');
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          // auto-chrome-mcp fork(2026-09): 고정 3000ms 대기 대신 실제 로드 신호(observed
+          // DOMContentLoaded)를 기다린다 — 로드가 더 빨리 끝나면 그만큼 빨리 돌아온다.
+          // navigate 가 쓰는 것과 같은 유틸(common.ts 의 waitForPageLoad 호출 참고).
+          // 새로 만든 탭이라 navigationStarted 추적은 필요 없다. 실패 시(예: 예상치 못한 에러)
+          // 에는 예전과 동일한 고정 3000ms 상한으로 폴백한다.
+          if (typeof tab.id === 'number') {
+            try {
+              await waitForPageLoad(tab.id, 'domcontentloaded', WEB_FETCHER_LOAD_TIMEOUT_MS, {
+                targetUrl: url,
+              });
+            } catch (waitErr) {
+              console.warn(
+                '[WebFetcher] waitForPageLoad failed, falling back to fixed wait:',
+                waitErr,
+              );
+              await new Promise((resolve) => setTimeout(resolve, WEB_FETCHER_LOAD_FALLBACK_MS));
+            }
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, WEB_FETCHER_LOAD_FALLBACK_MS));
+          }
         }
       } else {
         // Use active tab (prefer specified window)

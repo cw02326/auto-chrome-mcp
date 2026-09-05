@@ -30,6 +30,44 @@ export const MCP_TAB_GROUP_COLOR = 'green';
 const TAB_GROUP_ID_NONE = -1;
 
 /**
+ * 그룹 제목 상한. 탭 스트립의 그룹 라벨은 좁아서 긴 문구는 어차피 잘려 보인다.
+ * 여기서 먼저 자르면 어느 창에서 보든 같은 문구가 나온다.
+ */
+export const MCP_TAB_GROUP_TITLE_MAX = 24;
+
+/**
+ * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계): 지금 무슨 작업을 하고 있는지 그룹
+ * 제목으로 보여 준다. 무간섭 모드에서는 탭이 배경에 조용히 열리므로, 사용자가 "지금 이
+ * 창에서 뭐가 돌고 있나" 를 알 방법이 탭 그룹 라벨뿐이다.
+ *
+ * 규칙:
+ *   - batch·shortcut 실행 시작 시 제목을 바꾸고, 끝나면 "MCP" 로 되돌린다.
+ *   - chrome_navigate 의 task 인자는 다음 task 나 실행 종료 전까지 유지된다.
+ *   - 제목 변경은 chrome.tabGroups.update 만 쓴다. 탭 활성화·창 포커스는 건드리지 않는다.
+ *
+ * 상태는 워커 메모리에만 둔다. 제목은 표시용이라 워커가 교체돼 "MCP" 로 돌아가도
+ * 실행 자체에는 아무 영향이 없다(저장소를 늘릴 이유가 없다).
+ */
+let activeTaskTitle: string | null = null;
+/** 이 실행이 제목을 바꾼 창들 - 끝날 때 되돌릴 대상. */
+const titledWindows = new Set<number>();
+/** 창별로 우리가 만든 MCP 그룹 id. 제목을 바꾸면 title 조회로는 못 찾으므로 따로 기억한다. */
+const groupIdByWindow = new Map<number, number>();
+
+/** 사용자가 준 문구를 그룹 제목으로 다듬는다. 비면 기본 제목. */
+export function normalizeMcpGroupTitle(raw: unknown): string {
+  if (typeof raw !== 'string') return MCP_TAB_GROUP_TITLE;
+  const trimmed = raw.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return MCP_TAB_GROUP_TITLE;
+  return trimmed.slice(0, MCP_TAB_GROUP_TITLE_MAX);
+}
+
+/** 지금 새로 만들거나 편입하는 그룹에 붙일 제목. */
+export function currentMcpGroupTitle(): string {
+  return activeTaskTitle ?? MCP_TAB_GROUP_TITLE;
+}
+
+/**
  * 탭 그룹 표시 설정. 기본 true — 명시적으로 false 를 저장한 경우에만 OFF.
  * (조회 실패 시에도 기본 동작인 true 로 간주한다.)
  */
@@ -65,13 +103,27 @@ function isTabGroupApiAvailable(): boolean {
  * tabGroups.query 의 title 은 패턴 매칭이라 정확 일치를 다시 확인한다.
  */
 async function findMcpGroupInWindow(windowId: number): Promise<number | null> {
+  // 제목을 작업 이름으로 바꿔 둔 그룹은 title 조회로 찾을 수 없다 - 먼저 기억해 둔 id 를 본다.
+  const tracked = groupIdByWindow.get(windowId);
+  if (typeof tracked === 'number') {
+    try {
+      const group = await chrome.tabGroups.get(tracked);
+      if (group && group.windowId === windowId) return tracked;
+    } catch {
+      // 그룹이 사라졌다 - 기억을 버리고 title 조회로 넘어간다.
+    }
+    groupIdByWindow.delete(windowId);
+  }
+
   const groups = await chrome.tabGroups.query({
     windowId,
     title: MCP_TAB_GROUP_TITLE,
   });
   if (!Array.isArray(groups)) return null;
   const hit = groups.find((g) => g?.title === MCP_TAB_GROUP_TITLE && typeof g.id === 'number');
-  return hit ? hit.id : null;
+  if (!hit) return null;
+  groupIdByWindow.set(windowId, hit.id);
+  return hit.id;
 }
 
 /**
@@ -93,6 +145,12 @@ export async function assignTabToMcpGroup(tabId: unknown): Promise<number | null
 
     const existingGroupId = await findMcpGroupInWindow(tab.windowId);
     if (existingGroupId !== null) {
+      // 작업이 도는 중이면 그 창의 그룹 제목도 지금 작업 이름에 맞춘다 (탭이 나중에 생겨도
+      // 라벨이 맞는다). 작업이 없을 때는 손대지 않는다 - 편입만으로 tabGroups.update 를
+      // 부르면 그룹 재사용이 조용히 API 호출을 늘린다.
+      if (activeTaskTitle !== null) {
+        await applyTitleToGroup(tab.windowId, existingGroupId, activeTaskTitle);
+      }
       // 이미 그 그룹이면 tabs.group 을 다시 부르지 않는다 (불필요한 탭 이동 방지).
       if (tab.groupId === existingGroupId) return existingGroupId;
       await chrome.tabs.group({ tabIds: [tabId], groupId: existingGroupId });
@@ -107,18 +165,108 @@ export async function assignTabToMcpGroup(tabId: unknown): Promise<number | null
     if (typeof createdGroupId !== 'number' || createdGroupId === TAB_GROUP_ID_NONE) {
       return null;
     }
+    const title = currentMcpGroupTitle();
     await chrome.tabGroups.update(createdGroupId, {
-      title: MCP_TAB_GROUP_TITLE,
+      title,
       color: MCP_TAB_GROUP_COLOR,
-      // 접지 않는다 — 접으면 사용자가 보던 탭 스트립이 흔들린다.
+      // 접지 않는다. 접으면 사용자가 보던 탭 스트립이 흔들린다.
       collapsed: false,
     });
+    groupIdByWindow.set(tab.windowId, createdGroupId);
+    if (title !== MCP_TAB_GROUP_TITLE) titledWindows.add(tab.windowId);
     return createdGroupId;
   } catch (error) {
     // 권한 없음(tabGroups) / API 미지원 / 탭이 사라짐 / 그룹 불가 탭(pinned 등) 전부 여기로.
     console.warn(`[mcp-tab-group] skip grouping tab=${tabId}:`, error);
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 그룹 제목 (지금 무슨 작업 중인지 탭 스트립에 보여 준다)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 그룹 제목만 바꾼다. chrome.tabGroups.update 는 탭을 활성화하지도, 창을 포커스하지도
+ * 않는다 - 이 모듈의 무간섭 규칙을 그대로 지킨다. 실패는 삼킨다(표시용이다).
+ */
+async function applyTitleToGroup(
+  windowId: number,
+  groupId: number,
+  title: string,
+): Promise<boolean> {
+  try {
+    const current = await chrome.tabGroups.get(groupId);
+    if (current?.title === title) {
+      if (title !== MCP_TAB_GROUP_TITLE) titledWindows.add(windowId);
+      return true;
+    }
+  } catch {
+    // 조회 실패는 그냥 갱신을 시도한다.
+  }
+  try {
+    await chrome.tabGroups.update(groupId, { title });
+    if (title === MCP_TAB_GROUP_TITLE) titledWindows.delete(windowId);
+    else titledWindows.add(windowId);
+    return true;
+  } catch (error) {
+    console.warn(`[mcp-tab-group] skip title update window=${windowId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * 이 창의 MCP 그룹 제목을 바꾼다. 그룹이 없으면 아무것도 하지 않고 false.
+ * 제목은 24자에서 자르고, 빈 문구는 기본 "MCP" 로 되돌린다.
+ */
+export async function setMcpGroupTitle(windowId: unknown, title: unknown): Promise<boolean> {
+  if (typeof windowId !== 'number' || !Number.isInteger(windowId) || windowId <= 0) return false;
+  if (!isTabGroupApiAvailable()) return false;
+  const normalized = normalizeMcpGroupTitle(title);
+  try {
+    const groupId = await findMcpGroupInWindow(windowId);
+    if (groupId === null) return false;
+    return await applyTitleToGroup(windowId, groupId, normalized);
+  } catch (error) {
+    console.warn(`[mcp-tab-group] skip title lookup window=${windowId}:`, error);
+    return false;
+  }
+}
+
+/** 이 창의 MCP 그룹 제목을 기본값 "MCP" 로 되돌린다. */
+export async function resetMcpGroupTitle(windowId: unknown): Promise<boolean> {
+  return await setMcpGroupTitle(windowId, MCP_TAB_GROUP_TITLE);
+}
+
+/**
+ * 지금부터 만들거나 편입하는 MCP 그룹에 이 제목을 쓴다. 실제 그룹에 바로 반영하려면
+ * 이어서 setMcpGroupTitle(windowId, ...) 을 부른다(작업 탭 창을 아는 쪽이 부른다).
+ * 다듬어진 제목을 돌려준다.
+ */
+export function beginMcpGroupTask(title: unknown): string {
+  const normalized = normalizeMcpGroupTitle(title);
+  activeTaskTitle = normalized === MCP_TAB_GROUP_TITLE ? null : normalized;
+  return normalized;
+}
+
+/**
+ * 작업을 끝내고 제목을 바꿨던 창을 전부 "MCP" 로 되돌린다.
+ * 어떤 실패도 던지지 않는다 - 실행 결과에 영향을 주면 안 된다.
+ */
+export async function endMcpGroupTask(): Promise<void> {
+  activeTaskTitle = null;
+  const windows = Array.from(titledWindows);
+  titledWindows.clear();
+  for (const windowId of windows) {
+    await setMcpGroupTitle(windowId, MCP_TAB_GROUP_TITLE);
+  }
+}
+
+/** 테스트용 - 워커 메모리 상태를 초기화한다. */
+export function resetMcpGroupTaskState(): void {
+  activeTaskTitle = null;
+  titledWindows.clear();
+  groupIdByWindow.clear();
 }
 
 export const MCP_TAB_GROUP_STORAGE_KEY = STORAGE_KEY;

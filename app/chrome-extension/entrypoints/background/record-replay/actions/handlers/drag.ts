@@ -15,6 +15,7 @@ import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler, ElementTarget, Point, VariableStore } from '../types';
 import {
+  actionToolArgs,
   ensureElementVisible,
   logSelectorFallback,
   selectorLocator,
@@ -163,7 +164,7 @@ export const dragHandler: ActionHandler<'drag'> = {
     }
 
     // Ensure element refs are fresh before locating
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: actionToolArgs(ctx, {}) });
 
     // Get path coordinates as fallback
     const pathEndpoints = getPathEndpoints(action.params.path);
@@ -199,14 +200,14 @@ export const dragHandler: ActionHandler<'drag'> = {
     // Execute drag via chrome_computer tool
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.COMPUTER,
-      args: {
+      args: actionToolArgs(ctx, {
         action: 'left_click_drag',
         tabId,
         startRef: startResult.ref,
         ref: endResult.ref,
         startCoordinates,
         coordinates: endCoordinates,
-      },
+      }),
     });
 
     if ((res as { isError?: boolean })?.isError) {

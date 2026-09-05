@@ -456,6 +456,34 @@ async function forgetOwnedTabImpl(tabId: number): Promise<void> {
 }
 
 /**
+ * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): 탭은 그대로 두고 **소유만**
+ * 해제한다. 예약 실행 도중 사용자가 그 탭을 활성화해 가져갔을 때 쓴다 - 사용자가 눌러 본
+ * 탭을 도구가 계속 조작하거나 닫는 것이 곧 사용자 탭 침해다.
+ */
+export async function forgetOwnedTab(tabId: number): Promise<void> {
+  return await withStateLock(() => forgetOwnedTabImpl(tabId));
+}
+
+/**
+ * auto-chrome-mcp fork(2026-09-05): 이 접두로 시작하는 버킷 키 목록 (소유 목록과 작업 탭
+ * 기록 양쪽에서). 예약 실행의 고아 탭 정리가 `scheduled::` 버킷을 찾을 때 쓴다.
+ */
+export async function listSessionKeysWithPrefix(prefix: string): Promise<string[]> {
+  return await withStateLock(async () => {
+    const keys = new Set<string>();
+    const owned = await loadOwned();
+    for (const key of Object.keys(owned)) {
+      if (key.startsWith(prefix)) keys.add(key);
+    }
+    const map = await loadMap();
+    for (const key of Object.keys(map)) {
+      if (key.startsWith(prefix)) keys.add(key);
+    }
+    return Array.from(keys);
+  });
+}
+
+/**
  * auto-chrome-mcp fork(P1): MCP 가 닫은 탭의 사유 기록 (진단용, 메모리 전용).
  * 탭이 사라져 도구가 실패했을 때 "왜 없어졌는지" 를 에러에 붙여 준다.
  */

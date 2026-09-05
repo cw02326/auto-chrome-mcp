@@ -9,16 +9,30 @@
  */
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
-import type { ActionHandler, DownloadInfo, DownloadState, VariableStore } from '../types';
-// auto-chrome-mcp fork: OS 윈도우 포커스는 강제 포커스 정책 게이트를 통과해야 함
-import {
-  activateTab,
-  createTab as createTabGuarded,
-  focusWindow as focusWindowIfAllowed,
-  isForceFocusEnabled,
-} from '@/utils/activation-guard';
+import type {
+  ActionExecutionContext,
+  ActionHandler,
+  DownloadInfo,
+  DownloadState,
+  VariableStore,
+} from '../types';
+import { actionOwnedTabIds, isActionOwnedTab, markActionOwnedTab } from './common';
+// v1.9.0: 창 생성은 mcp-window-manager 를 거친다 (배치·비포커스·복귀 규칙 적용).
 import { createManagedWindow } from '@/utils/mcp-window-manager';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+
+/**
+ * 2026-09-05 Codex 검토 항목 1·5: 이 핸들러들도 legacy 노드와 같은 격리 규칙을 따른다.
+ *   - 새 탭은 run 창에 백그라운드로 만들고 run 소유로 등록한다.
+ *   - switchTab / closeTab 은 run 소유 탭만 대상으로 한다. url·title 전역 검색은 없다.
+ *   - 탭을 앞으로 끌어내지 않는다 (활성화·창 포커스 없음).
+ */
+
+/** run 소유 밖의 탭을 건드리려 할 때의 공통 메시지. */
+function scopeMessage(ctx: ActionExecutionContext, what: string): string {
+  return `${what} This run may only touch the tab it was given and tabs it opened itself (${[
+    ...actionOwnedTabIds(ctx),
+  ].join(', ')}).`;
+}
 
 /** Default timeout for tab operations */
 const DEFAULT_TAB_TIMEOUT_MS = 10000;
@@ -58,12 +72,9 @@ export const openTabHandler: ActionHandler<'openTab'> = {
       let tabId: number;
 
       if (params.newWindow) {
-        // Create new window
-        // v1.9.0: 창 생성은 mcp-window-manager 한곳에서만 (배치·비포커스·복귀 규칙 적용).
-        const window = await createManagedWindow({
-          url: url || 'about:blank',
-          focused: await isForceFocusEnabled(),
-        });
+        // 창 생성은 mcp-window-manager 한곳에서만 (배치·비포커스·복귀 규칙). 재생 중에는
+        // 포커스를 가져가지 않으므로 focused 는 항상 false 다.
+        const window = await createManagedWindow({ url: url || 'about:blank', focused: false });
 
         const tab = window?.tabs?.[0];
         if (!tab?.id) {
@@ -71,15 +82,13 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         }
         tabId = tab.id;
       } else {
-        // Create new tab in current window
-        // v1.9.0: active:true 는 activation-guard 가 판정한다 (사용자 창이면 비활성으로 강등).
-        const tab = await createTabGuarded(
-          {
-            url: url || 'about:blank',
-            active: true,
-          },
-          { reason: 'flow:openTab' },
-        );
+        // tab-create-ok: run 이 자기 작업 탭을 연다. run 창에 백그라운드로 만들고 run
+        // 소유로 등록하므로 사용자가 쓰는 탭에는 닿지 않는다.
+        const tab = await chrome.tabs.create({
+          url: url || 'about:blank',
+          active: false,
+          ...(typeof ctx.windowId === 'number' ? { windowId: ctx.windowId } : {}),
+        });
 
         if (!tab.id) {
           return failed('TAB_NOT_FOUND', 'Failed to create new tab');
@@ -87,12 +96,14 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         tabId = tab.id;
       }
 
+      markActionOwnedTab(ctx, tabId);
+
       // Wait for tab to be ready if URL was specified
       if (url) {
         await waitForTabComplete(tabId, DEFAULT_TAB_TIMEOUT_MS);
       }
 
-      // Return newTabId for ctx.tabId sync
+      // Return newTabId for ctx.tabId sync (adapter 가 setRunTab 으로 재고정한다)
       return { status: 'success', newTabId: tabId };
     } catch (e) {
       return failed('UNKNOWN', `Failed to open tab: ${e instanceof Error ? e.message : String(e)}`);
@@ -137,75 +148,29 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
     const params = action.params;
 
     try {
-      let targetTabId: number | undefined;
-
-      if (params.tabId !== undefined) {
-        targetTabId = params.tabId;
-      } else {
-        // Find tab by URL or title
-        // tab-scan-ok: matching by url/title requires enumerating open tabs.
-        // Only the tab the step names is selected, and the run is re-pinned to
-        // it through newTabId.
-        const tabs = await chrome.tabs.query({});
-
-        if (params.urlContains !== undefined) {
-          const urlResult = tryResolveString(params.urlContains, ctx.vars);
-          if (!urlResult.ok) {
-            return failed('VALIDATION_ERROR', `Failed to resolve urlContains: ${urlResult.error}`);
-          }
-          const urlPattern = urlResult.value.trim().toLowerCase();
-
-          // Empty pattern is invalid
-          if (!urlPattern) {
-            return failed('VALIDATION_ERROR', 'urlContains pattern cannot be empty');
-          }
-
-          const matchingTab = tabs.find(
-            (tab) => tab.url && tab.url.toLowerCase().includes(urlPattern),
-          );
-          targetTabId = matchingTab?.id;
-        } else if (params.titleContains !== undefined) {
-          const titleResult = tryResolveString(params.titleContains, ctx.vars);
-          if (!titleResult.ok) {
-            return failed(
-              'VALIDATION_ERROR',
-              `Failed to resolve titleContains: ${titleResult.error}`,
-            );
-          }
-          const titlePattern = titleResult.value.trim().toLowerCase();
-
-          // Empty pattern is invalid
-          if (!titlePattern) {
-            return failed('VALIDATION_ERROR', 'titleContains pattern cannot be empty');
-          }
-
-          const matchingTab = tabs.find(
-            (tab) => tab.title && tab.title.toLowerCase().includes(titlePattern),
-          );
-          targetTabId = matchingTab?.id;
-        }
+      if (params.tabId === undefined) {
+        // url·title 로 브라우저 전체를 뒤지는 경로는 제거했다 (검토 항목 5): 사용자의
+        // 탭이 걸리면 그 탭을 조작하게 된다. run 이 연 탭은 id 를 알고 있다.
+        return failed(
+          'TAB_NOT_FOUND',
+          scopeMessage(
+            ctx,
+            'tab_scope_violation: switchTab needs the id of a tab this run opened; matching by urlContains/titleContains would search the whole browser.',
+          ),
+        );
       }
 
-      if (targetTabId === undefined) {
-        return failed('TAB_NOT_FOUND', 'No matching tab found');
+      const targetTabId = params.tabId;
+      if (!isActionOwnedTab(ctx, targetTabId)) {
+        return failed(
+          'TAB_NOT_FOUND',
+          scopeMessage(ctx, `tab_scope_violation: switchTab refused tab ${targetTabId}.`),
+        );
       }
 
-      // v1.9.0(설계 D): 백그라운드 작업 모드가 켜져 있으면 재생 중 탭을 앞으로 끌어내지
-      // 않는다. 플로우 단계가 foreground:true 를 명시한 경우만 예외 — 기존에 저장된 플로우는
-      // 그 값이 없으므로 게이트를 탄다. 활성화를 건너뛰어도 ctx 의 작업 탭 포인터
-      // (newTabId)는 그대로 바뀌므로 이후 단계는 이 탭을 대상으로 진행한다.
-      const wantsForeground = params.foreground === true;
-      const backgroundMode = await isBackgroundModeEnabled();
-      if (wantsForeground || !backgroundMode) {
-        await activateTab(targetTabId, {
-          force: wantsForeground,
-          reason: 'flow:switchTab',
-        });
-        const tab = await chrome.tabs.get(targetTabId);
-        if (tab.windowId) {
-          await focusWindowIfAllowed(tab.windowId);
-        }
-      }
+      // 탭이 살아 있는지만 확인한다. 활성화·창 포커스는 하지 않는다 — 재생이 사용자의
+      // 화면을 빼앗지 않는다. ctx 의 작업 탭 포인터(newTabId)만 바뀐다.
+      await chrome.tabs.get(targetTabId);
 
       // Return newTabId for ctx.tabId sync
       return { status: 'success', newTabId: targetTabId };
@@ -242,10 +207,21 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
 
     try {
       let tabIds: number[] = [];
+      const owned = actionOwnedTabIds(ctx);
 
       if (params.tabIds && params.tabIds.length > 0) {
-        // Close specific tabs
+        // Close specific tabs — run 소유 밖은 거절한다 (검토 항목 1).
         tabIds = [...params.tabIds];
+        const outside = tabIds.filter((id) => !owned.has(id));
+        if (outside.length) {
+          return failed(
+            'VALIDATION_ERROR',
+            scopeMessage(
+              ctx,
+              `close_scope_violation: closeTab refused tab(s) ${outside.join(', ')}.`,
+            ),
+          );
+        }
       } else if (params.url !== undefined) {
         // Find and close tabs by URL
         const urlResult = tryResolveString(params.url, ctx.vars);
@@ -259,11 +235,24 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
           return failed('VALIDATION_ERROR', 'URL pattern cannot be empty');
         }
 
-        // tab-scan-ok: closeTab by url pattern has to enumerate open tabs.
-        const tabs = await chrome.tabs.query({});
-        tabIds = tabs
-          .filter((tab) => tab.url && tab.url.toLowerCase().includes(urlPattern) && tab.id)
-          .map((tab) => tab.id!);
+        // 후보는 run 소유 탭뿐이다. 전체 탭을 훑지 않는다.
+        for (const id of owned) {
+          try {
+            const tab = await chrome.tabs.get(id);
+            if ((tab?.url || '').toLowerCase().includes(urlPattern)) tabIds.push(id);
+          } catch {
+            // 이미 닫힌 탭은 후보가 아니다.
+          }
+        }
+        if (tabIds.length === 0) {
+          return failed(
+            'VALIDATION_ERROR',
+            scopeMessage(
+              ctx,
+              `close_scope_violation: closeTab found no run-owned tab whose url contains "${urlPattern}".`,
+            ),
+          );
+        }
       } else {
         // Close current tab
         if (typeof ctx.tabId === 'number') {

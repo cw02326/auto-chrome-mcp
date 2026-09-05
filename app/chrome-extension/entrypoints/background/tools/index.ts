@@ -11,6 +11,10 @@ import {
   invalidTabIdErrorText,
   noWorkTabErrorText,
 } from '@/utils/work-tab-gate';
+import {
+  EFFECTIVE_BACKGROUND_MODE_ARG,
+  stripEffectiveBackgroundMode,
+} from '@/utils/background-mode';
 import { withTabLock } from '@/utils/tab-lock';
 import { applyAutomationGuard } from '@/utils/automation-guard';
 import {
@@ -91,6 +95,18 @@ export interface ToolCallParam {
    * 파이프라인 어느 지점에서 확인해도 같은 마감을 본다. 워치독 예산은 줄이기만 한다.
    */
   deadlineAt?: number;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): **실행 컨텍스트 모드**.
+   *
+   * 예약 실행처럼 전역 토글과 무관하게 항상 무간섭이어야 하는 실행에서만 `true` 다.
+   * 스키마에 없는 내부 전용 값이며, 이 필드로만 들어온다 - 도구 인자에 적혀 온 같은
+   * 이름의 키는 아래에서 지운다(호출자가 무간섭 판정을 조작하지 못하게 한다).
+   *
+   * 여기서 받은 값은 게이트에 들어가기 전에 `args._effectiveBackgroundMode` 로 실어
+   * 보낸다. 게이트뿐 아니라 url 대상 해석(url-target) · navigate 재사용 판정 ·
+   * 활성화 가드 · chrome_close_tabs 까지 같은 모드를 봐야 판정이 갈리지 않기 때문이다.
+   */
+  effectiveBackgroundMode?: true;
 }
 
 // 탭 단위 직렬화는 utils/tab-lock.ts 로 분리했다 (navigate 의 재사용 판정도 같은 busy 상태를 본다).
@@ -206,7 +222,22 @@ export const handleCallTool = async (param: ToolCallParam) => {
     // 흐름 제어 마감은 파이프라인 전 구간에서 본다 — 게이트 조회 전이 첫 지점이다.
     assertWithinFlowDeadline(param.name, param.deadlineAt, 'before the work-tab gate');
 
-    const gate = await applyBackgroundModeGate(param.name, param.args);
+    // auto-chrome-mcp fork(설계 2절): 실행 컨텍스트 모드는 ToolCallParam 으로만 들어온다.
+    // 인자에 적혀 온 같은 이름의 키는 먼저 지우고, 러너가 준 값이 있을 때만 다시 싣는다.
+    const contextArgs =
+      param.args !== null && typeof param.args === 'object' && !Array.isArray(param.args)
+        ? { ...param.args }
+        : param.args;
+    stripEffectiveBackgroundMode(contextArgs);
+    if (
+      param.effectiveBackgroundMode === true &&
+      contextArgs !== null &&
+      typeof contextArgs === 'object'
+    ) {
+      (contextArgs as Record<string, unknown>)[EFFECTIVE_BACKGROUND_MODE_ARG] = true;
+    }
+
+    const gate = await applyBackgroundModeGate(param.name, contextArgs);
     const args = gate.args;
     gatedArgs = args;
 
@@ -417,3 +448,8 @@ setBatchToolInvoker(handleCallTool);
 // auto-chrome-mcp fork: chrome_shortcut(run) 도 저장된 step 을 같은 게이트로 실행
 import { setShortcutToolInvoker } from './browser/shortcut';
 setShortcutToolInvoker(handleCallTool);
+
+// auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): 예약 실행도 같은 파이프라인을
+// 지난다. MCP 세션이 없을 뿐 게이트·워치독·탭 잠금은 그대로다.
+import { setScheduleToolInvoker } from '../schedule-runner';
+setScheduleToolInvoker(handleCallTool);

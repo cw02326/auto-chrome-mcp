@@ -9,7 +9,7 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
-import { resolveString } from './common';
+import { actionToolArgs, resolveString } from './common';
 
 /** Extract text content from tool result */
 function extractToolText(result: unknown): string | undefined {
@@ -60,16 +60,18 @@ export const screenshotHandler: ActionHandler<'screenshot'> = {
     // Call screenshot tool
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.SCREENSHOT,
-      args: {
+      args: actionToolArgs(ctx, {
         name: 'workflow',
         storeBase64: true,
-        // auto-chrome-mcp fork: 스크린샷 도구는 이제 base64 를 MCP image 블록으로만 내보낸다.
-        // 워크플로는 이미지 바이트를 변수에 저장해야 하므로(모델 입력이 아님) 내부 플래그로 텍스트 동봉을 요청한다.
+        // 참조로 남기려면 파일이 실제로 있어야 한다.
+        saveToDownloads: true,
+        // auto-chrome-mcp fork: 스크린샷 도구는 base64 를 MCP image 블록으로만 내보낸다.
+        // 여기서는 크기(bytes) 계산에만 쓰고 변수에는 넣지 않는다 (검토 항목 7).
         includeBase64InText: true,
         fullPage: action.params.fullPage === true,
         selector,
         tabId,
-      },
+      }),
     });
 
     if ((res as { isError?: boolean })?.isError) {
@@ -94,9 +96,17 @@ export const screenshotHandler: ActionHandler<'screenshot'> = {
       return failed('UNKNOWN', 'Screenshot tool returned empty base64Data');
     }
 
-    // Store in variables if saveAs specified
+    // 변수에는 이미지 바이트가 아니라 artifact 참조만 남긴다. 변수는 run 결과의 outputs 로
+    // 나가므로, base64 를 넣으면 스크린샷 한 장이 응답을 수 MB 로 부풀린다 (검토 항목 7).
+    const saved = payload as { filename?: string; savedFilename?: string; fullPath?: string };
     if (action.params.saveAs) {
-      ctx.vars[action.params.saveAs] = base64Data;
+      const filename = saved.filename || saved.savedFilename;
+      ctx.vars[action.params.saveAs] = {
+        kind: 'screenshot',
+        ...(filename ? { filename } : {}),
+        ...(saved.fullPath ? { fullPath: saved.fullPath } : {}),
+        bytes: Math.floor((base64Data.length * 3) / 4),
+      };
     }
 
     return { status: 'success', output: { base64Data } };

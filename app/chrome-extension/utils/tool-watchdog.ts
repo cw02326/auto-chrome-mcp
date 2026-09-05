@@ -14,6 +14,62 @@
 export const WATCHDOG_DEFAULT_MS = 120_000;
 
 /**
+ * 흐름 실행(record_replay_flow_run) 하나가 쓸 수 있는 최대 시간.
+ *
+ * 2026-09-05 Codex 검토 항목 4: 워치독이 예산을 넘겨 응답을 끊어도 실제 실행은 계속 돌아
+ * "좀비 run" 이 남았다. `Promise.race` 는 취소 수단이 아니기 때문이다. 그래서 흐름 쪽이
+ * 자기 마감을 스스로 들고, 마감에 닿으면 abort 로 **실제 실행을 멈춘다**. 워치독은 그
+ * 뒤를 받치는 마지막 안전망으로만 남는다.
+ */
+export const MAX_FLOW_RUN_TIMEOUT_MS = 600_000;
+
+/** 마감에 닿아 취소된 실행을 알리는 신호. */
+export class RunAbortedError extends Error {
+  readonly code = 'run_aborted';
+
+  constructor(reason: string) {
+    super(`run_aborted: ${reason}`);
+    this.name = 'RunAbortedError';
+  }
+}
+
+export interface TimeoutAbort {
+  signal: AbortSignal;
+  /** 실제로 적용된 예산 (ms). 상한을 넘겨 요청하면 상한으로 깎인다. */
+  timeoutMs: number;
+  /** 마감이 지나 abort 됐는가. */
+  timedOut(): boolean;
+  /** 타이머 정리. 실행이 끝나면 반드시 부른다. */
+  dispose(): void;
+}
+
+/**
+ * `timeoutMs` 뒤에 abort 되는 신호를 만든다. 상한(`capMs`)을 넘겨 요청하면 상한으로 깎는다.
+ *
+ * `Promise.race` 와 달리 이 신호를 받는 쪽은 실행을 실제로 멈추고 정리할 수 있다.
+ */
+export function createTimeoutAbort(
+  timeoutMs?: number,
+  capMs: number = MAX_FLOW_RUN_TIMEOUT_MS,
+): TimeoutAbort {
+  const requested = Number(timeoutMs);
+  const budget =
+    Number.isFinite(requested) && requested > 0 ? Math.min(Math.floor(requested), capMs) : capMs;
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort(new RunAbortedError(`the run exceeded its ${budget}ms budget`));
+  }, budget);
+  return {
+    signal: controller.signal,
+    timeoutMs: budget,
+    timedOut: () => expired,
+    dispose: () => clearTimeout(timer),
+  };
+}
+
+/**
  * chrome_batch·chrome_shortcut 흐름 제어의 **절대 마감**을 넘겼다는 신호
  * (2026-09-04 Codex 최종 검토 항목 4).
  *
@@ -92,7 +148,11 @@ export function watchdogTimeoutMessage(name: string, budgetMs: number): string {
 
 /**
  * `fn` 을 예산 안에서 실행한다. 예산을 넘기면 `onTimeout(message)` 가 만든 값으로 즉시 끝낸다.
- * (예산 초과여도 `fn` 을 취소하지는 못한다 — chrome 확장 API 에 취소 수단이 없다.)
+ *
+ * 주의: 이 race 는 `fn` 을 **취소하지 못한다**. 그래서 여러 도구 호출을 이어 붙이는 긴 작업
+ * (흐름 실행)은 여기에 기대면 안 된다 — 응답만 끊기고 실행은 계속 도는 좀비가 된다.
+ * 그런 작업은 `createTimeoutAbort()` 로 자기 마감을 들고 abort 로 스스로 멈춘 뒤,
+ * 이 워치독은 마지막 안전망으로만 쓴다.
  */
 export async function runWithWatchdog<T>(
   name: string,

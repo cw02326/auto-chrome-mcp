@@ -230,6 +230,7 @@ auto-chrome-mcp-bridge report --copy   # 진단 리포트 (이슈 등록용)
 
 - 설계 → [`docs/DESIGN.md`](./docs/DESIGN.md) (33KB, 9 섹션)
 - 흡수 PR 매트릭스 → [`UPSTREAM_DIFF.md`](./UPSTREAM_DIFF.md)
+- 데일리 자동화 (예약 실행) → [`docs/DAILY-AUTOMATION-ko.md`](./docs/DAILY-AUTOMATION-ko.md)
 - 강제 재연결 동작 → [`docs/FORCE_RECONNECT.md`](./docs/FORCE_RECONNECT.md)
 - 회귀 케이스 → [`docs/REGRESSION_CASES.md`](./docs/REGRESSION_CASES.md)
 - Playwright 폴백 → [`docs/PLAYWRIGHT_FALLBACK.md`](./docs/PLAYWRIGHT_FALLBACK.md)

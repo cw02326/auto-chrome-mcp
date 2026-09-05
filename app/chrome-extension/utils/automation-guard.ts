@@ -19,17 +19,46 @@ const REPEAT_LIMIT = 12; // 동일 호출 12회 연속이면 루프 폭주로 �
 
 const STORAGE_KEY = 'automationGuardEnabled';
 
+/**
+ * auto-chrome-mcp fork: 인메모리 캐시. 이 가드는 액션성 도구 호출마다 평가되므로
+ * `chrome.storage.local.get` 을 매번 부르면 낭비가 크다(work-tab-manager 의 캐시 패턴 참고).
+ * null 이면 "아직 캐시 없음"이고, 그 외에는 캐시된 값을 그대로 쓴다.
+ * popup 에서 직접 storage 를 바꿔도 `chrome.storage.onChanged` 로 즉시 반영된다.
+ */
+let cachedEnabled: boolean | null = null;
+let changeListenerRegistered = false;
+
+function ensureChangeListener(): void {
+  if (changeListenerRegistered) return;
+  try {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      const change = changes[STORAGE_KEY];
+      if (!change) return;
+      cachedEnabled = change.newValue !== false;
+    });
+    changeListenerRegistered = true;
+  } catch {
+    // onChanged 를 쓸 수 없는 환경(구형 테스트 하네스 등) — 캐시는 set() 경유 갱신만으로 동작한다.
+  }
+}
+
 export async function isAutomationGuardEnabled(): Promise<boolean> {
+  ensureChangeListener();
+  if (cachedEnabled !== null) return cachedEnabled;
   try {
     const result = await chrome.storage.local.get([STORAGE_KEY]);
-    return result[STORAGE_KEY] !== false;
+    cachedEnabled = result[STORAGE_KEY] !== false;
+    return cachedEnabled;
   } catch {
+    // 실패는 캐시하지 않는다 — 다음 호출에서 다시 시도한다.
     return true;
   }
 }
 
 export async function setAutomationGuardEnabled(enabled: boolean): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: enabled });
+  cachedEnabled = enabled;
 }
 
 export const AUTOMATION_GUARD_STORAGE_KEY = STORAGE_KEY;

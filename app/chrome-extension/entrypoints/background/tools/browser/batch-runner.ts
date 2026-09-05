@@ -13,7 +13,9 @@
  */
 
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
-import { isBackgroundModeEnabled } from '@/utils/background-mode';
+import { isBackgroundModeEnabled, stripEffectiveBackgroundMode } from '@/utils/background-mode';
+import { beginMcpGroupTask, endMcpGroupTask, setMcpGroupTitle } from '@/utils/mcp-tab-group';
+import { getWorkTabId, sessionKeyOf } from '@/utils/work-tab-manager';
 import { FlowDeadlineExceededError } from '@/utils/tool-watchdog';
 import { URL_SELECTS_TARGET_TOOLS } from '@/utils/work-tab-gate';
 import {
@@ -74,6 +76,14 @@ export type ToolInvoker = (param: {
    * 상대값이면 게이트·지연·락 대기 동안 낡기 때문이다 (항목 4).
    */
   deadlineAt?: number;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): **실행 컨텍스트 모드**.
+   *
+   * 예약 실행처럼 전역 토글과 무관하게 항상 무간섭이어야 하는 실행에서 `true` 다.
+   * 게이트·url 대상 해석·navigate 재사용·활성화 가드·chrome_close_tabs 가 전역 토글보다
+   * 이 값을 먼저 읽는다. 스키마에 없는 내부 전용 값이라 step args 로는 실을 수 없다.
+   */
+  effectiveBackgroundMode?: true;
 }) => Promise<any>;
 
 export type StepStatus = 'completed' | 'skipped' | 'stopped' | 'failed';
@@ -85,21 +95,51 @@ export type StepStatus = 'completed' | 'skipped' | 'stopped' | 'failed';
  * `status:"completed"` 로 보고됐다. 최상위 `stoppedBy` 만 진짜 사유를 들고 있어서, 묶음
  * 항목만 읽는 쪽은 "20회 다 돌고 정상 종료"로 잘못 읽었다.
  */
-export type RepeatStoppedBy = 'until' | 'stopIf' | 'max' | 'failure' | 'timeout' | 'total_runs';
+export type RepeatStoppedBy =
+  | 'until'
+  | 'stopIf'
+  | 'max'
+  | 'failure'
+  | 'timeout'
+  | 'total_runs'
+  | 'aborted';
 
-/** batch 전체가 멈춘 이유. */
-export type BatchStopReason = 'stopIf' | 'total_runs_exceeded' | 'timeout';
+/** batch 전체가 멈춘 이유. `aborted` 는 `beforeStep` 훅이 실행을 끊은 것이다. */
+export type BatchStopReason = 'stopIf' | 'total_runs_exceeded' | 'timeout' | 'aborted';
+
+/**
+ * `beforeStep` 훅이 실행을 끊을 때 던지는 오류.
+ *
+ * 예약 실행의 탭 인계 검사(사용자가 작업 탭을 활성화했는가)가 이걸 던진다. 실패가
+ * 아니라 "여기서 그만둔다" 이므로 `stoppedBy.reason: "aborted"` 로 보고하고,
+ * `abortReason` 이 그대로 이력의 status 판정 근거가 된다(예: user_took_over_tab).
+ */
+export class FlowAbortedError extends Error {
+  constructor(
+    readonly abortReason: string,
+    message?: string,
+  ) {
+    super(message ?? abortReason);
+    this.name = 'FlowAbortedError';
+  }
+}
 
 /** batch 종료 사유를 반복 묶음의 `attempts.stoppedBy` 값으로 옮긴다. */
 function repeatStoppedByFor(reason: BatchStopReason): RepeatStoppedBy {
   if (reason === 'stopIf') return 'stopIf';
   if (reason === 'timeout') return 'timeout';
+  if (reason === 'aborted') return 'aborted';
   return 'total_runs';
 }
 
 /** 이 사유는 "다 돌아서 끝난 것"이 아니라 "중간에 멈춘 것"인가. */
 function isRepeatStop(stoppedBy: RepeatStoppedBy): boolean {
-  return stoppedBy === 'stopIf' || stoppedBy === 'timeout' || stoppedBy === 'total_runs';
+  return (
+    stoppedBy === 'stopIf' ||
+    stoppedBy === 'timeout' ||
+    stoppedBy === 'total_runs' ||
+    stoppedBy === 'aborted'
+  );
 }
 
 export interface RepeatSpec {
@@ -156,6 +196,27 @@ export interface RunStepsOptions {
   returnNames?: string[];
   /** shortcut 실행 파라미터 (`{{params.x}}` 의 뿌리). */
   params?: Record<string, unknown>;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 8절): 이 실행은 전역 토글과
+   * 무관하게 항상 background 규칙으로 돈다. 예약 실행 전용이며 스키마에 노출하지 않는다.
+   *
+   * 인자 `background: true` 만 덮으면 전역 OFF 상태의 게이트가 작업 탭 주입 자체를
+   * 건너뛰어 도구가 사용자의 활성 탭으로 fallback 한다. 그래서 모드를 실행 컨텍스트에
+   * 실어 모든 판정 지점이 같은 답을 내게 한다.
+   */
+  forceBackground?: boolean;
+  /**
+   * 각 도구 호출 **직전**에 부른다. 던지면 그 자리에서 실행을 끊는다
+   * (`stoppedBy.reason: "aborted"`). 예약 실행의 탭 인계 검사가 여기 붙는다.
+   * `FlowAbortedError` 를 던지면 그 `abortReason` 이 결과에 실린다.
+   */
+  beforeStep?: () => Promise<void> | void;
+  /**
+   * 실행하는 동안 MCP 탭 그룹에 붙일 제목. 끝나면 "MCP" 로 돌아간다.
+   * 무간섭 모드에서는 탭이 배경에 조용히 열리므로, 사용자가 무엇이 도는지 알 수 있는
+   * 유일한 표시가 그룹 라벨이다.
+   */
+  taskTitle?: string;
 }
 
 export interface RunStepsOutcome {
@@ -166,6 +227,8 @@ export interface RunStepsOutcome {
   stoppedBy?: { step: number; reason: BatchStopReason };
   returned?: Record<string, unknown>;
   resultsTruncated?: string[];
+  /** `beforeStep` 훅이 실행을 끊었을 때의 사유 (예: user_took_over_tab). */
+  aborted?: { reason: string; message: string };
 }
 
 /**
@@ -494,6 +557,9 @@ interface RunContext {
   collectImages: boolean;
   templatesEnabled: boolean;
   backgroundModeOn: boolean;
+  forceBackground: boolean;
+  beforeStep?: () => Promise<void> | void;
+  aborted?: { reason: string; message: string };
   continueOnError: boolean;
   lane?: string;
   mcpSessionId?: string;
@@ -593,6 +659,7 @@ async function runSingleStep(
       scope: ctx.scope,
       templatesEnabled: ctx.templatesEnabled,
       backgroundModeOn: ctx.backgroundModeOn,
+      forceBackground: ctx.forceBackground,
       lane: ctx.lane,
       mcpSessionId: ctx.mcpSessionId,
     });
@@ -605,6 +672,21 @@ async function runSingleStep(
     if (forbiddenAction) return failed(forbiddenAction);
   }
 
+  // 도구를 부르기 직전에 실행을 계속해도 되는지 확인한다 (예약 실행의 탭 인계 검사).
+  if (ctx.beforeStep) {
+    try {
+      await ctx.beforeStep();
+    } catch (error) {
+      const reason = error instanceof FlowAbortedError ? error.abortReason : 'aborted';
+      const message = error instanceof Error ? error.message : String(error);
+      if (ctx.aborted === undefined) ctx.aborted = { reason, message };
+      return {
+        result: { index, tool: toolName, ok: true, status: 'stopped', error: message },
+        stop: { reason: 'aborted' },
+      };
+    }
+  }
+
   let raw: any;
   ctx.totalRuns += 1;
   try {
@@ -612,6 +694,7 @@ async function runSingleStep(
       name: toolName,
       args: stepArgs,
       ...(ctx.deadline === null ? {} : { deadlineAt: ctx.deadline }),
+      ...(ctx.forceBackground ? { effectiveBackgroundMode: true as const } : {}),
     });
   } catch (error) {
     // 흐름 제어 마감 초과는 실패가 아니라 "여기서 끊었다" 다 (항목 4).
@@ -896,83 +979,125 @@ export async function runSteps(options: RunStepsOptions): Promise<RunStepsOutcom
     templatesEnabled,
     returnNames,
     params,
+    forceBackground,
+    beforeStep,
+    taskTitle,
   } = options;
 
-  const results: RunnerStepResult[] = [];
-  const scope = createTemplateScope();
-  if (params !== undefined) scope.params = params;
-
-  // 게이트에 들어가기 전에 background 를 강제할지 한 번만 정한다.
-  const backgroundModeOn = templatesEnabled ? await isBackgroundModeEnabled() : false;
-
-  const ctx: RunContext = {
-    invoke,
-    scope,
-    disallowedTools,
-    containerLabel,
-    collectImages,
-    templatesEnabled,
-    backgroundModeOn,
-    continueOnError: continueOnError === true,
-    lane,
-    mcpSessionId,
-    images: [],
-    capturedBytes: 0,
-    totalRuns: 0,
-    // 상한은 흐름 제어가 켜진 호출에만 적용한다. v1 호출의 실행 의미를 바꾸지 않기 위해서다.
-    deadline: templatesEnabled ? Date.now() + MAX_BATCH_MS : null,
-  };
-
-  let stoppedAtStep: number | undefined;
-  let stoppedBy: { step: number; reason: BatchStopReason } | undefined;
-  let success = true;
-
-  for (let index = 0; index < steps.length; index++) {
-    const step = steps[index];
-    const toolName =
-      typeof step?.tool === 'string' ? step.tool : isRepeatGroup(step) ? 'repeat' : '';
-
-    // 앞에서 실패로 멈춘 경우: 남은 단계는 사유와 함께 skipped 로 보고한다.
-    if (stoppedAtStep !== undefined) {
-      results.push({ index, tool: toolName, ok: false, error: skippedNote, status: 'skipped' });
-      continue;
-    }
-    // stopIf 나 상한으로 멈춘 경우: 남은 단계는 실패가 아니다.
-    if (stoppedBy !== undefined) {
-      results.push({ index, tool: toolName, ok: true, status: 'skipped' });
-      continue;
-    }
-
-    const outcome =
-      templatesEnabled && isRepeatGroup(step)
-        ? await runRepeatGroup(step, index, ctx)
-        : await runSingleStep(step, index, ctx);
-
-    if (typeof step?.as === 'string' && outcome.result.as === undefined) {
-      outcome.result.as = step.as;
-    }
-    results.push(outcome.result);
-
-    if (!outcome.result.ok) {
-      success = false;
-      if (!ctx.continueOnError) stoppedAtStep = index;
-    }
-    if (outcome.stop && stoppedBy === undefined) {
-      stoppedBy = { step: index, reason: outcome.stop.reason };
-    }
+  const titled = await beginTaskTitle(taskTitle, mcpSessionId, lane);
+  try {
+    return await runStepsInner();
+  } finally {
+    if (titled) await endMcpGroupTask();
   }
 
-  const outcome: RunStepsOutcome = { success, results, images: ctx.images };
-  if (stoppedAtStep !== undefined) outcome.stoppedAtStep = stoppedAtStep;
-  if (stoppedBy !== undefined) outcome.stoppedBy = stoppedBy;
+  async function runStepsInner(): Promise<RunStepsOutcome> {
+    const results: RunnerStepResult[] = [];
+    const scope = createTemplateScope();
+    if (params !== undefined) scope.params = params;
 
-  if (Array.isArray(returnNames) && returnNames.length > 0) {
-    const { returned, truncated } = buildReturnPayload(returnNames, scope.named);
-    outcome.returned = returned;
-    if (truncated.length > 0) outcome.resultsTruncated = truncated;
+    // 게이트에 들어가기 전에 background 를 강제할지 한 번만 정한다.
+    const backgroundModeOn = templatesEnabled ? await isBackgroundModeEnabled() : false;
+
+    const ctx: RunContext = {
+      invoke,
+      scope,
+      disallowedTools,
+      containerLabel,
+      collectImages,
+      templatesEnabled,
+      backgroundModeOn,
+      forceBackground: forceBackground === true,
+      beforeStep,
+      continueOnError: continueOnError === true,
+      lane,
+      mcpSessionId,
+      images: [],
+      capturedBytes: 0,
+      totalRuns: 0,
+      // 상한은 흐름 제어가 켜진 호출에만 적용한다. v1 호출의 실행 의미를 바꾸지 않기 위해서다.
+      deadline: templatesEnabled ? Date.now() + MAX_BATCH_MS : null,
+    };
+
+    let stoppedAtStep: number | undefined;
+    let stoppedBy: { step: number; reason: BatchStopReason } | undefined;
+    let success = true;
+
+    for (let index = 0; index < steps.length; index++) {
+      const step = steps[index];
+      const toolName =
+        typeof step?.tool === 'string' ? step.tool : isRepeatGroup(step) ? 'repeat' : '';
+
+      // 앞에서 실패로 멈춘 경우: 남은 단계는 사유와 함께 skipped 로 보고한다.
+      if (stoppedAtStep !== undefined) {
+        results.push({ index, tool: toolName, ok: false, error: skippedNote, status: 'skipped' });
+        continue;
+      }
+      // stopIf 나 상한으로 멈춘 경우: 남은 단계는 실패가 아니다.
+      if (stoppedBy !== undefined) {
+        results.push({ index, tool: toolName, ok: true, status: 'skipped' });
+        continue;
+      }
+
+      const outcome =
+        templatesEnabled && isRepeatGroup(step)
+          ? await runRepeatGroup(step, index, ctx)
+          : await runSingleStep(step, index, ctx);
+
+      if (typeof step?.as === 'string' && outcome.result.as === undefined) {
+        outcome.result.as = step.as;
+      }
+      results.push(outcome.result);
+
+      if (!outcome.result.ok) {
+        success = false;
+        if (!ctx.continueOnError) stoppedAtStep = index;
+      }
+      if (outcome.stop && stoppedBy === undefined) {
+        stoppedBy = { step: index, reason: outcome.stop.reason };
+      }
+    }
+
+    const outcome: RunStepsOutcome = { success, results, images: ctx.images };
+    if (stoppedAtStep !== undefined) outcome.stoppedAtStep = stoppedAtStep;
+    if (stoppedBy !== undefined) outcome.stoppedBy = stoppedBy;
+
+    if (Array.isArray(returnNames) && returnNames.length > 0) {
+      const { returned, truncated } = buildReturnPayload(returnNames, scope.named);
+      outcome.returned = returned;
+      if (truncated.length > 0) outcome.resultsTruncated = truncated;
+    }
+    if (ctx.aborted !== undefined) outcome.aborted = ctx.aborted;
+
+    return outcome;
   }
+}
 
-  return outcome;
+/**
+ * 실행 중 MCP 탭 그룹 제목을 작업 이름으로 바꾼다. 제목을 실제로 바꿨으면 true.
+ *
+ * 이 세션·레인의 작업 탭이 이미 있으면 그 창의 그룹에 지금 바로 반영하고, 아직 없으면
+ * 실행 중 navigate 가 탭을 만들 때 그 제목으로 그룹이 생긴다(mcp-tab-group 이 현재 작업
+ * 제목을 읽는다). 어떤 실패도 실행을 막지 않는다 - 제목은 표시용이다.
+ */
+async function beginTaskTitle(
+  taskTitle: string | undefined,
+  mcpSessionId: string | undefined,
+  lane: string | undefined,
+): Promise<boolean> {
+  if (typeof taskTitle !== 'string' || taskTitle.trim().length === 0) return false;
+  try {
+    beginMcpGroupTask(taskTitle);
+    const workTabId = await getWorkTabId(sessionKeyOf({ _mcpSessionId: mcpSessionId, lane }));
+    if (workTabId !== null) {
+      const tab = await chrome.tabs.get(workTabId);
+      await setMcpGroupTitle(tab?.windowId, taskTitle);
+    }
+    return true;
+  } catch (error) {
+    console.warn('[batch-runner] 탭 그룹 제목 지정 실패(무시):', error);
+    return true;
+  }
 }
 
 /** 이 도구에서 `url` 이 대상 탭을 고르는가 (고르면 치환 금지 키가 된다). */
@@ -991,6 +1116,8 @@ interface PrepareArgsInput {
   scope: TemplateScope;
   templatesEnabled: boolean;
   backgroundModeOn: boolean;
+  /** 예약 실행처럼 전역 토글과 무관하게 background 를 강제하는 실행인가. */
+  forceBackground?: boolean;
   lane?: string;
   mcpSessionId?: string;
 }
@@ -1002,8 +1129,16 @@ interface PrepareArgsInput {
  * `_mcpSessionId`·`lane` 제거 후 바깥 컨텍스트 재주입 -> background 강제.
  */
 export function prepareStepArgs(input: PrepareArgsInput): Record<string, any> {
-  const { rawArgs, toolName, scope, templatesEnabled, backgroundModeOn, lane, mcpSessionId } =
-    input;
+  const {
+    rawArgs,
+    toolName,
+    scope,
+    templatesEnabled,
+    backgroundModeOn,
+    forceBackground,
+    lane,
+    mcpSessionId,
+  } = input;
 
   let stepArgs: Record<string, any>;
 
@@ -1033,8 +1168,14 @@ export function prepareStepArgs(input: PrepareArgsInput): Record<string, any> {
     stepArgs.lane = lane;
   }
 
+  // auto-chrome-mcp fork(2026-09-05 설계 2절): 실행 컨텍스트 모드는 스키마에 없는 내부
+  // 전용 값이다. step args 에 적혀 있어도 신뢰하지 않고 지운다 - 저장된 step 이 스스로
+  // "나는 무간섭 실행이다" 라고 주장할 수 있으면 판정을 호출자가 조작하게 된다.
+  stripEffectiveBackgroundMode(stepArgs);
+
   // 전역 background mode 가 켜져 있으면 게이트 전에 background 를 true 로 덮는다.
-  if (backgroundModeOn) {
+  // 실행 컨텍스트가 background 를 강제하는 실행(예약)도 마찬가지다.
+  if (backgroundModeOn || forceBackground === true) {
     stepArgs.background = true;
   }
 

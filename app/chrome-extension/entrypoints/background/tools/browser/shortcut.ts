@@ -11,6 +11,34 @@ import {
   type ToolInvoker,
 } from './batch-runner';
 import { AS_NAME_PATTERN, areTemplatesActive } from '@/utils/step-template';
+import {
+  buildHistoryResults,
+  classifyRunOutcome,
+  finishRunRecord,
+  findRecordById,
+  manualRunId,
+  maskSecrets,
+  normalizeLimit,
+  readHistory,
+  selectHistory,
+  startRunRecord,
+} from '@/utils/shortcut-history';
+import {
+  MAX_SCHEDULES,
+  armScheduleAlarm,
+  bumpScheduleRevision,
+  clearScheduleAlarm,
+  computeNextAt,
+  currentTimeZoneSignature,
+  putSchedule,
+  readSchedules,
+  removeSchedule,
+  summarizeSchedule,
+  validateLoginCheck,
+  validateScheduleExpression,
+  validateScheduleFirstStep,
+  type ScheduleRecord,
+} from '@/utils/shortcut-schedule';
 
 /**
  * auto-chrome-mcp fork: chrome_shortcut — chrome_batch 의 step 목록을 이름 붙여 저장해두고
@@ -23,7 +51,7 @@ import { AS_NAME_PATTERN, areTemplatesActive } from '@/utils/step-template';
 type ShortcutStep = RunnerStep;
 
 interface ShortcutToolParams {
-  action: 'save' | 'run' | 'list' | 'delete';
+  action: 'save' | 'run' | 'list' | 'delete' | 'history' | 'schedule' | 'unschedule' | 'schedules';
   name?: string;
   steps?: ShortcutStep[];
   description?: string;
@@ -37,6 +65,24 @@ interface ShortcutToolParams {
   return?: string[];
   /** action="save": 파라미터 선언. action="run": 파라미터 값. */
   params?: Record<string, unknown>;
+  /** action="run": 실행 중 MCP 탭 그룹에 붙일 제목. 없으면 shortcut 이름을 쓴다. */
+  task?: string;
+  /** action="history": 이 실행 하나를 results 까지 통째로 돌려준다. */
+  runId?: string;
+  /** action="history": 목록 개수 (기본 20, 상한 100). */
+  limit?: number;
+  /** action="history": 이 시각(ISO 또는 epoch ms) 이후 기록만. */
+  since?: string | number;
+  /** action="history": 상태 필터. */
+  status?: string | string[];
+  /** action="schedule": `{ every }` 또는 `{ daily, days? }`. */
+  schedule?: unknown;
+  /** action="schedule": 실패 알림을 받을지 (기본 true). */
+  notify?: boolean;
+  /** action="schedule": 결과를 다운로드 폴더에 JSON 으로도 남길지 (기본 false). */
+  report?: boolean;
+  /** action="schedule": 이 이름의 top-level step 이 stopIf 로 멈추면 login_required. */
+  loginCheck?: string;
 }
 
 /** `params` 선언 하나 (설계 3절). */
@@ -60,6 +106,12 @@ interface StoredShortcut {
    * (설계 1절 "활성화 규칙" — 기존 저장본의 실행 의미를 한 글자도 바꾸지 않기 위해서다).
    */
   templates?: boolean;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 9절 예시 (a)): 저장 시점의 `return`
+   * 이름. 예약 실행에는 호출자가 없어 `return` 을 줄 수 없으므로, 무엇을 이력에 남길지는
+   * 저장 때 정해 둬야 한다. 수동 `run` 은 인자로 준 `return` 이 우선이다.
+   */
+  returnNames?: string[];
 }
 
 const MAX_SHORTCUTS = 50;
@@ -73,7 +125,7 @@ const STORAGE_KEY = 'mcpShortcuts';
  * orchestrator 자기 자신(chrome_shortcut)을 추가한다 — 매크로 안에 매크로를 저장하는
  * 중첩을 막기 위해서다.
  */
-const DISALLOWED_STEP_TOOLS = new Set<string>([
+export const SHORTCUT_DISALLOWED_STEP_TOOLS = new Set<string>([
   'chrome_batch',
   'chrome_shortcut',
   'chrome_switch_tab',
@@ -98,7 +150,11 @@ export function setShortcutToolInvoker(fn: ToolInvoker) {
   invoker = fn;
 }
 
-async function loadShortcuts(): Promise<Record<string, StoredShortcut>> {
+/**
+ * 저장된 shortcut 전체. 예약 러너(entrypoints/background/schedule-runner.ts)가 실행 직전에
+ * 정의를 읽어야 하므로 export 한다 - 저장 형식을 두 곳에 복제하지 않기 위해서다.
+ */
+export async function loadShortcuts(): Promise<Record<string, StoredShortcut>> {
   const r = await chrome.storage.local.get([STORAGE_KEY]);
   const raw = (r as any)?.[STORAGE_KEY];
   return raw && typeof raw === 'object' ? (raw as Record<string, StoredShortcut>) : {};
@@ -215,7 +271,7 @@ function validateOneStep(raw: unknown, isV2: boolean): string | null {
   if (argsInvalid) {
     return `step "${toolName}": args must be an object`;
   }
-  if (DISALLOWED_STEP_TOOLS.has(toolName)) {
+  if (SHORTCUT_DISALLOWED_STEP_TOOLS.has(toolName)) {
     return `tool "${toolName}" is not allowed inside a chrome_shortcut`;
   }
   if (isV2) {
@@ -337,7 +393,7 @@ function validateParamDeclarations(params: unknown): ParamDeclarationValidation 
   return { ok: true, declarations };
 }
 
-type ParamResolution =
+export type ParamResolution =
   | { ok: true; values: Record<string, unknown>; secrets: string[]; warnings: string[] }
   | { ok: false; error: string };
 
@@ -346,7 +402,7 @@ type ParamResolution =
  * 전달값 > `default` 순이고, 둘 다 없는 optional 은 스코프에 넣지 않는다
  * (참조하면 `unresolved_reference` 로 그 step 이 실패한다).
  */
-function resolveParams(
+export function resolveShortcutParams(
   declarations: Record<string, ParamDeclaration> | undefined,
   supplied: unknown,
 ): ParamResolution {
@@ -400,23 +456,6 @@ function resolveParams(
 }
 
 /**
- * 응답 문자열에서 비밀값을 가린다. JSON 으로 escape 된 형태까지 함께 지운다.
- * 길이와 무관하게 항상 가리는 것이 설계 3절 규칙이다.
- */
-function maskSecrets(text: string, secrets: string[]): string {
-  let out = text;
-  for (const secret of secrets) {
-    if (secret.length === 0) continue;
-    const variants = new Set<string>([secret, JSON.stringify(secret).slice(1, -1)]);
-    for (const variant of variants) {
-      if (variant.length === 0) continue;
-      out = out.split(variant).join('***');
-    }
-  }
-  return out;
-}
-
-/**
  * `list` 에 실을 선언 요약. `secret` 은 값이 될 만한 것을 싣지 않는다
  * (secret 은 `default` 를 가질 수 없으므로 이름·필수 여부·설명만 남는다).
  */
@@ -441,6 +480,18 @@ function notFoundError(name: string, available: string[]): ToolResult {
   );
 }
 
+/**
+ * 이력 기록 실패가 실행 결과를 삼키지 않게 한다. 이력은 부가 기록이라, 저장소가 꽉 찼다고
+ * 해서 성공한 실행이 오류로 보고되면 안 된다. 대신 콘솔에 남겨 원인을 찾을 수 있게 한다.
+ */
+async function safeHistoryWrite(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    console.warn('[chrome_shortcut] 실행 이력 기록 실패(실행에는 영향 없음):', error);
+  }
+}
+
 class ShortcutTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.SHORTCUT;
 
@@ -456,8 +507,18 @@ class ShortcutTool extends BaseBrowserToolExecutor {
         return this.handleList();
       case 'delete':
         return this.handleDelete(args);
+      case 'history':
+        return this.handleHistory(args);
+      case 'schedule':
+        return this.handleSchedule(args);
+      case 'unschedule':
+        return this.handleUnschedule(args);
+      case 'schedules':
+        return this.handleSchedules();
       default:
-        return createErrorResponse('action must be one of "save", "run", "list", "delete"');
+        return createErrorResponse(
+          'action must be one of "save", "run", "list", "delete", "history", "schedule", "unschedule", "schedules"',
+        );
     }
   }
 
@@ -481,8 +542,15 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       return createErrorResponse(declaration.error);
     }
 
+    // 저장 시점의 `return`. 예약 실행에는 호출자가 없어 여기서 정해 두지 않으면 이력에
+    // 남길 값이 없다 (설계 9절 예시 (a) 가 save 에 `return` 을 함께 싣는 이유).
+    const savedReturnNames =
+      Array.isArray(args?.return) && args.return.every((n) => typeof n === 'string')
+        ? args.return
+        : undefined;
+
     if (isV2) {
-      const flowError = validateFlow(validation.steps);
+      const flowError = validateFlow(validation.steps, savedReturnNames);
       if (flowError) {
         return createErrorResponse(flowError);
       }
@@ -524,9 +592,14 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       // 치환 활성 여부를 레코드에 함께 기록한다 (legacy 레코드는 이 필드가 없다).
       ...(isV2 ? { templates: true } : {}),
       ...(declaration.declarations ? { params: declaration.declarations } : {}),
+      ...(isV2 && savedReturnNames ? { returnNames: savedReturnNames } : {}),
     };
 
     await saveShortcuts(shortcuts);
+
+    // 정의가 바뀌었으니 이 이름의 예약도 새 정의를 가리킨다. 실행 중이던 run 은 종료 시
+    // revision 이 다른 것을 보고 재무장을 포기한다(superseded).
+    if (replaced) await bumpScheduleRevision(name);
 
     return {
       content: [
@@ -569,7 +642,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     // legacy 레코드(templates 필드 없음)는 절대 치환하지 않는다.
     const templatesEnabled = stored.templates === true;
-    const returnNames = args?.return;
+    const returnNames = Array.isArray(args?.return) ? args.return : stored.returnNames;
     if (templatesEnabled) {
       const flowError = validateFlow(steps, returnNames);
       if (flowError) {
@@ -577,10 +650,24 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       }
     }
 
-    const resolvedParams = resolveParams(stored.params, args?.params);
+    const resolvedParams = resolveShortcutParams(stored.params, args?.params);
     if (!resolvedParams.ok) {
       return createErrorResponse(resolvedParams.error);
     }
+
+    // 이력 기록(설계 4절): 수동 실행도 `trigger: "manual"` 로 남긴다. 시작 레코드를 먼저
+    // 써 둬야 워커가 중간에 죽어도 reconcile 이 `interrupted` 로 바꿔 줄 수 있다.
+    const startedAt = Date.now();
+    const runId = manualRunId(name, startedAt);
+    await safeHistoryWrite(() =>
+      startRunRecord({
+        runId,
+        name,
+        trigger: 'manual',
+        startedAt,
+        secrets: resolvedParams.secrets,
+      }),
+    );
 
     const outcome = await runSteps({
       steps,
@@ -588,14 +675,44 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       continueOnError,
       lane,
       mcpSessionId: _mcpSessionId,
-      disallowedTools: DISALLOWED_STEP_TOOLS,
+      disallowedTools: SHORTCUT_DISALLOWED_STEP_TOOLS,
       containerLabel: 'chrome_shortcut',
       skippedNote: 'skipped (shortcut stopped at earlier failing step)',
       collectImages: false,
       templatesEnabled,
       returnNames: templatesEnabled && Array.isArray(returnNames) ? returnNames : undefined,
       params: templatesEnabled ? resolvedParams.values : undefined,
+      // 실행 중 MCP 탭 그룹 라벨. 문구를 주지 않으면 shortcut 이름이 그대로 라벨이 된다.
+      taskTitle: typeof args?.task === 'string' && args.task.trim().length > 0 ? args.task : name,
     });
+
+    const endedAt = Date.now();
+    const classification = classifyRunOutcome(outcome);
+    const history = buildHistoryResults(outcome.returned);
+    // 러너가 이미 상한으로 뺀 이름(outcome.resultsTruncated)과 이력 단계에서 뺀 이름을
+    // 합쳐 둔다. 어느 층에서 빠졌든 레코드를 읽는 쪽에는 "이 이름은 없다" 가 전부다.
+    const truncatedNames = Array.from(
+      new Set([...(outcome.resultsTruncated ?? []), ...history.truncated]),
+    );
+    await safeHistoryWrite(() =>
+      finishRunRecord(
+        name,
+        runId,
+        {
+          status: classification.status,
+          endedAt,
+          durationMs: endedAt - startedAt,
+          failedStep: classification.failedStep,
+          errorCode: classification.errorCode,
+          error: classification.error,
+          stoppedBy: outcome.stoppedBy ?? null,
+          results: history.results,
+          ...(truncatedNames.length > 0 ? { resultsTruncated: truncatedNames } : {}),
+          ...(resolvedParams.warnings.length > 0 ? { warnings: resolvedParams.warnings } : {}),
+        },
+        resolvedParams.secrets,
+      ),
+    );
 
     // 실행 횟수만 반영한다 - 전달된 params 값은 저장소에 쓰지 않는다.
     stored.runCount = (stored.runCount || 0) + 1;
@@ -605,6 +722,8 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     const body = JSON.stringify({
       success: outcome.success,
       name,
+      // 방금 실행을 `action: "history"` 로 다시 열 때 쓰는 손잡이.
+      runId,
       steps: outcome.results,
       ...(outcome.stoppedAtStep !== undefined ? { stoppedAtStep: outcome.stoppedAtStep } : {}),
       ...(outcome.stoppedBy !== undefined ? { stoppedBy: outcome.stoppedBy } : {}),
@@ -649,6 +768,216 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     };
   }
 
+  /**
+   * action="history": 실행 이력 조회 (설계 4절).
+   *
+   * `runId` 를 주면 그 레코드 하나를 `results` 까지 통째로, 없으면 요약 목록만 돌려준다.
+   * 밤새 30건 x 24,000자를 그대로 실으면 Claude 컨텍스트를 밀어내기 때문이다.
+   */
+  private async handleHistory(args: ShortcutToolParams): Promise<ToolResult> {
+    const map = await readHistory();
+    const name = typeof args?.name === 'string' && args.name.length > 0 ? args.name : undefined;
+
+    const runId = typeof args?.runId === 'string' ? args.runId.trim() : '';
+    if (runId.length > 0) {
+      const record = findRecordById(map, runId, name);
+      if (!record) {
+        return createErrorResponse(`run_not_found: no history record with runId "${runId}"`);
+      }
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, run: record }) }],
+        isError: false,
+      };
+    }
+
+    const limit = normalizeLimit(args?.limit);
+    const { summaries, matched } = selectHistory(map, {
+      name,
+      limit,
+      since: args?.since,
+      status: args?.status,
+    });
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ success: true, runs: summaries, matched, limit }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
+  /**
+   * action="schedule": 저장된 shortcut 에 실행 시각을 붙인다 (설계 1절).
+   *
+   * 검증을 전부 **예약 시점**에 한다. 실행 시점에 실패하면 밤에 아무도 못 본다.
+   * shortcut 하나에 예약 하나이고, 다시 걸면 덮어쓴다(`replaced: true`).
+   */
+  private async handleSchedule(args: ShortcutToolParams): Promise<ToolResult> {
+    const name = validateName(args?.name);
+    if (!name) {
+      return createErrorResponse(
+        'name must be a 1-64 character string without "/" or control characters',
+      );
+    }
+
+    const shortcuts = await loadShortcuts();
+    const stored = shortcuts[name];
+    if (!stored) {
+      return notFoundError(name, Object.keys(shortcuts));
+    }
+
+    const expression = validateScheduleExpression(args?.schedule);
+    if (!expression.ok) {
+      return createErrorResponse(expression.error);
+    }
+
+    const steps = Array.isArray(stored.steps) ? stored.steps : [];
+
+    // 예약은 시간이 지난 뒤 도니 저장된 탭 id 는 반드시 남의 탭이다. v1 grandfathering 은
+    // 수동 실행에만 남기고, 예약은 legacy 레코드도 v2 규칙으로 다시 검사한다.
+    const stepCheck = validateSteps(steps, true);
+    if (!stepCheck.ok) {
+      return createErrorResponse(stepCheck.error);
+    }
+
+    const firstStepError = validateScheduleFirstStep(steps);
+    if (firstStepError) {
+      return createErrorResponse(firstStepError);
+    }
+
+    const loginCheckError = validateLoginCheck(steps, args?.loginCheck);
+    if (loginCheckError) {
+      return createErrorResponse(loginCheckError);
+    }
+
+    const declarations = isPlainObject(stored.params) ? stored.params : undefined;
+    if (declarations) {
+      for (const paramName of Object.keys(declarations)) {
+        if (
+          declarations[paramName]?.secret === true &&
+          declarations[paramName]?.required === true
+        ) {
+          return createErrorResponse(
+            `secret_required_unschedulable: "${name}" requires the secret "${paramName}", and secrets are never stored`,
+          );
+        }
+      }
+      if (isPlainObject(args?.params)) {
+        for (const paramName of Object.keys(args.params)) {
+          if (declarations[paramName]?.secret === true) {
+            return createErrorResponse(
+              `secret_param_in_schedule: "${paramName}" is a secret and cannot be stored in a schedule`,
+            );
+          }
+        }
+      }
+    } else if (isPlainObject(args?.params) && Object.keys(args.params).length > 0) {
+      return createErrorResponse(
+        `unknown_param: "${Object.keys(args.params)[0]}" is not declared by this shortcut`,
+      );
+    }
+
+    // 선언과 대조해 unknown_param·missing_param 을 지금 잡는다.
+    const resolved = resolveShortcutParams(declarations, args?.params);
+    if (!resolved.ok) {
+      return createErrorResponse(resolved.error);
+    }
+
+    const now = Date.now();
+    const signature = currentTimeZoneSignature(now);
+    const draft: ScheduleRecord = {
+      name,
+      schedule: expression.parsed.schedule,
+      ...(isPlainObject(args?.params) ? { params: args.params } : {}),
+      notify: args?.notify !== false,
+      report: args?.report === true,
+      ...(typeof args?.loginCheck === 'string' ? { loginCheck: args.loginCheck.trim() } : {}),
+      nextAt: now,
+      anchorAt: now,
+      revision: 0,
+      createdAt: now,
+      updatedAt: now,
+      timeZone: signature.timeZone,
+      offsetMinutes: signature.offsetMinutes,
+      failStreak: 0,
+    };
+
+    const nextAt = computeNextAt(draft, now);
+    if (nextAt === null) {
+      return createErrorResponse(
+        'schedule_invalid: this schedule never comes around. Check "daily" and "days".',
+      );
+    }
+    draft.nextAt = nextAt;
+
+    const saved = await putSchedule(draft, now);
+    if (!saved.ok) {
+      return createErrorResponse(saved.error);
+    }
+    await armScheduleAlarm(name, saved.record.nextAt);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            name,
+            replaced: saved.replaced,
+            schedule: saved.record.schedule,
+            nextAt: saved.record.nextAt,
+            nextAtLocal: new Date(saved.record.nextAt).toString(),
+            notify: saved.record.notify,
+            report: saved.record.report,
+            revision: saved.record.revision,
+            ...(resolved.warnings.length > 0 ? { warnings: resolved.warnings } : {}),
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
+  /** action="unschedule": 예약 레코드와 알람을 지운다. shortcut 정의는 그대로 둔다. */
+  private async handleUnschedule(args: ShortcutToolParams): Promise<ToolResult> {
+    const name = validateName(args?.name);
+    if (!name) {
+      return createErrorResponse(
+        'name must be a 1-64 character string without "/" or control characters',
+      );
+    }
+    // 실행 중이던 run 이 종료 시 재무장하지 않도록 revision 을 먼저 올린 뒤 지운다.
+    await bumpScheduleRevision(name);
+    const unscheduled = await removeSchedule(name);
+    await clearScheduleAlarm(name);
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ success: true, name, unscheduled }) }],
+      isError: false,
+    };
+  }
+
+  /** action="schedules": 예약 목록. 아침에 상태를 훑는 첫 화면이다. */
+  private async handleSchedules(): Promise<ToolResult> {
+    const map = await readSchedules();
+    const schedules = Object.keys(map)
+      .map((name) => summarizeSchedule(map[name]))
+      .sort((a, b) => a.nextAt - b.nextAt);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ success: true, schedules, max: MAX_SCHEDULES }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
   private async handleDelete(args: ShortcutToolParams): Promise<ToolResult> {
     const name = validateName(args?.name);
     if (!name) {
@@ -665,8 +994,18 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     delete shortcuts[name];
     await saveShortcuts(shortcuts);
 
+    // shortcut 을 지우면 예약과 알람도 함께 사라져야 한다 - 없는 정의를 가리키는 알람이
+    // 밤에 울려 봐야 실패 기록만 쌓인다.
+    const unscheduled = await removeSchedule(name);
+    if (unscheduled) await clearScheduleAlarm(name);
+
     return {
-      content: [{ type: 'text', text: JSON.stringify({ success: true, name, deleted: true }) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ success: true, name, deleted: true, unscheduled }),
+        },
+      ],
       isError: false,
     };
   }

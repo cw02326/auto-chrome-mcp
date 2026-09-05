@@ -31,6 +31,7 @@ import {
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
 import { RunTabError, resolveRunTab, runToolArgs, type RunTabContext } from './tab-context';
+import { RunAbortedError } from '@/utils/tool-watchdog';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
@@ -42,6 +43,17 @@ export interface RunOptions {
   args?: Record<string, any>;
   startNodeId?: string;
   plugins?: RunPlugin[];
+
+  /**
+   * Cancellation signal.
+   *
+   * The caller (or its own deadline) can stop a run in flight: step boundaries
+   * and the engine's wait loops check it, and an aborted run ends as
+   * `run_aborted` after closing the tabs it opened. Without it a watchdog that
+   * gave up on the response left the run itself grinding on
+   * (2026-09-05 Codex review, item 4).
+   */
+  signal?: AbortSignal;
 
   /**
    * Step execution mode switch.
@@ -122,6 +134,46 @@ function buildExecutionModeConfig(options: RunOptions): ExecutionModeConfig {
   return { ...DEFAULT_EXECUTION_MODE_CONFIG };
 }
 
+/** Human-readable reason an abort signal carries. */
+function abortReason(signal?: AbortSignal): string {
+  const reason: unknown = signal?.reason;
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'string' && reason.trim()) return reason;
+  return 'the caller cancelled this run';
+}
+
+/**
+ * Largest string a variable may contribute to `outputs`.
+ *
+ * A screenshot variable used to be a base64 blob, and `outputs` is echoed back
+ * to the caller, so one step could push megabytes of image bytes through the
+ * tool response (2026-09-05 Codex review, item 7). Screenshot steps now store an
+ * artifact reference instead; this is the backstop for anything else that grows
+ * unexpectedly large.
+ */
+export const MAX_OUTPUT_VALUE_CHARS = 8192;
+
+/** Replace oversized binary-looking values with a reference, keep the rest. */
+export function sanitizeOutputs(
+  vars: Record<string, any>,
+  sensitiveKeys: Set<string>,
+): Record<string, any> {
+  const outputs: Record<string, any> = {};
+  for (const [key, value] of Object.entries(vars)) {
+    if (sensitiveKeys.has(key)) continue;
+    if (typeof value === 'string' && value.length > MAX_OUTPUT_VALUE_CHARS) {
+      outputs[key] = {
+        kind: 'omitted',
+        reason: 'value too large for a tool response',
+        bytes: value.length,
+      };
+      continue;
+    }
+    outputs[key] = value;
+  }
+  return outputs;
+}
+
 /**
  * ExecutionOrchestrator manages the lifecycle of a flow execution.
  *
@@ -151,6 +203,17 @@ class ExecutionOrchestrator {
   private executed = 0;
   private steps: Step[] = [];
   private prepareError: RunResult | null = null;
+  private aborted = false;
+
+  /**
+   * Execution context shared with logger, runners and steps.
+   *
+   * It **is** `this.tab` (not a copy): openTab/switchTab re-pin the run through
+   * `setRunTab(ctx)`, and everything that keeps a reference — the logger's
+   * overlay, cleanup, and the tab id the caller reports back — has to follow
+   * that move (2026-09-05 Codex review, item 6).
+   */
+  private readonly ctx: ExecCtx;
 
   // Runners
   private stepRunner: StepRunner;
@@ -176,6 +239,18 @@ class ExecutionOrchestrator {
       if (v.default !== undefined) this.vars[v.key] = v.default;
     }
     if (options.args) Object.assign(this.vars, options.args);
+
+    // The run context is the caller's object, augmented in place. Tabs the run
+    // opens are tracked here so tab steps and cleanup share one set.
+    if (!this.tab.ownedTabIds) this.tab.ownedTabIds = new Set<number>();
+    // 시작 탭은 계속 사정권에 둔다(돌아올 수 있어야 한다). 소유 집합에는 넣지 않는다 —
+    // run 이 만든 탭이 아니므로 abort 정리가 닫으면 안 된다.
+    if (this.tab.entryTabId === undefined) this.tab.entryTabId = this.tab.tabId;
+    if (options.signal) this.tab.signal = options.signal;
+    this.ctx = Object.assign(this.tab, {
+      vars: this.vars,
+      logger: (e: RunLogEntry) => this.logger.push(e),
+    }) as ExecCtx;
 
     // Set up global deadline
     const globalTimeout = Math.max(0, Number(options.timeoutMs || 0));
@@ -212,14 +287,36 @@ class ExecutionOrchestrator {
 
   private ensureWithinDeadline() {
     if (this.deadline > 0 && Date.now() > this.deadline) {
-      const err = new Error('Global timeout reached');
       this.logger.push({
         stepId: LOG_STEP_IDS.GLOBAL_TIMEOUT,
         status: 'failed',
         message: 'Global timeout reached',
       });
-      throw err;
+      throw new RunAbortedError('the run exceeded its global timeout');
     }
+  }
+
+  /** Did the caller (or its deadline) ask this run to stop? */
+  private abortRequested(): boolean {
+    return this.tab.signal?.aborted === true;
+  }
+
+  /**
+   * Stop the run at a step boundary when it was aborted.
+   * @returns true when the caller should stop traversing.
+   */
+  private checkAbort(): boolean {
+    if (!this.abortRequested()) return false;
+    if (!this.aborted) {
+      this.aborted = true;
+      this.failed++;
+      this.logger.push({
+        stepId: LOG_STEP_IDS.RUN_ABORTED,
+        status: 'failed',
+        message: `run_aborted: ${abortReason(this.tab.signal)}`,
+      });
+    }
+    return true;
   }
 
   async run(): Promise<RunResult> {
@@ -227,12 +324,54 @@ class ExecutionOrchestrator {
       await this.prepareExecution();
       if (this.prepareError) return this.prepareError;
       return await this.traverseDag();
+    } catch (e) {
+      // 마감·취소는 오류가 아니라 "여기서 멈췄다" 는 결과다. 예외로 흘려보내면 호출자가
+      // 요약도 로그도 받지 못한다.
+      if (e instanceof RunAbortedError) return this.abortedResult(e);
+      throw e;
     } finally {
       await this.cleanup();
     }
   }
 
+  /** RunResult shape for a run that was cancelled or ran out of time. */
+  private abortedResult(e: RunAbortedError): RunResult {
+    this.aborted = true;
+    if (!this.logger.getLogs().some((l) => String(l.message || '').includes('run_aborted'))) {
+      this.logger.push({
+        stepId: LOG_STEP_IDS.RUN_ABORTED,
+        status: 'failed',
+        message: e.message,
+      });
+    }
+    return {
+      runId: this.runId,
+      success: false,
+      summary: {
+        total: this.executed,
+        success: Math.max(0, this.executed - this.failed),
+        failed: Math.max(1, this.failed),
+        tookMs: Date.now() - this.startAt,
+      },
+      url: null,
+      outputs: sanitizeOutputs(this.vars, this.sensitiveKeys()),
+      logs: this.options.returnLogs ? this.logger.getLogs() : undefined,
+      screenshots: { onFailure: null },
+      paused: false,
+    };
+  }
+
+  private sensitiveKeys(): Set<string> {
+    return new Set((this.flow.variables || []).filter((v) => v.sensitive).map((v) => v.key));
+  }
+
   private async prepareExecution() {
+    // 이미 취소된 채로 들어왔으면 준비 작업(탭 열기·read_page·변수 수집)도 하지 않는다.
+    if (this.abortRequested()) {
+      this.prepareError = this.abortedResult(new RunAbortedError(abortReason(this.tab.signal)));
+      return;
+    }
+
     // Derive default startUrl
     let derivedStartUrl: string | undefined;
     try {
@@ -488,8 +627,10 @@ class ExecutionOrchestrator {
       vars: this.vars,
       logger: this.logger,
       evalCondition: (c) => this.evalCondition(c),
-      runSubflowById: (id, ctx) => this.subflowRunner.runSubflowById(id, ctx, () => this.paused),
-      isPaused: () => this.paused,
+      // subflow 도 abort 를 본다: 바깥 DAG 만 멈추고 안쪽 루프가 계속 도는 일이 없게 한다.
+      runSubflowById: (id, ctx) =>
+        this.subflowRunner.runSubflowById(id, ctx, () => this.paused || this.abortRequested()),
+      isPaused: () => this.paused || this.abortRequested(),
     });
   }
 
@@ -574,18 +715,10 @@ class ExecutionOrchestrator {
     let guard = 0;
 
     // Execution context carries the run's pinned tab. openTab/switchTab move it
-    // through setRunTab(); nothing else may change which tab steps touch.
-    const ctx: ExecCtx = {
-      vars: this.vars,
-      tabId: this.tab.tabId,
-      windowId: this.tab.windowId,
-      source: this.tab.source,
-      // Session/lane of the caller ride along so every tool call a node makes is
-      // attributed to the same bucket as the call that started the run.
-      mcpSessionId: this.tab.mcpSessionId,
-      lane: this.tab.lane,
-      logger: (e: RunLogEntry) => this.logger.push(e),
-    };
+    // through setRunTab(); nothing else may change which tab steps touch. It is
+    // the same object the logger and cleanup hold, so a move is visible to all
+    // of them at once.
+    const ctx: ExecCtx = this.ctx;
     if (currentId) {
       try {
         await this.logger.overlayAppend(
@@ -596,6 +729,9 @@ class ExecutionOrchestrator {
       }
     }
     while (currentId) {
+      // 스텝 경계마다 취소를 확인한다: 워치독이 응답을 끊은 뒤에도 계속 도는 좀비 run 을
+      // 막는 지점이 여기다.
+      if (this.checkAbort()) break;
       this.ensureWithinDeadline();
       if (guard++ >= ENGINE_CONSTANTS.MAX_ITERATIONS) {
         this.logger.push({
@@ -684,14 +820,11 @@ class ExecutionOrchestrator {
       }
     }
     const tookMs = Date.now() - this.startAt;
-    const sensitiveKeys = new Set(
-      (this.flow.variables || []).filter((v) => v.sensitive).map((v) => v.key),
-    );
-    const outputs: Record<string, any> = {};
-    for (const [k, v] of Object.entries(this.vars)) if (!sensitiveKeys.has(k)) outputs[k] = v;
+    // outputs 는 응답에 그대로 실린다. 큰 값은 참조로 바꿔 내보낸다 (검토 항목 7).
+    const outputs = sanitizeOutputs(this.vars, this.sensitiveKeys());
     return {
       runId: this.runId,
-      success: !this.paused && this.failed === 0,
+      success: !this.paused && !this.aborted && this.failed === 0,
       summary: {
         total: this.executed,
         success: this.executed - this.failed,
@@ -805,6 +938,31 @@ class ExecutionOrchestrator {
     };
   }
 
+  /**
+   * Close the tabs this run opened.
+   *
+   * Only on abort: a run that finished normally leaves its tabs for the caller
+   * to inspect. The tab the run was handed is never closed here — it belongs to
+   * the session, not to the run.
+   */
+  private async closeOwnedTabs() {
+    const owned = [...(this.tab.ownedTabIds ?? [])];
+    if (!owned.length) return;
+    for (const tabId of owned) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        // 이미 닫혔으면 그만이다.
+      }
+    }
+    this.tab.ownedTabIds?.clear();
+    this.logger.push({
+      stepId: LOG_STEP_IDS.RUN_CLEANUP,
+      status: 'warning',
+      message: `run_aborted cleanup closed ${owned.length} tab(s) this run opened`,
+    });
+  }
+
   private async cleanup() {
     if (this.networkCaptureStarted) {
       try {
@@ -882,6 +1040,8 @@ class ExecutionOrchestrator {
         });
       }
     } catch {}
+    // 마지막에 닫는다: 오버레이 종료·네트워크 캡처 정리가 아직 탭을 쓰기 때문이다.
+    if (this.aborted) await this.closeOwnedTabs();
   }
 }
 

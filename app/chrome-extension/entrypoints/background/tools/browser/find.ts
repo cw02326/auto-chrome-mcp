@@ -442,7 +442,6 @@ interface MatchPayload {
   cy: number;
   frameId?: number;
   frameUrl?: string;
-  hint: string;
 }
 
 function toMatch(scored: ScoredCandidate, rank: number): MatchPayload {
@@ -455,7 +454,6 @@ function toMatch(scored: ScoredCandidate, rank: number): MatchPayload {
     name: clip(c.name, MAX_NAME_CHARS),
     cx: c.cx,
     cy: c.cy,
-    hint: MATCH_HINT,
   };
   if (c.text) match.text = clip(c.text, MAX_TEXT_CHARS);
   if (typeof c.frameId === 'number') {
@@ -623,11 +621,13 @@ class FindTool extends BaseBrowserToolExecutor {
     }
 
     let matches = scored.slice(0, maxResults).map((s, i) => toMatch(s, i + 1));
-    let text = JSON.stringify({ ...basePayload, matches });
+    // auto-chrome-mcp fork: hint 는 응답 전체에 1회만 싣는다 — 이전에는 match 항목마다
+    // 118자짜리 문구가 반복돼(maxResults=5 면 5회) 응답 크기를 불필요하게 부풀렸다.
+    let text = JSON.stringify({ ...basePayload, matches, hint: MATCH_HINT });
     // 응답 상한 초과 시 순위가 낮은 매치부터 버린다(1위는 항상 남긴다).
     while (text.length > MAX_RESPONSE_CHARS && matches.length > 1) {
       matches = matches.slice(0, matches.length - 1);
-      text = JSON.stringify({ ...basePayload, matches, truncated: true });
+      text = JSON.stringify({ ...basePayload, matches, hint: MATCH_HINT, truncated: true });
     }
 
     return {

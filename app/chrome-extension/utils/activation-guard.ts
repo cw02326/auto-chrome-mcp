@@ -29,7 +29,7 @@
  * 탭 활성화는 이 토글과 무관하다 — 강제 포커스를 켜도 활성화는 전용 창 안에서만 일어난다.
  */
 
-import { isBackgroundModeEnabled } from './background-mode';
+import { isBackgroundModeEnabled, isBackgroundModeEnabledFor } from './background-mode';
 import { isMcpWindow } from './mcp-window-manager';
 
 const FORCE_FOCUS_STORAGE_KEY = 'forceFocusOnToolCall';
@@ -39,6 +39,12 @@ export interface ActivationOptions {
   force?: boolean;
   /** 로그에 남길 호출자 이름 (예: 'gif-recorder'). */
   reason?: string;
+  /**
+   * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): 이 호출의 도구 인자.
+   * 인자에 실행 컨텍스트 모드가 실려 있으면 전역 토글보다 그 값을 먼저 본다 -
+   * 예약 실행은 전역 토글이 OFF 여도 사용자 탭을 활성화하지 않는다.
+   */
+  contextArgs?: unknown;
 }
 
 /**
@@ -82,7 +88,11 @@ export async function isActivationAllowed(
 ): Promise<boolean> {
   if (options.force === true) return true;
   try {
-    if (!(await isBackgroundModeEnabled())) return true;
+    const enabled =
+      options.contextArgs === undefined
+        ? await isBackgroundModeEnabled()
+        : await isBackgroundModeEnabledFor(options.contextArgs);
+    if (!enabled) return true;
   } catch {
     // 조회 실패 시에는 무간섭 쪽(기본 ON)으로 간주한다.
   }

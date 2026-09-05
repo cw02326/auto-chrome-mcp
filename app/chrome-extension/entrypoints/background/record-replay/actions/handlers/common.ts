@@ -18,6 +18,63 @@ import {
 } from '@/shared/selector';
 import { tryResolveString } from '../registry';
 import type { ActionExecutionContext, ElementTarget, Resolvable, VariableStore } from '../types';
+import { LEASE_TOKEN_ARG } from '@/utils/tab-lock';
+
+// ================================
+// Tool Call Arguments
+// ================================
+
+/**
+ * Build the args for a browser tool call made from an action handler.
+ *
+ * The actions path used to send a bare `{ tabId }`, so the work-tab gate saw an
+ * anonymous session: locks, owned-tab bookkeeping and lane routing all landed in
+ * the wrong bucket, and the run's tab lease could not recognise its own calls
+ * (2026-09-05 Codex review, item 8). Every `handleCallTool` from a handler goes
+ * through here so the run's tab, session, lane and lease token always ride along.
+ *
+ * An explicit value in `args` wins: a step that deliberately addresses another
+ * tab says so.
+ */
+export function actionToolArgs<T extends Record<string, any>>(
+  ctx: ActionExecutionContext,
+  args?: T,
+): T & { tabId: number } {
+  const out: Record<string, any> = { ...(args ?? {}) };
+  if (typeof out.tabId !== 'number') out.tabId = ctx.tabId;
+  if (typeof ctx.mcpSessionId === 'string' && out._mcpSessionId === undefined) {
+    out._mcpSessionId = ctx.mcpSessionId;
+  }
+  if (typeof ctx.lane === 'string' && out.lane === undefined) out.lane = ctx.lane;
+  if (typeof ctx.leaseToken === 'string' && out[LEASE_TOKEN_ARG] === undefined) {
+    out[LEASE_TOKEN_ARG] = ctx.leaseToken;
+  }
+  return out as T & { tabId: number };
+}
+
+// ================================
+// Run-owned Tabs
+// ================================
+
+/** Tabs this run may drive: the ones it opened, plus the tab it was pinned to. */
+export function actionOwnedTabIds(ctx: ActionExecutionContext): Set<number> {
+  const owned = new Set<number>(ctx.ownedTabIds ?? []);
+  if (typeof ctx.tabId === 'number') owned.add(ctx.tabId);
+  if (typeof ctx.entryTabId === 'number') owned.add(ctx.entryTabId);
+  return owned;
+}
+
+/** Register a tab the run just opened. */
+export function markActionOwnedTab(ctx: ActionExecutionContext, tabId: number): void {
+  if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
+  ctx.ownedTabIds.add(tabId);
+}
+
+/** Is this tab inside the run's scope? */
+export function isActionOwnedTab(ctx: ActionExecutionContext, tabId: number): boolean {
+  return actionOwnedTabIds(ctx).has(tabId);
+}
 
 // ================================
 // Selector Locator Instance

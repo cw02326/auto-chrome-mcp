@@ -606,10 +606,11 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
                 ...(isDownscaled
                   ? { downscaledFrom: `${modelImage.originalWidth}x${modelImage.originalHeight}` }
                   : {}),
-                note:
-                  'The image is attached as an MCP image content block (no base64 in this text). ' +
-                  'Coordinates you read off the image are in image pixels; chrome_computer converts them ' +
-                  'automatically via the screenshot context. To convert manually: cssX = imageX / imageScale.',
+                // auto-chrome-mcp fork: 254자짜리 note 문구를 매 호출 응답에서 반복하던 것을
+                // 제거했다(2026-09 최적화). 같은 설명(이미지가 별도 MCP image 블록으로 온다는 것,
+                // imageScale 로 좌표를 환산하는 법)은 tools.ts 의 chrome_screenshot 도구
+                // description 으로 옮겨야 한다 — 아직 옮기지 않았다면 CHANGELOG 참고
+                // (tools.ts 는 이 작업 범위 밖이라 여기서 수정하지 않는다).
                 ...(includeBase64InText === true ? { base64Data } : {}),
                 ...downloadsSaveResult,
               }),

@@ -27,6 +27,12 @@ interface BatchToolParams {
   templates?: boolean;
   /** 응답에 실을 `as` 이름 목록. 없으면 results 필드를 아예 싣지 않는다. */
   return?: string[];
+  /**
+   * auto-chrome-mcp fork(2026-09-05): 지금 하는 작업을 한 문구로. 실행하는 동안 MCP 탭
+   * 그룹 라벨이 이 문구가 되고, 끝나면 "MCP" 로 돌아간다. 무간섭 모드에서는 탭이 배경에
+   * 조용히 열리므로 사용자가 무엇이 도는지 아는 유일한 표시가 그룹 라벨이다.
+   */
+  task?: string;
 }
 
 /**
@@ -95,6 +101,7 @@ class BatchTool extends BaseBrowserToolExecutor {
       collectImages: true,
       templatesEnabled,
       returnNames: templatesEnabled && Array.isArray(returnNames) ? returnNames : undefined,
+      taskTitle: typeof args?.task === 'string' ? args.task : undefined,
     });
 
     // 상한을 넘으면 최신 것부터 남긴다 — 체인의 마지막 스크린샷이 보통 가장 중요하다.

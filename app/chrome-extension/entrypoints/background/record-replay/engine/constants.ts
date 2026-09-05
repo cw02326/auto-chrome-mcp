@@ -16,6 +16,10 @@ export type EdgeLabel =
 // Centralized stepId values used in run logs for non-step events
 export const LOG_STEP_IDS = {
   GLOBAL_TIMEOUT: 'global-timeout',
+  /** 호출자가 취소했거나 마감을 넘겨 실행을 멈춘 자리. */
+  RUN_ABORTED: 'run-aborted',
+  /** abort 정리에서 run 이 만든 탭을 닫은 기록. */
+  RUN_CLEANUP: 'run-cleanup',
   PLUGIN_RUN_START: 'plugin-runStart',
   VARIABLE_COLLECT: 'variable-collect',
   BINDING_CHECK: 'binding-check',

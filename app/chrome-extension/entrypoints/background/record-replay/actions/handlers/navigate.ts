@@ -13,7 +13,7 @@ import { ENGINE_CONSTANTS } from '../../engine/constants';
 import { ensureReadPageIfWeb, waitForNavigationDone } from '../../engine/policies/wait';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
-import { clampInt, readTabUrl, resolveString } from './common';
+import { actionToolArgs, clampInt, readTabUrl, resolveString } from './common';
 import { runTabFromId } from '../../engine/tab-context';
 
 export const navigateHandler: ActionHandler<'navigate'> = {
@@ -55,7 +55,7 @@ export const navigateHandler: ActionHandler<'navigate'> = {
     if (action.params.refresh) {
       const result = await handleCallTool({
         name: TOOL_NAMES.BROWSER.NAVIGATE,
-        args: { refresh: true, tabId },
+        args: actionToolArgs(ctx, { refresh: true, tabId }),
       });
 
       if ((result as { isError?: boolean })?.isError) {
@@ -86,7 +86,7 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
     const result = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
-      args: { url, tabId },
+      args: actionToolArgs(ctx, { url, tabId }),
     });
 
     if ((result as { isError?: boolean })?.isError) {
