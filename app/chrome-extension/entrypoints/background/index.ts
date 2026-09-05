@@ -15,6 +15,11 @@ import { initializeTogglesIfMissing } from '@/utils/consent-storage';
 // auto-chrome-mcp fork(2026-09-05): chrome_shortcut 예약 실행. import 만으로 최상위
 // onAlarm 리스너가 등록된다 - 늦게 등록한 리스너는 워커를 깨우지 못한다.
 import { initShortcutScheduleRunner } from './schedule-runner';
+// auto-chrome-mcp fork(2026-09-05 사이드패널 2단계 D): 매일 작업 화면의 메시지 접점과
+// 예약 실패 알림 클릭 처리.
+import { initDailyMessages } from './daily-messages';
+// auto-chrome-mcp fork(2026-09-05 사이드패널 2단계): 사이드패널 여는 단축키.
+import { initSidepanelShortcut } from './sidepanel-shortcut';
 
 /**
  * v1.0.32+: 비민감 4종 site-level contentSettings 를 모든 사이트 (`<all_urls>`) 에 대해
@@ -105,6 +110,8 @@ export default defineBackground(() => {
   // auto-chrome-mcp fork: 워커가 평가될 때마다 예약 상태를 맞춘다 (running -> interrupted,
   // 고아 탭 정리, 없어진 알람 재생성, 지난 예약 1회 따라잡기).
   initShortcutScheduleRunner();
+  // 매일 작업 탭이 부르는 메시지와 알림 클릭. 리스너는 워커 평가마다 등록된다.
+  initDailyMessages();
 
   // Initialize core services
   initNativeHostListener();
@@ -134,6 +141,8 @@ export default defineBackground(() => {
   initQuickPanelTabsHandler();
   // Quick Panel: keyboard shortcut handler
   initQuickPanelCommands();
+  // 사이드패널 여는 단축키 (Ctrl+Shift+Y)
+  initSidepanelShortcut();
 
   // Conditionally initialize semantic similarity engine if model cache exists
   initializeSemanticEngineIfCached()

@@ -89,6 +89,49 @@
                 </svg>
               </div>
             </button>
+            <!-- 매일 작업: 예약해 둔 흐름·단축과 그 실행 이력 (2026-09-05 2단계 E) -->
+            <button
+              class="navigator-item"
+              :class="{ 'navigator-item-active': activeTab === 'daily' }"
+              @click="selectTab('daily')"
+            >
+              <div class="navigator-item-icon">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M8 7V3m8 4V3M4 11h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"
+                  />
+                </svg>
+              </div>
+              <div class="navigator-item-content">
+                <span class="navigator-item-title">{{
+                  getMessage('sidepanel_daily_tab_title')
+                }}</span>
+                <span class="navigator-item-desc">{{
+                  getMessage('sidepanel_daily_tab_desc')
+                }}</span>
+              </div>
+              <div v-if="activeTab === 'daily'" class="navigator-item-check">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </button>
             <button
               class="navigator-item"
               :class="{ 'navigator-item-active': activeTab === 'element-markers' }"
@@ -143,7 +186,7 @@ import { ref, computed } from 'vue';
 import { getMessage } from '@/utils/i18n';
 import { useFloatingDrag } from '../composables/useFloatingDrag';
 
-type TabType = 'workflows' | 'element-markers';
+type TabType = 'workflows' | 'daily' | 'element-markers';
 
 const BUTTON_SIZE = 36;
 const CLAMP_MARGIN = 12;

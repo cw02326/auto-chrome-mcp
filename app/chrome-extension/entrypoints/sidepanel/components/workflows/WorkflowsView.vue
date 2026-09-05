@@ -51,10 +51,65 @@
           </svg>
         </button>
 
+        <!-- 가져오기: JSON 파일을 골라 흐름을 들여온다 -->
+        <button
+          class="flex-shrink-0 px-3 py-2 text-xs font-medium"
+          :style="refreshButtonStyle"
+          @click="$emit('import')"
+          :title="getMessage('sidepanel_daily_import_button')"
+        >
+          {{ getMessage('sidepanel_daily_import_button') }}
+        </button>
+
         <!--
           예전 "새로 만들기" 버튼은 여기 있었다. 흐름은 녹화로만 만들고, 녹화 버튼은 이
           목록 바로 위 녹화 표시줄에 있으므로 같은 자리에 버튼을 둘로 두지 않는다.
         -->
+      </div>
+
+      <!--
+        필터 바. 접이식이 아니라 늘 보이는 한 줄이다. 무엇이 걸려 있는지 보이지 않으면
+        목록이 비었을 때 흐름이 없는 것으로 읽힌다.
+      -->
+      <div class="wf-filter-bar">
+        <select
+          class="wf-filter-select"
+          :style="filterSelectStyle"
+          :value="filter.site"
+          @change="patchFilter({ site: ($event.target as HTMLSelectElement).value })"
+        >
+          <option value="">{{ getMessage('sidepanel_daily_filter_site_all') }}</option>
+          <option v-for="site in sites" :key="site" :value="site">{{ site }}</option>
+        </select>
+        <button
+          class="wf-chip"
+          :style="filter.published ? chipOnStyle : chipStyle"
+          @click="patchFilter({ published: !filter.published })"
+        >
+          {{ getMessage('sidepanel_daily_filter_published') }}
+        </button>
+        <button
+          class="wf-chip"
+          :style="filter.scheduled ? chipOnStyle : chipStyle"
+          @click="patchFilter({ scheduled: !filter.scheduled })"
+        >
+          {{ getMessage('sidepanel_daily_filter_scheduled') }}
+        </button>
+        <button
+          class="wf-chip"
+          :style="filter.recentFailed ? chipOnStyle : chipStyle"
+          @click="patchFilter({ recentFailed: !filter.recentFailed })"
+        >
+          {{ getMessage('sidepanel_daily_filter_recent_failed') }}
+        </button>
+        <button
+          v-if="filterActive"
+          class="wf-chip"
+          :style="chipStyle"
+          @click="$emit('update:filter', { ...EMPTY_FLOW_FILTER })"
+        >
+          {{ getMessage('sidepanel_daily_filter_clear') }}
+        </button>
       </div>
 
       <!-- Filter Bar -->
@@ -144,7 +199,10 @@
           :key="flow.id"
           :flow="flow"
           :status="statuses?.[flow.id] || null"
+          :schedule="schedules?.[flow.id] || null"
+          :last-success-at="lastSuccessAt?.[flow.id] || null"
           @run="$emit('run', $event)"
+          @schedule="$emit('schedule', $event)"
           @edit="$emit('edit', $event)"
           @delete="$emit('delete', $event)"
           @export="$emit('export', $event)"
@@ -201,9 +259,13 @@
               >
                 {{ getMessage('sidepanel_no_run_history') }}
               </div>
+              <!--
+                예전에는 최근 5건만 보여 줬다. 실패를 찾으려면 그 5건 밖을 봐야 하는 일이
+                잦아 제한을 없앴다 (2026-09-05 사이드패널 2단계).
+              -->
               <div v-else class="space-y-2 py-2">
                 <div
-                  v-for="run in runs.slice(0, 5)"
+                  v-for="run in runs"
                   :key="run.id"
                   class="run-item"
                   :style="runItemStyle"
@@ -277,10 +339,21 @@
                           entry.status === 'failed' ? 'var(--ac-danger)' : 'var(--ac-text-muted)',
                       }"
                     >
-                      #{{ idx + 1 }} {{ entry.status }} -
+                      #{{ idx + 1 }} {{ entry.status }} ·
                       {{ getMessage('sidepanel_step_label') }}={{ entry.stepId }}
                       <span v-if="entry.tookMs" class="ml-2">{{ entry.tookMs }}ms</span>
                     </div>
+                    <!--
+                      수동 실행의 실패 화면은 흐름 엔진이 base64 로 남긴다(파일이 아니다).
+                      그대로 썸네일로 보여 준다. 예약 실행의 파일 스크린샷은 매일 작업 탭에서
+                      "스크린샷 열기" 로 연다.
+                    -->
+                    <img
+                      v-if="failureShot(run)"
+                      class="run-shot"
+                      :src="failureShot(run)"
+                      :alt="getMessage('sidepanel_daily_screenshot_alt')"
+                    />
                   </div>
                 </div>
               </div>
@@ -303,6 +376,8 @@
 import { ref, computed } from 'vue';
 import { getMessage } from '@/utils/i18n';
 import WorkflowListItem from './WorkflowListItem.vue';
+import { EMPTY_FLOW_FILTER, isFilterActive, type FlowFilterState } from '../../utils/flow-filters';
+import type { ScheduleView } from '../../utils/daily-messages';
 
 interface FlowLite {
   id: string;
@@ -345,6 +420,14 @@ const props = defineProps<{
   totalCount: number;
   /** 흐름별 마지막 실행 결과. 카드에 그대로 보여 준다. */
   statuses?: Record<string, { kind: 'running' | 'ok' | 'error'; text: string }>;
+  /** 흐름 id → 그 흐름에 걸린 예약. 카드 배지에 쓴다. */
+  schedules?: Record<string, ScheduleView>;
+  /** 흐름 id → 마지막으로 성공한 시각(epoch ms). */
+  lastSuccessAt?: Record<string, number>;
+  /** 필터 바 상태. 실제로 거르는 일은 상위가 한다. */
+  filter: FlowFilterState;
+  /** 필터 바의 사이트 선택지. */
+  sites: string[];
 }>();
 
 const emit = defineEmits<{
@@ -358,11 +441,37 @@ const emit = defineEmits<{
   (e: 'unpublish', id: string): void;
   (e: 'update:onlyBound', value: boolean): void;
   (e: 'update:search', value: string): void;
+  (e: 'update:filter', value: FlowFilterState): void;
   (e: 'toggleRun', id: string): void;
+  (e: 'schedule', id: string): void;
+  (e: 'import'): void;
 }>();
 
 // Local state
 const expandedSections = ref<Set<string>>(new Set());
+
+const filterActive = computed(() => isFilterActive(props.filter));
+
+function patchFilter(patch: Partial<FlowFilterState>): void {
+  emit('update:filter', { ...props.filter, ...patch });
+}
+
+/**
+ * 실패한 수동 실행의 화면(base64).
+ *
+ * 흐름 엔진은 마지막 단계 기록에 `screenshotBase64` 를 남긴다. 데이터 URL 접두가 붙어 있지
+ * 않은 형태도 있어 여기서 맞춘다.
+ */
+function failureShot(run: RunLite): string {
+  const entries = Array.isArray(run.entries) ? (run.entries as Array<Record<string, unknown>>) : [];
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const raw = entries[i]?.screenshotBase64;
+    if (typeof raw === 'string' && raw) {
+      return raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
+    }
+  }
+  return '';
+}
 
 // Helper functions
 function getFlowName(flowId: string): string {
@@ -476,9 +585,68 @@ const runItemStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface-muted)',
   borderRadius: 'var(--ac-radius-button)',
 }));
+
+const filterSelectStyle = computed(() => ({
+  backgroundColor: 'var(--ac-surface-muted)',
+  color: 'var(--ac-text)',
+  border: 'var(--ac-border-width) solid var(--ac-border)',
+  borderRadius: 'var(--ac-radius-button)',
+}));
+
+const chipStyle = computed(() => ({
+  backgroundColor: 'var(--ac-surface-muted)',
+  color: 'var(--ac-text-muted)',
+  borderRadius: 'var(--ac-radius-button, 999px)',
+}));
+
+const chipOnStyle = computed(() => ({
+  backgroundColor: 'var(--ac-accent)',
+  color: 'var(--ac-accent-contrast)',
+  borderRadius: 'var(--ac-radius-button, 999px)',
+}));
 </script>
 
 <style scoped>
+/* 필터 바: 늘 보이는 한 줄 */
+.wf-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.wf-filter-select {
+  height: 28px;
+  font-size: 12px;
+  padding: 0 6px;
+  font-family: inherit;
+  outline: none;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+
+.wf-chip {
+  border: none;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 실패 화면 썸네일 */
+.run-shot {
+  margin-top: 6px;
+  max-width: 100%;
+  max-height: 160px;
+  border-radius: var(--ac-radius-inner, 8px);
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+}
+
 .workflow-checkbox {
   width: 16px;
   height: 16px;

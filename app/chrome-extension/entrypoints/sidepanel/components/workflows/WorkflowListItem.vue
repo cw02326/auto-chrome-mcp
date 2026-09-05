@@ -11,13 +11,17 @@
         <div class="workflow-name" :style="nameStyle">{{
           flow.name || getMessage('sidepanel_untitled_flow')
         }}</div>
-        <!-- 발행 상태 배지 -->
-        <div v-if="flow.published || flow.needsRepublish" class="workflow-badges">
+        <!-- 발행·예약 상태 배지 -->
+        <div v-if="flow.published || flow.needsRepublish || schedule" class="workflow-badges">
           <span v-if="flow.published" class="workflow-badge" :style="publishedBadgeStyle">
             {{ getMessage('sidepanel_published_badge') }}
           </span>
           <span v-if="flow.needsRepublish" class="workflow-badge" :style="staleBadgeStyle">
             {{ getMessage('sidepanel_republish_badge') }}
+          </span>
+          <!-- 예약 배지: 다음 실행 시각. 꺼 둔 예약은 그렇게 적는다. -->
+          <span v-if="schedule" class="workflow-badge" :style="scheduleBadgeStyle">
+            {{ scheduleBadgeText }}
           </span>
         </div>
         <div class="workflow-desc" :style="descStyle">{{
@@ -25,6 +29,10 @@
         }}</div>
         <!-- 실행 결과. 실패를 콘솔에만 남기지 않고 카드에 남긴다. -->
         <div v-if="status" class="workflow-status" :style="statusStyle">{{ status.text }}</div>
+        <!-- 마지막으로 성공한 시각. 예약이 도는 흐름인지 한눈에 보게 한다. -->
+        <div v-if="lastSuccessText" class="workflow-status" :style="descStyle">
+          {{ lastSuccessText }}
+        </div>
         <!-- Tags -->
         <div v-if="hasTags" class="workflow-tags">
           <span v-if="flow.meta?.domain" class="workflow-tag" :style="tagDomainStyle">
@@ -51,6 +59,27 @@
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M8 5v14l11-7z" />
+          </svg>
+        </button>
+        <button
+          class="workflow-action"
+          :style="actionStyle"
+          @click.stop="$emit('schedule', flow.id)"
+          :title="getMessage('sidepanel_daily_schedule_button')"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M8 7V3m8 4V3M4 11h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"
+            />
           </svg>
         </button>
         <button
@@ -159,6 +188,8 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getMessage } from '@/utils/i18n';
+import { formatNextRun, formatRunTime } from '../../utils/daily-format';
+import type { ScheduleView } from '../../utils/daily-messages';
 
 interface FlowLite {
   id: string;
@@ -179,6 +210,10 @@ const props = defineProps<{
   flow: FlowLite;
   /** 마지막 실행 결과. 실패를 조용히 넘기지 않으려고 카드에 남긴다. */
   status?: { kind: 'running' | 'ok' | 'error'; text: string } | null;
+  /** 이 흐름에 걸린 예약. 있으면 다음 실행 시각을 배지로 보여준다. */
+  schedule?: ScheduleView | null;
+  /** 마지막으로 성공한 시각(epoch ms). */
+  lastSuccessAt?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -188,7 +223,22 @@ const emit = defineEmits<{
   (e: 'export', id: string): void;
   (e: 'publish', id: string): void;
   (e: 'unpublish', id: string): void;
+  (e: 'schedule', id: string): void;
 }>();
+
+/** 예약 배지 문구. 꺼 둔 예약은 "꺼짐" 이다 - 다음 실행 시각을 보여주면 돌 것처럼 읽힌다. */
+const scheduleBadgeText = computed(() => {
+  const schedule = props.schedule;
+  if (!schedule) return '';
+  if (!schedule.enabled) return getMessage('sidepanel_daily_paused');
+  return getMessage('sidepanel_daily_badge_next', [formatNextRun(schedule.nextAt)]);
+});
+
+const lastSuccessText = computed(() => {
+  const at = props.lastSuccessAt;
+  if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) return '';
+  return getMessage('sidepanel_daily_last_success', [formatRunTime(at)]);
+});
 
 const showActions = ref(false);
 const showMoreMenu = ref(false);
@@ -252,6 +302,11 @@ const descStyle = computed(() => ({
 const publishedBadgeStyle = computed(() => ({
   backgroundColor: 'var(--ac-success-light, #dcfce7)',
   color: 'var(--ac-success, #16a34a)',
+}));
+
+const scheduleBadgeStyle = computed(() => ({
+  backgroundColor: 'var(--ac-accent-subtle, rgba(217, 119, 87, 0.12))',
+  color: 'var(--ac-accent, #d97757)',
 }));
 
 const staleBadgeStyle = computed(() => ({

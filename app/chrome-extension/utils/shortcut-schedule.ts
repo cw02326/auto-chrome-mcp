@@ -68,8 +68,105 @@ export interface ScheduleExpression {
   days?: string[];
 }
 
+/**
+ * 예약이 무엇을 돌리는가 (2026-09-05 사이드패널 2단계 D).
+ *
+ * 예약 엔진은 하나지만 대상은 둘이다: 저장된 단축(`chrome_shortcut`)과 발행된 흐름
+ * (record-replay). 대상을 레코드에 명시해야 실행기가 분기할 수 있고, 흐름이 지워져도
+ * 이력이 무엇을 가리켰는지 남는다.
+ */
+export type ScheduleTarget =
+  | { kind: 'shortcut'; name: string }
+  | { kind: 'flow'; flowId: string; args?: Record<string, string> };
+
+export type ScheduleKind = ScheduleTarget['kind'];
+
+/**
+ * 예약 식별자 접두 (2026-09-05 Codex 설계 검토 1).
+ *
+ * 표시 이름과 내부 식별자를 나눈다. 예전 설계는 흐름 예약의 `name` 을 `flow:<flowId>` 로
+ * 두려 했는데, 그러면 그 문자열을 이름으로 가진 단축과 저장소 키·알람·이력이 겹친다.
+ * 겹침을 막으려고 단축 이름 공간에 접두사를 예약하는 것은 사용자에게 이유를 설명할 수
+ * 없는 제약이라(단축 이름은 사용자 자유다) 대신 **양쪽 모두** 접두를 붙이고 뒤를
+ * `encodeURIComponent` 로 감쌌다. 인코딩된 뒤에는 ':' 이 남지 않으므로 두 공간이 절대
+ * 만나지 않는다.
+ */
+export const SHORTCUT_SCHEDULE_PREFIX = 'shortcut:';
+export const FLOW_SCHEDULE_PREFIX = 'flow:';
+
+/** 단축 예약의 식별자. */
+export function scheduleIdForShortcut(name: string): string {
+  return `${SHORTCUT_SCHEDULE_PREFIX}${encodeURIComponent(name)}`;
+}
+
+/** 흐름 예약의 식별자. */
+export function scheduleIdForFlow(flowId: string): string {
+  return `${FLOW_SCHEDULE_PREFIX}${encodeURIComponent(flowId)}`;
+}
+
+/** 식별자에서 대상을 되찾는다. 우리 형식이 아니면 null. */
+export function parseScheduleId(scheduleId: unknown): ScheduleTarget | null {
+  if (typeof scheduleId !== 'string' || scheduleId.length === 0) return null;
+  const decode = (raw: string): string | null => {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return null;
+    }
+  };
+  if (scheduleId.startsWith(SHORTCUT_SCHEDULE_PREFIX)) {
+    const name = decode(scheduleId.slice(SHORTCUT_SCHEDULE_PREFIX.length));
+    return name ? { kind: 'shortcut', name } : null;
+  }
+  if (scheduleId.startsWith(FLOW_SCHEDULE_PREFIX)) {
+    const flowId = decode(scheduleId.slice(FLOW_SCHEDULE_PREFIX.length));
+    return flowId ? { kind: 'flow', flowId } : null;
+  }
+  return null;
+}
+
+/** 작업 탭 버킷의 레인 이름 상한 (`utils/work-tab-manager.ts` 와 같은 값). */
+const MAX_LANE_LENGTH = 64;
+
+/**
+ * 32bit FNV-1a. 짧고 안정적인 값이면 충분하다 (암호용이 아니다).
+ */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * 이 예약이 쓰는 작업 탭 레인 이름.
+ *
+ * 레인은 `sessionKeyOf` 가 64자에서 자른다. 흐름 id 가 길면 잘린 두 예약이 같은 레인을
+ * 쓰게 되어 서로의 작업 탭을 건드린다. 그래서 상한을 넘으면 해시로 접는다.
+ */
+export function laneForScheduleId(scheduleId: unknown): string {
+  const value = typeof scheduleId === 'string' ? scheduleId : '';
+  if (value.length <= MAX_LANE_LENGTH) return value;
+  return `sched-${shortHash(value)}`;
+}
+
 export interface ScheduleRecord {
+  /**
+   * 저장소 키이자 알람·잠금·이력·레인의 식별자 (`shortcut:<enc>` 또는 `flow:<enc>`).
+   * 이 필드가 없는 옛 레코드는 읽을 때 단축으로 보정한다 (저장하지 않는다).
+   */
+  scheduleId: string;
+  /** 화면에 보여 줄 이름. 단축은 단축 이름, 흐름은 예약 당시의 흐름 이름 스냅샷이다. */
   name: string;
+  /** 무엇을 돌리는가. 없으면 `{ kind: 'shortcut', name }` 으로 읽는다. */
+  target?: ScheduleTarget;
+  /**
+   * 꺼진 예약은 알람이 없고 실행되지 않는다. 레코드는 남는다(다시 켤 수 있어야 한다).
+   * 이 필드가 없는 옛 레코드는 켜진 것으로 읽는다.
+   */
+  enabled?: boolean;
   schedule: ScheduleExpression;
   /** 실행마다 주입할 파라미터 값. `secret` 이름은 절대 들어오지 못한다. */
   params?: Record<string, unknown>;
@@ -417,16 +514,16 @@ export function computeNextAt(record: ScheduleRecord, from: number = Date.now())
  * 이름·식별자
  * ------------------------------------------------------------------ */
 
-/** 예약 실행의 알람 이름. */
-export function alarmNameFor(name: string): string {
-  return `${SCHEDULE_ALARM_PREFIX}${name}`;
+/** 예약 실행의 알람 이름 (`mcp-shortcut::<scheduleId>`). */
+export function alarmNameFor(scheduleId: string): string {
+  return `${SCHEDULE_ALARM_PREFIX}${scheduleId}`;
 }
 
-/** 알람 이름에서 shortcut 이름을 되찾는다. 우리 알람이 아니면 null. */
+/** 알람 이름에서 scheduleId 를 되찾는다. 우리 알람이 아니면 null. */
 export function scheduleNameFromAlarm(alarmName: unknown): string | null {
   if (typeof alarmName !== 'string' || !alarmName.startsWith(SCHEDULE_ALARM_PREFIX)) return null;
-  const name = alarmName.slice(SCHEDULE_ALARM_PREFIX.length);
-  return name.length > 0 ? name : null;
+  const scheduleId = alarmName.slice(SCHEDULE_ALARM_PREFIX.length);
+  return scheduleId.length > 0 ? scheduleId : null;
 }
 
 /**
@@ -434,18 +531,18 @@ export function scheduleNameFromAlarm(alarmName: unknown): string | null {
  * 하나가 되고, 크롬이 꺼져 있던 동안 쌓인 주기 알람이 몰아서 울리지 않기 때문이다.
  * 같은 이름으로 다시 걸면 크롬이 이전 알람을 대체하므로 알람은 항상 하나만 남는다.
  */
-export async function armScheduleAlarm(name: string, when: number): Promise<void> {
+export async function armScheduleAlarm(scheduleId: string, when: number): Promise<void> {
   try {
-    await chrome.alarms.create(alarmNameFor(name), { when });
+    await chrome.alarms.create(alarmNameFor(scheduleId), { when });
   } catch (error) {
     console.warn('[shortcut-schedule] 알람 등록 실패:', error);
   }
 }
 
 /** 알람을 지운다. */
-export async function clearScheduleAlarm(name: string): Promise<boolean> {
+export async function clearScheduleAlarm(scheduleId: string): Promise<boolean> {
   try {
-    return await chrome.alarms.clear(alarmNameFor(name));
+    return await chrome.alarms.clear(alarmNameFor(scheduleId));
   } catch {
     return false;
   }
@@ -455,16 +552,16 @@ export async function clearScheduleAlarm(name: string): Promise<boolean> {
  * 예약 실행의 `runId`. 알람과 `reconcile()` 따라잡기가 같은 due 를 동시에 집어도 키가
  * 같아 이력이 1건이다 (한쪽이 storage claim 에서 진다).
  */
-export function scheduleRunId(name: string, dueAt: number): string {
-  return `${name}:${new Date(dueAt).toISOString()}`;
+export function scheduleRunId(scheduleId: string, dueAt: number): string {
+  return `${scheduleId}:${new Date(dueAt).toISOString()}`;
 }
 
-/** 이 실행이 쓰는 합성 세션 키의 lane (= shortcut 이름). 세션 id 는 항상 `scheduled`. */
+/** 이 실행이 쓰는 합성 세션 키의 세션 id. lane 은 `laneForScheduleId` 가 만든다. */
 export const SCHEDULED_SESSION_ID = 'scheduled';
 
 /** 예약 실행 중 MCP 탭 그룹에 붙는 제목. */
-export function scheduleTaskTitle(name: string): string {
-  return `예약: ${name}`;
+export function scheduleTaskTitle(label: string): string {
+  return `예약: ${label}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -506,21 +603,44 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * 읽기 보정 (2026-09-05 Codex 설계 검토 1).
+ *
+ * `scheduleId`·`target`·`enabled` 가 생기기 전에 저장된 레코드는 저장소 키가 곧 단축
+ * 이름이었다. 그 사실을 **메모리에서만** 채운다. 읽을 때마다 저장하면 `generation` 이
+ * 흔들려 정상 실행이 `superseded` 로 끝나므로, revision·generation 은 손대지 않는다.
+ * (실제 저장은 이 레코드를 고치는 다른 쓰기가 일어날 때 따라온다.)
+ */
+export function normalizeScheduleRecord(raw: unknown, storageKey: string): ScheduleRecord | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as ScheduleRecord;
+  if (typeof record.generation !== 'number') record.generation = 0;
+  const name = typeof record.name === 'string' && record.name ? record.name : storageKey;
+  record.name = name;
+  if (!record.target || typeof record.target !== 'object') {
+    record.target = { kind: 'shortcut', name };
+  }
+  if (typeof record.scheduleId !== 'string' || record.scheduleId.length === 0) {
+    record.scheduleId =
+      record.target.kind === 'flow'
+        ? scheduleIdForFlow(record.target.flowId)
+        : scheduleIdForShortcut(record.target.name);
+  }
+  if (typeof record.enabled !== 'boolean') record.enabled = true;
+  return record;
+}
+
 async function loadMap(): Promise<ScheduleMap> {
   try {
     const result = await chrome.storage.local.get([SCHEDULE_STORAGE_KEY]);
     const raw = (result as any)?.[SCHEDULE_STORAGE_KEY];
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-    const map = raw as ScheduleMap;
-    // 이 필드가 생기기 전에 저장된 레코드는 generation 이 없다. 0 으로 채워야 CAS 가
-    // "값이 없으니 검사도 생략" 으로 흘러가지 않는다.
-    for (const name of Object.keys(map)) {
-      const record = map[name];
-      if (record && typeof record === 'object' && typeof record.generation !== 'number') {
-        record.generation = 0;
-      }
+    const out: ScheduleMap = {};
+    for (const key of Object.keys(raw as Record<string, unknown>)) {
+      const record = normalizeScheduleRecord((raw as Record<string, unknown>)[key], key);
+      if (record) out[record.scheduleId] = record;
     }
-    return map;
+    return out;
   } catch {
     return {};
   }
@@ -574,9 +694,9 @@ export async function readSchedules(): Promise<ScheduleMap> {
 }
 
 /** 예약 하나. 없으면 null. */
-export async function readSchedule(name: string): Promise<ScheduleRecord | null> {
+export async function readSchedule(scheduleId: string): Promise<ScheduleRecord | null> {
   const map = await readSchedules();
-  return Object.hasOwn(map, name) ? map[name] : null;
+  return Object.hasOwn(map, scheduleId) ? map[scheduleId] : null;
 }
 
 /**
@@ -593,7 +713,7 @@ export async function putSchedule(
 ): Promise<{ ok: true; record: ScheduleRecord; replaced: boolean } | { ok: false; error: string }> {
   return await enqueue(async () => {
     const map = await loadMap();
-    const existing = Object.hasOwn(map, record.name) ? map[record.name] : undefined;
+    const existing = Object.hasOwn(map, record.scheduleId) ? map[record.scheduleId] : undefined;
     if (!existing && Object.keys(map).length >= MAX_SCHEDULES) {
       return {
         ok: false as const,
@@ -602,24 +722,25 @@ export async function putSchedule(
     }
     const stored: ScheduleRecord = {
       ...record,
+      enabled: record.enabled !== false,
       failStreak: record.failStreak ?? 0,
       revision: (existing?.revision ?? 0) + 1,
       generation: await nextGeneration(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    map[record.name] = stored;
+    map[record.scheduleId] = stored;
     await persistMap(map);
     return { ok: true as const, record: stored, replaced: existing !== undefined };
   });
 }
 
 /** 예약을 지운다. 있었으면 true. */
-export async function removeSchedule(name: string): Promise<boolean> {
+export async function removeSchedule(scheduleId: string): Promise<boolean> {
   return await enqueue(async () => {
     const map = await loadMap();
-    if (!Object.hasOwn(map, name)) return false;
-    delete map[name];
+    if (!Object.hasOwn(map, scheduleId)) return false;
+    delete map[scheduleId];
     await persistMap(map);
     return true;
   });
@@ -629,17 +750,46 @@ export async function removeSchedule(name: string): Promise<boolean> {
  * `revision` 만 올린다. shortcut `save`·`delete` 처럼 예약 자체는 그대로인데 정의가 바뀐
  * 경우다. 실행 중이던 run 은 이 값이 달라진 것을 보고 재무장을 포기한다.
  */
-export async function bumpScheduleRevision(name: string): Promise<ScheduleRecord | null> {
+export async function bumpScheduleRevision(scheduleId: string): Promise<ScheduleRecord | null> {
   return await enqueue(async () => {
     const map = await loadMap();
-    if (!Object.hasOwn(map, name)) return null;
+    if (!Object.hasOwn(map, scheduleId)) return null;
     const updated: ScheduleRecord = {
-      ...map[name],
-      revision: map[name].revision + 1,
+      ...map[scheduleId],
+      revision: map[scheduleId].revision + 1,
       generation: await nextGeneration(),
       updatedAt: Date.now(),
     };
-    map[name] = updated;
+    map[scheduleId] = updated;
+    await persistMap(map);
+    return updated;
+  });
+}
+
+/**
+ * 레코드의 **의미**를 바꾸면서 revision·generation 을 함께 올린다
+ * (2026-09-05 Codex 설계 검토 2).
+ *
+ * `enabled` 를 끄거나 `target`·`params` 를 바꾸는 것은 "예약이 달라졌다" 이다. 알람만
+ * 지우면 이미 큐에 들어간 실행이 그대로 돌고, 끝나면서 옛 레코드 기준으로 알람을 다시
+ * 건다. generation 을 올려 두면 그 실행이 종료 시 `superseded` 로 물러난다.
+ */
+export async function patchScheduleMeaning(
+  scheduleId: string,
+  patch: Partial<Omit<ScheduleRecord, 'scheduleId' | 'revision' | 'generation'>>,
+): Promise<ScheduleRecord | null> {
+  return await enqueue(async () => {
+    const map = await loadMap();
+    if (!Object.hasOwn(map, scheduleId)) return null;
+    const current = map[scheduleId];
+    const updated: ScheduleRecord = {
+      ...current,
+      ...patch,
+      revision: current.revision + 1,
+      generation: await nextGeneration(),
+      updatedAt: Date.now(),
+    };
+    map[scheduleId] = updated;
     await persistMap(map);
     return updated;
   });
@@ -654,17 +804,17 @@ export async function bumpScheduleRevision(name: string): Promise<ScheduleRecord
  * 살림살이 갱신마다 올리면 러너의 결과 기록이 reconcile 의 nextAt 갱신에 밀려 사라진다.
  */
 export async function patchSchedule(
-  name: string,
-  patch: Partial<Omit<ScheduleRecord, 'name' | 'revision' | 'generation'>>,
+  scheduleId: string,
+  patch: Partial<Omit<ScheduleRecord, 'scheduleId' | 'name' | 'revision' | 'generation'>>,
   expect?: ScheduleExpectation,
 ): Promise<ScheduleRecord | null> {
   return await enqueue(async () => {
     const map = await loadMap();
-    if (!Object.hasOwn(map, name)) return null;
-    const current = map[name];
+    if (!Object.hasOwn(map, scheduleId)) return null;
+    const current = map[scheduleId];
     if (!matchesExpectation(current, expect)) return null;
     const updated: ScheduleRecord = { ...current, ...patch, updatedAt: Date.now() };
-    map[name] = updated;
+    map[scheduleId] = updated;
     await persistMap(map);
     return updated;
   });
@@ -672,7 +822,14 @@ export async function patchSchedule(
 
 /** `schedules` 응답에 싣는 요약 (설계 1절: 표현·nextAt·마지막 상태·failStreak 만). */
 export interface ScheduleSummary {
+  /** 내부 식별자. 이력·알람·다른 메시지가 예약을 가리킬 때 쓰는 값이다. */
+  scheduleId: string;
   name: string;
+  /** 화면에 그대로 쓰는 이름 (= `name`). 응답을 읽는 쪽이 헷갈리지 않게 함께 싣는다. */
+  label: string;
+  kind: ScheduleKind;
+  target: ScheduleTarget;
+  enabled: boolean;
   schedule: ScheduleExpression;
   nextAt: number;
   notify: boolean;
@@ -686,8 +843,14 @@ export interface ScheduleSummary {
 }
 
 export function summarizeSchedule(record: ScheduleRecord): ScheduleSummary {
+  const target: ScheduleTarget = record.target ?? { kind: 'shortcut', name: record.name };
   const summary: ScheduleSummary = {
+    scheduleId: record.scheduleId,
     name: record.name,
+    label: record.name,
+    kind: target.kind,
+    target,
+    enabled: record.enabled !== false,
     schedule: record.schedule,
     nextAt: record.nextAt,
     notify: record.notify,

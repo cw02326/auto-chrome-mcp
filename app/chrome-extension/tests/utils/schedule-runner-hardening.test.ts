@@ -327,7 +327,8 @@ function wireInvoker(
   handler: (call: AnyRecord) => any = () => okText({ success: true }),
   workTabId = WORK_TAB_ID,
 ) {
-  const sessionKey = h.runner.scheduledSessionKey(name);
+  // 2026-09-05 사이드패널 2단계: 버킷 키는 표시 이름이 아니라 scheduleId 로 만든다.
+  const sessionKey = h.runner.scheduledSessionKey(`shortcut:${name}`);
   h.runner.setScheduleToolInvoker(async (call: any) => {
     h.toolCalls.push({ name: call.name, args: call.args, mode: call.effectiveBackgroundMode });
     if (call.name === 'chrome_navigate') {
@@ -499,12 +500,12 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
 
     // 사용자는 자기 창의 탭을 보고 있다.
     userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
     // 팝업이 떴다고 실행이 인계로 끊기지 않는다.
-    expect(map.job[0].status).toBe('success');
+    expect(map['shortcut:job'][0].status).toBe('success');
     // 스폰 직전에 포커스를 쥐고 있던 사용자 창으로 되돌렸다. 사용자 창의 활성 탭은
     // 팝업이 가져가지 않았으므로 탭은 건드리지 않는다.
     expect(h.focusedWindows).toContain(USER_WINDOW_ID);
@@ -529,11 +530,11 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
     ]);
 
     userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('success');
+    expect(map['shortcut:job'][0].status).toBe('success');
     // 활성 슬롯을 빼앗겼으므로 직전 탭으로 되돌린다.
     expect(h.activatedTabs).toContain(USER_TAB_ID);
     // 같은 창 안의 일이라 창 포커스는 건드리지 않는다.
@@ -573,11 +574,11 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
 
     // 실행이 시작될 때 사용자는 창 A 를 보고 있었다.
     userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('success');
+    expect(map['shortcut:job'][0].status).toBe('success');
     // 되돌린 곳은 창 B 다. 옛 창 A 로는 한 번도 끌고 가지 않았다.
     expect(h.focusedWindows).toContain(OTHER_WINDOW_ID);
     expect(h.focusedWindows).not.toContain(USER_WINDOW_ID);
@@ -608,10 +609,10 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
     userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
     userLooksAt(h, TAB_B1, WINDOW_B);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
-    expect((await h.history.readHistory()).job[0].status).toBe('success');
+    expect((await h.history.readHistory())['shortcut:job'][0].status).toBe('success');
     // 창 A 의 활성 슬롯은 창 A 의 직전 탭(a1)으로 돌아간다.
     expect(h.activatedTabs).toContain(USER_TAB_ID);
     // 창 B 의 탭은 건드리지 않는다 - 그 창에서는 아무 일도 없었다.
@@ -639,10 +640,10 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
     userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
     userLooksAt(h, TAB_B1, WINDOW_B);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
-    expect((await h.history.readHistory()).job[0].status).toBe('success');
+    expect((await h.history.readHistory())['shortcut:job'][0].status).toBe('success');
     // 팝업이 포커스를 가져갔으므로 창 포커스는 되돌린다 - 사용자가 있던 창 B 로만.
     expect(h.focusedWindows).toEqual([WINDOW_B]);
     // 팝업은 별도 창이라 어느 창의 활성 탭도 빼앗지 않았다.
@@ -662,7 +663,7 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
       { tool: 'chrome_extract', as: 'after', args: { fields: { x: '.x' } } },
     ]);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     expect(h.focusedWindows).toHaveLength(0);
@@ -710,9 +711,9 @@ describe('3. 지웠다 다시 건 예약을 옛 실행이 자기 것으로 착�
       return okText({ success: true });
     });
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS);
-    expect((await h.schedule.readSchedule('job'))?.revision).toBe(1);
+    expect((await h.schedule.readSchedule('shortcut:job'))?.revision).toBe(1);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle();
 
     // 사용자가 예약을 지웠다가 같은 이름으로 다시 건다 -> revision 이 1 로 돌아온다(ABA).
@@ -722,20 +723,20 @@ describe('3. 지웠다 다시 건 예약을 옛 실행이 자기 것으로 착�
       name: 'job',
       schedule: { every: '6h' },
     } as any);
-    const reborn = await h.schedule.readSchedule('job');
+    const reborn = await h.schedule.readSchedule('shortcut:job');
     expect(reborn?.revision).toBe(1);
 
     release?.();
     await settle(120);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].superseded).toBe(true);
+    expect(map['shortcut:job'][0].superseded).toBe(true);
     // 새 예약의 상태는 옛 실행이 건드리지 않는다.
-    const after = await h.schedule.readSchedule('job');
+    const after = await h.schedule.readSchedule('shortcut:job');
     expect(after?.lastStatus).toBeUndefined();
     expect(after?.lastRunId).toBeUndefined();
     expect(after?.nextAt).toBe(reborn?.nextAt);
-    expect(h.alarms.get('mcp-shortcut::job')?.scheduledTime).toBe(reborn?.nextAt);
+    expect(h.alarms.get('mcp-shortcut::shortcut:job')?.scheduledTime).toBe(reborn?.nextAt);
   });
 });
 
@@ -756,7 +757,7 @@ describe('4. 워커 둘이 같은 due 를 집어도 실행은 한 번뿐이다',
     second.runner.setScheduleToolInvoker(async (call: any) => {
       calls.push(`b:${call.name}`);
       if (call.name === 'chrome_navigate') {
-        const key = second.runner.scheduledSessionKey('job');
+        const key = second.runner.scheduledSessionKey('shortcut:job');
         second.tabs.set(WORK_TAB_ID, { id: WORK_TAB_ID, windowId: USER_WINDOW_ID, active: false });
         await second.workTab.addOwnedTab(WORK_TAB_ID, key);
         await second.workTab.setWorkTab(WORK_TAB_ID, key, true);
@@ -768,7 +769,7 @@ describe('4. 워커 둘이 같은 due 를 집어도 실행은 한 번뿐이다',
     h.runner.setScheduleToolInvoker(async (call: any) => {
       calls.push(`a:${call.name}`);
       if (call.name === 'chrome_navigate') {
-        const key = h.runner.scheduledSessionKey('job');
+        const key = h.runner.scheduledSessionKey('shortcut:job');
         second.tabs.set(WORK_TAB_ID, { id: WORK_TAB_ID, windowId: USER_WINDOW_ID, active: false });
         await h.workTab.addOwnedTab(WORK_TAB_ID, key);
         await h.workTab.setWorkTab(WORK_TAB_ID, key, true);
@@ -777,12 +778,12 @@ describe('4. 워커 둘이 같은 due 를 집어도 실행은 한 번뿐이다',
       return okText({ success: true });
     });
 
-    h.runner.enqueueScheduledRun('job', saved.nextAt);
-    second.runner.enqueueScheduledRun('job', saved.nextAt);
+    h.runner.enqueueScheduledRun('shortcut:job', saved.nextAt);
+    second.runner.enqueueScheduledRun('shortcut:job', saved.nextAt);
     await settle(150);
 
     const map = await second.history.readHistory();
-    expect(map.job).toHaveLength(1);
+    expect(map['shortcut:job']).toHaveLength(1);
     // 한쪽 워커만 도구를 불렀다.
     const workers = new Set(calls.map((entry) => entry.split(':', 1)[0]));
     expect(workers.size).toBe(1);
@@ -817,7 +818,7 @@ describe('4b. 하트비트·해제는 자기 nonce 일 때만 잠금을 건드�
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await vi.advanceTimersByTimeAsync(5);
 
     // 실행은 report 저장에서 멈춰 있다 - 이 실행의 잠금이 세션 저장소에 있다.
@@ -875,7 +876,7 @@ describe('4c. 진행 중인 하트비트가 해제된 잠금을 되살리지 않
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await vi.advanceTimersByTimeAsync(5);
     expect(h.downloads).toHaveLength(1);
     expect(typeof h.session.scheduledRunLock?.nonce).toBe('string');
@@ -973,7 +974,7 @@ describe('5. 상한을 넘긴 실행은 실제로 끊기고, 정리까지 하트
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await vi.advanceTimersByTimeAsync(5);
 
     // 실행은 report 저장에서 멈춰 있다.
@@ -1021,15 +1022,15 @@ describe('6. 마지막 step 뒤에 사용자가 탭을 가져가도 알아챈다
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('user_took_over_tab');
+    expect(map['shortcut:job'][0].status).toBe('user_took_over_tab');
     // 산출물 없음: 실패 스크린샷도 report 파일도 만들지 않는다.
     expect(h.toolCalls.some((call) => call.name === 'chrome_screenshot')).toBe(false);
     expect(h.downloads).toHaveLength(0);
-    expect(map.job[0].report).toBeNull();
+    expect(map['shortcut:job'][0].report).toBeNull();
     // 사용자가 가져간 탭은 열린 채로 남고 소유만 풀린다.
     expect(h.removedTabs).not.toContain(workTabId);
     expect(h.tabs.has(workTabId)).toBe(true);
@@ -1045,14 +1046,14 @@ describe('7. interrupted 로 되돌린 실행도 상태·알림을 남긴다', (
   it('reconcile 이 lastStatus·failStreak 를 갱신하고 첫 실패 알림을 보낸다', async () => {
     wireInvoker(h, 'job');
     await saveAndSchedule(h, 'job', BASIC_STEPS);
-    const record = await h.schedule.readSchedule('job');
+    const record = await h.schedule.readSchedule('shortcut:job');
     expect(record).not.toBeNull();
 
     // 워커가 죽어 종료 처리를 못 한 실행.
-    const runId = h.schedule.scheduleRunId('job', record!.nextAt);
+    const runId = h.schedule.scheduleRunId('shortcut:job', record!.nextAt);
     await h.history.startRunRecord({
       runId,
-      name: 'job',
+      name: 'shortcut:job',
       trigger: 'scheduled',
       startedAt: Date.now() - 60_000,
       revision: record!.revision,
@@ -1064,9 +1065,9 @@ describe('7. interrupted 로 되돌린 실행도 상태·알림을 남긴다', (
     await settle(80);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('interrupted');
+    expect(map['shortcut:job'][0].status).toBe('interrupted');
 
-    const after = await h.schedule.readSchedule('job');
+    const after = await h.schedule.readSchedule('shortcut:job');
     expect(after?.lastStatus).toBe('interrupted');
     expect(after?.lastRunId).toBe(runId);
     expect(after?.failStreak).toBe(1);
@@ -1077,11 +1078,11 @@ describe('7. interrupted 로 되돌린 실행도 상태·알림을 남긴다', (
   it('그 사이 예약을 새로 걸었으면 상태를 건드리지 않는다', async () => {
     wireInvoker(h, 'job');
     await saveAndSchedule(h, 'job', BASIC_STEPS);
-    const first = await h.schedule.readSchedule('job');
-    const runId = h.schedule.scheduleRunId('job', first!.nextAt);
+    const first = await h.schedule.readSchedule('shortcut:job');
+    const runId = h.schedule.scheduleRunId('shortcut:job', first!.nextAt);
     await h.history.startRunRecord({
       runId,
-      name: 'job',
+      name: 'shortcut:job',
       trigger: 'scheduled',
       startedAt: Date.now() - 60_000,
       revision: first!.revision,
@@ -1100,9 +1101,9 @@ describe('7. interrupted 로 되돌린 실행도 상태·알림을 남긴다', (
     await settle(80);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('interrupted');
-    expect(map.job[0].superseded).toBe(true);
-    const after = await h.schedule.readSchedule('job');
+    expect(map['shortcut:job'][0].status).toBe('interrupted');
+    expect(map['shortcut:job'][0].superseded).toBe(true);
+    const after = await h.schedule.readSchedule('shortcut:job');
     expect(after?.lastStatus).toBeUndefined();
     expect(after?.failStreak).toBe(0);
     expect(h.notifications).toHaveLength(0);
@@ -1145,15 +1146,15 @@ describe('통합: 예약 실행은 stub 이 아니라 진짜 게이트를 지난
     } as any);
     expect(saved.ok).toBe(true);
 
-    h.runner.enqueueScheduledRun('gated', now);
+    h.runner.enqueueScheduledRun('shortcut:gated', now);
     await settle(200);
 
     const map = await h.history.readHistory();
-    expect(map.gated).toHaveLength(1);
-    expect(map.gated[0].status).toBe('failed');
+    expect(map['shortcut:gated']).toHaveLength(1);
+    expect(map['shortcut:gated'][0].status).toBe('failed');
     // 게이트가 돌려주는 본문은 JSON 이라 errorCode 는 tool_error 로 접힌다. 거절 사유는
     // 본문에 그대로 있다 - 여기서 보는 것은 "진짜 게이트가 판정했는가" 다.
-    expect(map.gated[0].error).toContain('no_work_tab');
+    expect(map['shortcut:gated'][0].error).toContain('no_work_tab');
     // 사용자 탭은 건드리지 않았다.
     expect(h.removedTabs).not.toContain(USER_TAB_ID);
     expect(h.tabs.get(USER_TAB_ID)?.active).toBe(true);
@@ -1177,13 +1178,13 @@ describe('10. report 파일은 이력 상한이 아니라 256KiB 예산을 쓴�
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
     // 이력에서는 빠진다 (상한 그대로).
-    expect(map.job[0].results?.latest).toBeUndefined();
-    expect(map.job[0].resultsTruncated).toContain('latest');
+    expect(map['shortcut:job'][0].results?.latest).toBeUndefined();
+    expect(map['shortcut:job'][0].resultsTruncated).toContain('latest');
 
     // report 파일에는 값이 통째로 들어 있다.
     expect(h.downloads).toHaveLength(1);

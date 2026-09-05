@@ -490,3 +490,10 @@ setShortcutToolInvoker(handleCallTool);
 // 지난다. MCP 세션이 없을 뿐 게이트·워치독·탭 잠금은 그대로다.
 import { setScheduleToolInvoker } from '../schedule-runner';
 setScheduleToolInvoker(handleCallTool);
+
+// auto-chrome-mcp fork(2026-09-05 사이드패널 2단계 D): 흐름 예약도 도구와 **같은** 실행
+// 본체를 쓴다. 예약 러너가 이 모듈을 직접 import 하면 도구 레지스트리의 순환 import 에
+// 끌려들어가므로, 배선은 여기서 한다 (invoker 와 같은 이유·같은 자리).
+import { setScheduledFlowRunner } from '../schedule-runner';
+import { runPublishedFlow } from '../record-replay/run-published-flow';
+setScheduledFlowRunner(runPublishedFlow);

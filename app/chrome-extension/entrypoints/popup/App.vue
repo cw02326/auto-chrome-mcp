@@ -5,6 +5,10 @@
       <div class="header">
         <div class="header-content">
           <h1 class="header-title">auto-chrome-mcp Chrome Mcp</h1>
+          <!-- 2026-09-05 2단계: 사이드패널의 매일 작업 탭으로 바로 간다 -->
+          <button class="daily-panel-button" @click="openDailySidepanel">
+            {{ getMessage('sidepanel_daily_tab_title') }}
+          </button>
         </div>
       </div>
       <div class="content">
@@ -724,6 +728,11 @@ function openWorkflowSidepanel() {
 // Open sidepanel for element marker management
 function openElementMarkerSidepanel() {
   openSidepanelAndClose('element-markers');
+}
+
+/** 사이드패널의 매일 작업 탭 (2026-09-05 사이드패널 2단계 E). */
+function openDailySidepanel() {
+  void openSidepanelAndClose('daily');
 }
 
 async function toggleWebEditor() {
@@ -2070,6 +2079,24 @@ onUnmounted(() => {
   font-weight: 700;
   color: #1e293b;
   margin: 0;
+}
+
+/* 2026-09-05 2단계: 매일 작업 탭으로 가는 버튼 */
+.daily-panel-button {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--ac-surface-muted, #f2f0eb);
+  color: var(--ac-text, #1a1a1a);
+  border: none;
+  border-radius: var(--ac-radius-button, 8px);
+  cursor: pointer;
+  transition: all var(--ac-motion-fast, 120ms) ease;
+  white-space: nowrap;
+}
+
+.daily-panel-button:hover {
+  background: var(--ac-hover-bg, #e5e5e5);
 }
 
 .settings-button {

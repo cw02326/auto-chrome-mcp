@@ -102,10 +102,12 @@ export default defineConfig({
       //   suggested_key: { default: 'Ctrl+Shift+3' },
       //   description: 'Run quick trigger 3',
       // },
-      // open_workflow_sidepanel: {
-      //   suggested_key: { default: 'Ctrl+Shift+O' },
-      //   description: 'Open workflow sidepanel',
-      // },
+      // 2026-09-05 사이드패널 2단계: 사이드패널 여는 단축키를 되살렸다.
+      // Ctrl+Shift+O(웹 편집기)·Ctrl+Shift+U(퀵 패널)와 겹치지 않는 조합을 쓴다.
+      open_workflow_sidepanel: {
+        suggested_key: { default: 'Ctrl+Shift+Y', mac: 'Command+Shift+Y' },
+        description: 'Open workflow sidepanel',
+      },
       toggle_web_editor: {
         suggested_key: { default: 'Ctrl+Shift+O', mac: 'Command+Shift+O' },
         description: 'Toggle Web Editor mode',

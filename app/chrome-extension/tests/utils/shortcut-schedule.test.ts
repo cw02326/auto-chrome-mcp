@@ -77,6 +77,9 @@ async function saveShortcut(extra: Record<string, unknown> = {}) {
 function baseRecord(over: Partial<ScheduleRecord> & { name: string }) {
   const now = Date.now();
   return {
+    // 2026-09-05 사이드패널 2단계: 저장소 키는 표시 이름이 아니라 scheduleId 다.
+    scheduleId: `shortcut:${encodeURIComponent(over.name)}`,
+    target: { kind: 'shortcut', name: over.name },
     schedule: { every: '1h' },
     notify: true,
     report: false,
@@ -467,7 +470,7 @@ describe('3(리뷰). 저장소 전역 generation 과 CAS', () => {
     const firstRecord = (first as { ok: true; record: ScheduleRecord }).record;
     expect(firstRecord.revision).toBe(1);
 
-    await removeSchedule('a');
+    await removeSchedule('shortcut:a');
     const second = await putSchedule(baseRecord({ name: 'a' }));
     const secondRecord = (second as { ok: true; record: ScheduleRecord }).record;
     // revision 은 1 로 돌아온다(ABA). generation 은 절대 돌아오지 않는다.
@@ -480,15 +483,15 @@ describe('3(리뷰). 저장소 전역 generation 과 CAS', () => {
     const record = (saved as { ok: true; record: ScheduleRecord }).record;
 
     const stale = await patchSchedule(
-      'b',
+      'shortcut:b',
       { lastStatus: 'failed' },
       { generation: record.generation - 1 },
     );
     expect(stale).toBeNull();
-    expect((await readSchedule('b'))?.lastStatus).toBeUndefined();
+    expect((await readSchedule('shortcut:b'))?.lastStatus).toBeUndefined();
 
     const fresh = await patchSchedule(
-      'b',
+      'shortcut:b',
       { lastStatus: 'failed' },
       { generation: record.generation },
     );

@@ -55,6 +55,20 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_SCHEDULE_FLOW: 'rr_schedule_flow',
   RR_UNSCHEDULE_FLOW: 'rr_unschedule_flow',
   RR_LIST_SCHEDULES: 'rr_list_schedules',
+  // 2026-09-05 사이드패널 2단계 D: 가져오기 미리보기 (id 충돌 여부를 먼저 보여 준다).
+  RR_IMPORT_FLOW_PREVIEW: 'rr_import_flow_preview',
+  // 매일 작업 (예약 엔진 하나로 통일된 화면). 대상은 단축과 흐름 둘 다이고, 예약을
+  // 가리키는 값은 표시 이름이 아니라 scheduleId 다.
+  DAILY_LIST_SCHEDULES: 'daily_list_schedules',
+  DAILY_PUT_SCHEDULE: 'daily_put_schedule',
+  DAILY_REMOVE_SCHEDULE: 'daily_remove_schedule',
+  DAILY_SET_ENABLED: 'daily_set_enabled',
+  DAILY_RUN_NOW: 'daily_run_now',
+  DAILY_HISTORY: 'daily_history',
+  DAILY_GET_RUN: 'daily_get_run',
+  DAILY_OPEN_SCREENSHOT: 'daily_open_screenshot',
+  /** 예약·이력이 바뀌었다는 방송 (내용 없음). */
+  DAILY_CHANGED: 'daily_changed',
   // Element marker management
   ELEMENT_MARKER_LIST_ALL: 'element_marker_list_all',
   ELEMENT_MARKER_LIST_FOR_URL: 'element_marker_list_for_url',
