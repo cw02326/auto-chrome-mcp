@@ -11,8 +11,8 @@
  *   - 흐름 예약은 **발행된 흐름 + 시작 URL** 이 있어야 만들어진다. 예약은 사람이 보고
  *     있지 않을 때 도니, 작업 탭을 스스로 열 수 없는 흐름은 밤에 실패만 쌓는다.
  *   - 민감 변수를 쓰는 흐름은 예약하지 않는다. 예약 레코드는 평문 저장소에 남는다.
- *   - 이 파일은 record-replay 자체 예약(`RR_SCHEDULE_FLOW`, flow-store 의 FlowSchedule,
- *     `rr_schedule_*` 알람)을 부르지 않는다. 예약 엔진은 하나다.
+ *   - 예약 엔진은 하나다. record-replay 자체 예약(`RR_SCHEDULE_FLOW`, flow-store 의
+ *     FlowSchedule, `rr_schedule_*` 알람)은 2026-09-06 3단계에서 삭제됐다.
  */
 
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
@@ -32,26 +32,27 @@ import {
   armScheduleAlarm,
   clearScheduleAlarm,
   computeNextAt,
-  currentTimeZoneSignature,
   laneForScheduleId,
   parseScheduleId,
   patchScheduleMeaning,
-  putSchedule,
   readSchedule,
   readSchedules,
   removeSchedule,
-  scheduleIdForFlow,
   scheduleIdForShortcut,
   summarizeSchedule,
   validateLoginCheck,
-  validateScheduleExpression,
   validateScheduleFirstStep,
   type ScheduleRecord,
   type ScheduleTarget,
 } from '@/utils/shortcut-schedule';
 import { loadShortcuts } from './tools/browser/shortcut';
 import { enqueueScheduledRun } from './schedule-runner';
-import { resolvePublishedFlow } from './record-replay/flow-store';
+import {
+  checkFlowScheduleTarget,
+  commitSchedule,
+  isPlainObject,
+  type ScheduleTargetCheck,
+} from './flow-schedule';
 
 /** 알림 id 접두 (예약 러너가 만든다). 뒤에 scheduleId 와 시각이 붙는다. */
 const FAIL_NOTIFICATION_PREFIX = 'mcp-shortcut-fail::';
@@ -163,72 +164,11 @@ interface PutScheduleInput {
   enabled?: unknown;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** 대상 검증 결과: 식별자·표시 이름·저장할 target. */
-type TargetCheck =
-  | { ok: true; scheduleId: string; label: string; target: ScheduleTarget }
-  | { ok: false; error: string; code: string };
-
-/** 흐름 대상 검증. 예약이 스스로 돌 수 있는 흐름만 통과시킨다. */
-async function checkFlowTarget(raw: Record<string, unknown>): Promise<TargetCheck> {
-  const flowId = typeof raw.flowId === 'string' ? raw.flowId.trim() : '';
-  if (!flowId) {
-    return { ok: false, code: 'flow_id_required', error: 'flow_id_required: "flowId" is missing' };
-  }
-
-  const resolution = await resolvePublishedFlow(flowId);
-  if (!resolution.ok) {
-    return {
-      ok: false,
-      code: 'flow_not_published',
-      error: `flow_not_published: 이 흐름을 먼저 발행해야 예약할 수 있습니다 (${flowId})`,
-    };
-  }
-  const flow = resolution.flow;
-
-  const startUrl = typeof flow.startUrl === 'string' ? flow.startUrl.trim() : '';
-  if (!startUrl) {
-    return {
-      ok: false,
-      code: 'flow_start_url_required',
-      error:
-        'flow_start_url_required: 시작 URL 이 없는 흐름은 예약할 수 없습니다. 예약 실행은 스스로 작업 탭을 열어야 합니다.',
-    };
-  }
-
-  const sensitive = (flow.variables ?? []).filter((v) => v?.sensitive === true);
-  if (sensitive.length > 0) {
-    return {
-      ok: false,
-      code: 'flow_has_sensitive_vars',
-      error: `flow_has_sensitive_vars: 민감 변수(${sensitive
-        .map((v) => v.key)
-        .join(', ')})는 예약에 저장하지 않습니다.`,
-    };
-  }
-
-  // 민감 변수는 위에서 걸렀으므로 남은 값만 문자열로 굳혀 저장한다.
-  const rawArgs = isPlainObject(raw.args) ? raw.args : undefined;
-  const args: Record<string, string> | undefined = rawArgs
-    ? Object.fromEntries(Object.entries(rawArgs).map(([k, v]) => [k, String(v ?? '')]))
-    : undefined;
-
-  return {
-    ok: true,
-    scheduleId: scheduleIdForFlow(flowId),
-    label: String(flow.name || flowId),
-    target: { kind: 'flow', flowId, ...(args ? { args } : {}) },
-  };
-}
-
 /** 단축 대상 검증. `chrome_shortcut action=schedule` 과 같은 규칙을 본다. */
 async function checkShortcutTarget(
   raw: Record<string, unknown>,
   input: PutScheduleInput,
-): Promise<TargetCheck> {
+): Promise<ScheduleTargetCheck> {
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
   if (!name) {
     return {
@@ -297,7 +237,11 @@ async function putScheduleFromPanel(
   const kind = input.target.kind;
   const check =
     kind === 'flow'
-      ? await checkFlowTarget(input.target)
+      ? await checkFlowScheduleTarget({
+          flowId: input.target.flowId,
+          args: input.target.args,
+          loginCheck: input.loginCheck,
+        })
       : kind === 'shortcut'
         ? await checkShortcutTarget(input.target, input)
         : {
@@ -306,11 +250,6 @@ async function putScheduleFromPanel(
             error: 'target_invalid: "kind" must be "shortcut" or "flow"',
           };
   if (!check.ok) return { ok: false, error: check.error, code: check.code };
-
-  const expression = validateScheduleExpression(input.schedule);
-  if (!expression.ok) {
-    return { ok: false, code: 'schedule_invalid', error: expression.error };
-  }
 
   // 2026-09-05 Codex 코드 리뷰 3: 켜짐·알림·보고서는 불리언이어야 한다. `x !== false` 로
   // 읽으면 문자열 "false" 나 null 도 켜진 것이 된다.
@@ -332,51 +271,21 @@ async function putScheduleFromPanel(
     };
   }
 
-  const now = Date.now();
-  const signature = currentTimeZoneSignature(now);
-  const existing = await readSchedule(check.scheduleId);
-  const draft: ScheduleRecord = {
-    scheduleId: check.scheduleId,
-    name: check.label,
-    target: check.target,
-    enabled,
-    schedule: expression.parsed.schedule,
+  // 저장·알람·방송은 도구 경로(`chrome_shortcut action=schedule flowId=...`)와 같은
+  // 함수를 지난다. 두 접점이 다른 레코드를 만들면 화면과 도구가 다른 예약을 보게 된다.
+  const committed = await commitSchedule(check, {
+    schedule: input.schedule,
     ...(isPlainObject(input.params) ? { params: input.params } : {}),
     notify,
     report,
     ...(typeof input.loginCheck === 'string' && input.loginCheck.trim()
       ? { loginCheck: input.loginCheck.trim() }
       : {}),
-    nextAt: now,
-    // `every` 격자는 예약을 고쳐도 흔들리지 않게 처음 값을 이어 쓴다.
-    anchorAt: existing?.anchorAt ?? now,
-    revision: 0,
-    generation: 0,
-    createdAt: now,
-    updatedAt: now,
-    timeZone: signature.timeZone,
-    offsetMinutes: signature.offsetMinutes,
-    failStreak: 0,
-  };
+    enabled,
+  });
+  if (!committed.ok) return { ok: false, code: committed.code, error: committed.error };
 
-  const nextAt = computeNextAt(draft, now);
-  if (nextAt === null) {
-    return {
-      ok: false,
-      code: 'schedule_invalid',
-      error: 'schedule_invalid: 이 예약은 돌아오는 시각이 없습니다. 시각과 요일을 확인하세요.',
-    };
-  }
-  draft.nextAt = nextAt;
-
-  const saved = await putSchedule(draft, now);
-  if (!saved.ok) return { ok: false, code: 'too_many_schedules', error: saved.error };
-
-  if (saved.record.enabled === false) await clearScheduleAlarm(check.scheduleId);
-  else await armScheduleAlarm(check.scheduleId, saved.record.nextAt);
-
-  notifyDailyChanged();
-  return { ok: true, schedule: summarizeSchedule(saved.record) };
+  return { ok: true, schedule: summarizeSchedule(committed.record) };
 }
 
 /* ------------------------------------------------------------------ *

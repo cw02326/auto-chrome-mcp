@@ -10,8 +10,10 @@
  *   reach into the user's browsing session.
  *
  * What is scanned:
- *   Every .ts file under entrypoints/background/record-replay/ (the V3 kernel
- *   lives in a sibling directory, record-replay-v3/, and is out of scope).
+ *   Every .ts file under entrypoints/background/record-replay/. The V3 kernel
+ *   used to live in a sibling directory, record-replay-v3/; it was deleted on
+ *   2026-09-06 (stage 3 dead-code removal). The guard below keeps the scan
+ *   anchored to this one tree so a future sibling cannot slip in unscanned.
  *
  * What counts as a violation:
  *   1. chrome.tabs.query(...) whose argument mentions active / currentWindow /
@@ -164,7 +166,8 @@ describe('record-replay engine never queries the user active tab', () => {
 
   it('scans the whole V2 engine tree', () => {
     expect(files.length).toBeGreaterThan(50);
-    // record-replay-v3 is a sibling directory and must not be pulled in.
+    // 삭제됨(2026-09-06, 3단계): record-replay-v3 는 이제 없다. 되살아나더라도 이 스캔에
+    // 섞이면 안 되므로 확인은 남긴다.
     expect(files.some((f) => f.includes(`record-replay-v3${sep}`))).toBe(false);
   });
 

@@ -8,7 +8,7 @@
 - 예약 이력: `utils/shortcut-history.ts`, 키 `mcpShortcutHistory`, `{[name]: RunRecord[]}`, 상태 9종, `screenshot`(다운로드 폴더 `mcp-screenshots/YYYY-MM-DD/failure_<name>_<HHmmss>.png` 파일명), `results`, `failedStep`, `error`. 단축당 100건·전체 1000건·3MiB.
 - 흐름 수동 실행 이력: `flow-store.ts` `appendRun/listRuns`, IndexedDB `rr_storage.runs`, 흐름당 10건, 실패 스크린샷은 `entries[last].screenshotBase64`(파일 아님). 변경 방송 없음(사이드패널이 5초 폴링).
 - 흐름 실행 본체: `tools/record-replay.ts` `FlowRunTool.execute`(발행 흐름만, 작업 탭 게이트, startUrl 자동 탭, `createTimeoutAbort`, `runFlow(flow, runTab, options)` → `summarizeRunResult`). 예약 엔진에서 부르려면 이 로직을 도구 껍데기와 분리해야 한다.
-- record-replay 자체 예약(`RR_SCHEDULE_FLOW`, `FlowSchedule`, 별도 알람군)은 UI 없이 코드만 있다. **쓰지 않는다**(3단계 삭제 대상). 알람 이름이 shortcut 알람과 겹치지 않는지 D 가 확인.
+- record-replay 자체 예약(`RR_SCHEDULE_FLOW`, `FlowSchedule`, 별도 알람군)은 UI 없이 코드만 있었다. **삭제됨(2026-09-06, 3단계)**. 알람 이름이 shortcut 알람과 겹치지 않는 것은 확인했고, 남아 있던 `rr_schedule_*` 알람은 백그라운드 시작 시 한 번 지운다.
 - 가져오기: `flow-store.importFlowFromJson(json)` 이 배열/`{flows}`/단일 흐름을 받아 `saveFlow` 로 덮어씀(id 충돌 처리 없음). `RR_IMPORT_FLOW` 핸들러 있음, 사이드패널 래퍼 없음.
 - 알림: `schedule-runner.ts` 예약 실패 알림(한국어 제목) 있음, 클릭 동작 없음.
 - 사이드패널: 탭 2개(workflows, element-markers). 카드에 예약·다음 실행 정보 없음. 실행 이력은 접이식 안 최근 5건.
@@ -36,7 +36,7 @@
 - 예약 실행 실패 시 스크린샷은 단축과 같은 방식(다운로드 폴더 파일)으로 남기고 `RunRecord.screenshot` 에 파일명. 흐름 엔진이 entries 에 base64 로 남긴 것은 그대로 두되 예약 이력에는 넣지 않는다(3MiB 상한 보호).
 - `classifyRunOutcome` 의 `login_required` 는 흐름에도 적용: 흐름 실행 결과의 `failedStep` 이 흐름 변수 `loginCheck`(마법사에서 지정 가능, 선택) 와 같으면 `login_required`. 1단계 마법사에 "이 단계가 실패하면 로그인 만료로 본다" 체크를 단계 목록 옆에 하나 둔다(선택 사항, 없어도 동작).
 - MCP 도구 `chrome_shortcut` 의 `schedules`/`history` 응답에 `target` 을 싣는다(응답 필드 추가는 스키마 변경이 아니다). `schedule` 액션으로 흐름을 예약하는 파라미터(`flowId`)는 **이번에 넣지 않는다**(스키마 변경 = bridge 재발행). 흐름 예약은 사이드패널에서만 만든다. 다음 릴리스 메모에 남긴다.
-- record-replay 자체 예약(`RR_SCHEDULE_FLOW` 등)은 건드리지 않고, 사이드패널이 부르지 않는 것을 유지한다.
+- record-replay 자체 예약(`RR_SCHEDULE_FLOW` 등)은 2단계에서 건드리지 않았다. **삭제됨(2026-09-06, 3단계)**.
 
 ### 사이드패널 ↔ 백그라운드 메시지 (계약, D 가 구현하고 E 가 소비)
 
@@ -182,10 +182,10 @@ Codex 설계 검토를 반영해 위 "설계 결정"·"메시지 계약"에서 �
 
 ### 8. 확인만 하고 건드리지 않은 것
 
-- record-replay 자체 예약(`RR_SCHEDULE_FLOW`, flow-store 의 `FlowSchedule`, `rescheduleAlarms`)의 알람
+- **삭제됨(2026-09-06, 3단계)** record-replay 자체 예약(`RR_SCHEDULE_FLOW`, flow-store 의 `FlowSchedule`, `rescheduleAlarms`)의 알람
   이름은 `rr_schedule_<id>` 이고 예약 엔진의 알람은 `mcp-shortcut::<scheduleId>` 다. 접두가 달라
   겹치지 않는다(`scheduleNameFromAlarm` 은 자기 접두만 인정하고, `rescheduleAlarms` 는
-  `rr_schedule_` 로 시작하는 알람만 지운다). 코드는 그대로 두었고 사이드패널이 부르지 않는다.
+  `rr_schedule_` 로 시작하는 알람만 지운다). 2단계에서는 코드를 그대로 두었고, 3단계에서 지웠다.
 - `packages/shared` 파라미터 불변. `git diff packages/shared` 가 비어 있다. 흐름 예약을 **만드는** 길은
   사이드패널뿐이고, 도구 표면에는 `schedules`·`history` **응답 필드**만 늘었다.
 

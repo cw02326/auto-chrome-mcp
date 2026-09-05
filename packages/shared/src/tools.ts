@@ -102,7 +102,7 @@ const P_REPEAT =
   'Repeat group: { max: 1-20, until?: condition, delayMs?: 0-5000 } together with a "steps" array.';
 const P_GROUP_STEPS = 'Steps of a repeat group (no repeat inside a repeat).';
 const P_PARAMS =
-  'save: declare { user: { required: true }, pw: { secret: true } }. run: values for {{params.user}}.';
+  'save: declare { user: { required: true }, pw: { secret: true } }. run: values for {{params.user}}. schedule with flowId: values for the flow variables.';
 const P_TASK =
   'Short label for what this run is doing (max 24 chars). Shows on the MCP tab group while it runs, then goes back to "MCP".';
 const P_HISTORY_RUN_ID = 'action="history": return this one run in full, including its "results".';
@@ -115,7 +115,9 @@ const P_NOTIFY = 'action="schedule": show a Chrome notification when a run fails
 const P_REPORT =
   'action="schedule": also write the run record to Downloads/mcp-screenshots (default false).';
 const P_LOGIN_CHECK =
-  'action="schedule": "as" name of the top level step whose stopIf means the login expired.';
+  'action="schedule": "as" name of the top level step whose stopIf means the login expired. With flowId: the flow step id that fails when the login expired.';
+const P_FLOW_ID =
+  'action=schedule/unschedule/history: target a published flow id instead of a shortcut name (the id from record_replay_list_published). Error if given together with name.';
 const P_HISTORY_STATUS =
   'action="history": keep only these statuses: running, success, failed, stopped, timeout, interrupted, skipped_queue, login_required, user_took_over_tab.';
 
@@ -194,7 +196,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SHORTCUT,
     description:
-      'Save, run and schedule named macros (a chrome_batch step list stored under a name). action: save {name, steps, description} | run (through the normal pipeline) | list | delete | history (past runs) | schedule (run it on a timer with no MCP session) | unschedule | schedules. Use for flows you repeat across sessions (logins, routine collection, overnight checks).',
+      'Save, run and schedule named macros (a chrome_batch step list stored under a name). action: save {name, steps, description} | run (through the normal pipeline) | list | delete | history (past runs) | schedule (run it on a timer with no MCP session) | unschedule | schedules. schedule/unschedule/history also take a published flow through flowId. Use for flows you repeat across sessions (logins, routine collection, overnight checks).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -207,6 +209,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'string',
           description: 'Shortcut name (save/run/delete/schedule/unschedule)',
         },
+        flowId: { type: 'string', description: P_FLOW_ID },
         steps: {
           type: 'array',
           description:

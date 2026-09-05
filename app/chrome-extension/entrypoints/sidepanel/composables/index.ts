@@ -6,12 +6,6 @@
 export { useAgentTheme, preloadAgentTheme, THEME_LABELS } from './useAgentTheme';
 export type { AgentThemeId, UseAgentTheme } from './useAgentTheme';
 
-// RR V3 (record-replay) Composables
-export { useRRV3Rpc } from './useRRV3Rpc';
-export { useRRV3Debugger } from './useRRV3Debugger';
-export type { UseRRV3Rpc, UseRRV3RpcOptions, RpcRequestOptions } from './useRRV3Rpc';
-export type { UseRRV3Debugger, UseRRV3DebuggerOptions } from './useRRV3Debugger';
-
 // Workflows V3 (사용처: sidepanel/App.vue 의 workflows 탭)
 export { useWorkflowsV3 } from './useWorkflowsV3';
 export type { FlowLite } from './useWorkflowsV3';

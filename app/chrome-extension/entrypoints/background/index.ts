@@ -72,14 +72,10 @@ async function applySiteContentSettings(): Promise<void> {
   );
 }
 
-// Record-Replay V3 (feature flag)
-import { bootstrapV3 } from './record-replay-v3/bootstrap';
-
-/**
- * Feature flag for RR-V3
- * Set to true to enable the new Record-Replay V3 engine
- */
-const ENABLE_RR_V3 = true;
+// 2026-09-06 3단계: record-replay-v3 엔진(부트스트랩·RPC·트리거·큐·저장소)을 통째로 지웠다.
+// 화면에서 부르는 곳이 없어 켜져 있어도 아무 일도 하지 않는 코드였다. 남은 것은 그 엔진이
+// 예전에 만들어 둔 알람을 치우는 정리 코드뿐이다.
+import { cleanupDeadAlarmsOnce } from './dead-alarm-cleanup';
 
 /**
  * Background script entry point
@@ -120,16 +116,8 @@ export default defineBackground(() => {
   // Record & Replay V1/V2 listeners
   initRecordReplayListeners();
 
-  // Record & Replay V3 (new engine)
-  if (ENABLE_RR_V3) {
-    bootstrapV3()
-      .then((runtime) => {
-        console.log(`[RR-V3] Bootstrap complete, ownerId: ${runtime.ownerId}`);
-      })
-      .catch((error) => {
-        console.error('[RR-V3] Bootstrap failed:', error);
-      });
-  }
+  // 없어진 예약 기능(record-replay 자체 예약, V3 트리거)이 남긴 알람을 한 번 치운다.
+  void cleanupDeadAlarmsOnce();
 
   // Element marker: context menu + CRUD listeners
   initElementMarkerListeners();

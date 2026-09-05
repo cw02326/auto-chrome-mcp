@@ -1,6 +1,6 @@
 # 사이드패널 1단계: 녹화부터 발행까지 한 화면 (2026-09-05)
 
-사용자 결정: 구버전 노드 빌더(`entrypoints/builder`, `builder.html`)는 폐기(3단계에서 삭제, 지금은 건드리지 않음). 예약은 `chrome_shortcut` 예약 엔진으로 통일(record-replay 트리거 엔진은 UI 없이 그대로 둠). 1단계 4개를 먼저 끝내고 실제 녹화·발행·실행을 한 번 해 본 뒤 2단계로 간다.
+사용자 결정: 구버전 노드 빌더(`entrypoints/builder`, `builder.html`)는 폐기 → **삭제됨(2026-09-06, 3단계)**. 예약은 `chrome_shortcut` 예약 엔진으로 통일(record-replay 트리거 엔진은 UI 없이 그대로 둠). 1단계 4개를 먼저 끝내고 실제 녹화·발행·실행을 한 번 해 본 뒤 2단계로 간다.
 
 ## 배경(조사 결과, 2026-09-05)
 
@@ -25,7 +25,7 @@
 
 ### C. 사이드패널 한국어화 (sonnet, 먼저 시작)
 
-- 대상: `entrypoints/sidepanel/**` 와 `components/workflows/**`, `components/rr-v3/**` 중 사이드패널에서 실제 import 되는 것. `entrypoints/builder/**` 는 폐기 예정이라 **건드리지 않는다**.
+- 대상: `entrypoints/sidepanel/**` 와 `components/workflows/**` 중 사이드패널에서 실제 import 되는 것. `entrypoints/builder/**` 와 `components/rr-v3/**` 는 **삭제됨(2026-09-06, 3단계)**.
 - 방법: 팝업과 같은 `getMessage`(`utils/i18n.ts`) + `_locales/ko/messages.json` 키 추가. `_locales/en` 에도 같은 키를 영어로 추가(다른 로케일은 en 폴백이면 그대로). 키 이름은 `sidepanel_` 접두사.
 - `loading-texts.ts` 의 중국어 49개는 한국어 문구로 교체(키로 뺄 필요 없이 파일 안에서 한국어 배열로 둬도 됨).
 - 용어 통일: 흐름(flow), 발행(publish), 예약(schedule), 실행 이력(run history), 시험 실행(test run), 시작 URL, 변수, 민감값.
