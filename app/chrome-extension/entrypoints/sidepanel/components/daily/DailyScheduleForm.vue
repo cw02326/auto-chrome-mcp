@@ -173,7 +173,7 @@
  */
 import { computed, reactive, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
-import { useDialogA11y } from '../../composables/useDialogA11y';
+import { useDialogA11y } from '@/ui/useDialogA11y';
 import { DAY_DISPLAY_ORDER, EVERY_KEYS, dayLabel } from '../../utils/daily-format';
 import {
   flowScheduleBlockMessage,

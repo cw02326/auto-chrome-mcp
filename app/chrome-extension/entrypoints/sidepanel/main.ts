@@ -5,7 +5,7 @@ import App from './App.vue';
 // Tailwind first, then custom tokens
 import '../styles/tailwind.css';
 // AgentChat theme tokens
-import './styles/agent-chat.css';
+import '@/ui/theme.css';
 
 import { preloadAgentTheme } from './composables';
 

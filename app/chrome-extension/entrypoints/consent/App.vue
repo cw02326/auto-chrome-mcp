@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import '../sidepanel/styles/agent-chat.css';
+import '@/ui/theme.css';
 
 // Query string 파싱
 const params = new URLSearchParams(window.location.search);

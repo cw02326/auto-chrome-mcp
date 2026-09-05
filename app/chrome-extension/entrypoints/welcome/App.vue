@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 
 // agent-theme 디자인 토큰 시스템 (v1.0.36 chat UI 제거됐으나 CSS 변수는 유지)
-import '../sidepanel/styles/agent-chat.css';
+import '@/ui/theme.css';
 
 // auto-chrome-mcp fork: 두 설치 경로별 next-step 분리
 // (A) npm 자동 설치자: bridge + manifest + extension zip 까지 자동

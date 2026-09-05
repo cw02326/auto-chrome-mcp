@@ -51,7 +51,7 @@
 <script lang="ts" setup>
 import { reactive, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
-import { useDialogA11y } from '../../composables/useDialogA11y';
+import { useDialogA11y } from '@/ui/useDialogA11y';
 import type { WizardVariableDef } from '../../utils/flow-wizard';
 
 const props = defineProps<{

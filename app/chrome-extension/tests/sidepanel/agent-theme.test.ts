@@ -2,7 +2,7 @@
  * 테마 시스템 - 남은 테마 하나(toss-light) 강제 (2026-09-06 디자인/접근성 리뷰 대응).
  *
  * 패널은 예전에 테마를 7개 지원했다. 고르는 UI가 없었으니 6개는 죽은 코드였고,
- * 다 지웠다(agent-chat.css 도 함께). chrome.storage.local 에는 옛 설치에서 쓰던
+ * 다 지웠다(ui/theme.css 도 함께). chrome.storage.local 에는 옛 설치에서 쓰던
  * 값(예: 'warm-editorial', 'dark-console')이 여전히 남아 있을 수 있으므로,
  * 무엇이 저장돼 있든 항상 'toss-light' 로 풀려야 한다 - 저장값을 지우는 게
  * 아니라 "신뢰하지 않는" 방식으로.

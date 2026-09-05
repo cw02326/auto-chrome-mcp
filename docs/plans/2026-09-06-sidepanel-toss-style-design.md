@@ -139,3 +139,33 @@
 3. 배포본 리로드 후 스크린샷: 흐름 탭(카드 2개 이상), 매일 작업 탭(예약 1개 + 펼침), 저장 마법사, 예약 폼, 가져오기 대화상자, 변수 입력 폼, 빈 상태. 저장 위치 `C:/PROJECTS/_작업물/2026-09/sidepanel-toss/after-*.png`. 이 스크린샷은 메인이 찍는다(구현자는 빌드까지).
 4. 세로 액센트 띠 0건, 12px 미만 font-size 0건(파이썬 검사), 대시류 0건.
 5. 탭 전환·녹화·마법사·예약·가져오기가 스타일 변경 전과 같은 동작(기능 회귀 없음. 기존 테스트 통과로 확인).
+
+## 추가 (2026-09-06 07:20): 팝업·옵션 페이지도 같은 토큰으로
+
+사용자 결정: 팝업(`entrypoints/popup`)과 옵션 페이지(`entrypoints/options`, 유저스크립트 관리)도 사이드패널과 같은 토스 토큰·규격으로 맞춘다.
+
+### 조사 결과
+
+- 팝업 `App.vue` 2972줄(스타일 1163줄, hex 119·rgba 20, `--ac-*` 40곳 부분 도입), `popup/style.css` 에 자체 `--primary-*` 토큰과 `StyreneB/Inter` 글꼴, 창 400×500~600 고정. 자식: ForceReconnect(hex 21), DiagnosticReport(24, 12px 미만 9), LocalModelPage(50, 대부분 `var(--ac-*, #hex)` 폴백), ModelCacheManagement(27), ConfirmDialog(14, border-left 2), ProgressIndicator(3, border-left 1). `ElementMarkerManagement.vue` 는 어디서도 import 되지 않는 죽은 컴포넌트.
+- 옵션 `App.vue` 398줄(스타일 96줄, hex 8), 토큰 파일 미사용, `m()` i18n 47회, index.html 제목 "Userscripts Manager" 고정.
+- `agent-chat.css` 는 `entrypoints/sidepanel/styles/` 에 있고 팝업이 상대경로로 빌려 쓴다. 공유 컴포넌트 없음. 팝업 i18n 미경유 한국어 하드코딩 11곳+. `popup/index.html` 제목 "Default Popup Title".
+
+### 결정
+
+- **공유 위치**: 토큰·유틸 CSS 를 `app/chrome-extension/ui/theme.css` 로 옮기고(`agent-chat.css` 이름 폐기), 사이드패널·팝업·옵션 세 `main.ts` 가 전부 이것을 import. `useDialogA11y.ts` 도 `app/chrome-extension/ui/` 로 옮겨 세 페이지가 공유(`entrypoints/` 아래 새 폴더는 WXT 가 entrypoint 로 오인할 수 있어 루트 `ui/` 사용). `@/ui/...` 별칭 import.
+- **팝업 재구성(가독성)**: 폭 400 유지. 바탕 `--ac-bg`, 흰 카드 radius 16.
+  - 헤더: 제목 한 줄 "Auto Chrome MCP" 18/700 + 캡션 13 "네이티브 서버 설정". 오른쪽 "매일 작업" 보조 버튼(32px).
+  - 연결 상태 카드: 상태 점 + "서비스 실행 중" 15/600, 캡션 "포트 12320 · 마지막 확인 07:01"(가운뎃점 U+00B7 허용). 포트 입력 `ac-field`(40) + 연결 주 버튼(36) 한 줄.
+  - 설정 카드: 토글 4개를 2×2 격자가 아니라 **한 줄에 하나**(라벨 왼쪽 14/500, 설명 캡션 13, 스위치 오른쪽, 행 높이 48). 작업 창 배치 select 는 `ac-field`. "무간섭 권장 설정으로 되돌리기" 는 텍스트 버튼(파랑 글자).
+  - Claude Code 등록 prompt: 거대한 코드 블록을 기본 접음. "등록 prompt 복사하기" 주 버튼 + "내용 보기" 텍스트 버튼(펼치면 mono 12 회색 박스, 최대 높이 160 스크롤). 복사 후 버튼 문구 "복사됨" 2초.
+  - 권한 카드: 사이트별 행(44px) + 스위치. 강제 재연결·진단은 보조 버튼 두 개 한 줄, 결과는 카드 안 접이식.
+  - LocalModelPage(2차 화면): 상단 "뒤로" 텍스트 버튼 + 제목 18/700, 나머지 카드·필드·버튼 규격. ConfirmDialog 는 `ac-dialog` + `useDialogA11y`. ProgressIndicator 는 토큰색.
+  - 팝업 하드코딩 한국어 11곳+ 를 `getMessage` 키(`popup_*`, ko·en)로. `popup/index.html` 제목 "Auto Chrome MCP". `popup/style.css` 의 자체 토큰·글꼴 선언 삭제(리셋만 남김). 죽은 `ElementMarkerManagement.vue` 삭제.
+- **옵션 페이지**: 바탕 `--ac-bg`, 최대 폭 960 가운데, 카드 2개("생성 / 실행", "목록"). 입력·select·textarea `ac-field`(textarea 는 mono 13, 최소 높이 160), 체크박스는 라벨과 같은 줄 `ac-check`, 긴급 정지는 `ac-switch` + 라벨 + 캡션 설명. 버튼 주/보조 규격. 목록 테이블은 토스 리스트 행(44px, 헤어라인, hover `--ac-surface-hover`, 숫자 tabular), 상태는 배지. 제목 "유저스크립트 관리"(index.html 도 i18n 값으로).
+- 공통 규칙·가독성 규칙·검사(hex/rgb 0, 12px 미만 0, 세로 띠 0, 대시류 0)는 팝업·옵션 파일에도 그대로 적용. 기능·핸들러·메시지 타입 불변.
+
+### 합격 기준(추가)
+
+- `entrypoints/popup/**`, `entrypoints/options/**` 의 .vue/.css 에서 hex/rgb 직접 지정 0, 12px 미만 0, border-left 0, 대시류 0.
+- 세 페이지 모두 `ui/theme.css` 하나만 import(agent-chat.css 파일 없음). Pretendard 가 세 페이지에서 로드(`document.fonts.check`).
+- 빌드 0, vitest 통과. 실기기: 팝업(400×600 에뮬레이션)·옵션·사이드패널 스크린샷을 메인이 찍어 `after-popup.png`, `after-options.png` 로 저장.

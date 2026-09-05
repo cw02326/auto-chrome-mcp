@@ -173,7 +173,7 @@ export function formatRunStatus(status: string | undefined, t: Translate = getMe
  * 상태별 색. 성공은 초록, 진행 중은 파랑, 로그인 필요·건너뜀은 주의색, 나머지는 빨강.
  *
  * 토큰 이름만 돌려준다 - 하드코드 폴백(`var(--x, #hex)`)을 쓰면 토큰이 없어져도(오타 포함)
- * 화면이 조용히 옛 색으로 버텨서 문제를 못 알아챈다. 토큰은 `styles/agent-chat.css` 에 있다.
+ * 화면이 조용히 옛 색으로 버텨서 문제를 못 알아챈다. 토큰은 `ui/theme.css` 에 있다.
  */
 export function runStatusColor(status: string | undefined): string {
   switch (status) {

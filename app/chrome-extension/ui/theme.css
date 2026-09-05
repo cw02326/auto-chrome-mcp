@@ -224,6 +224,47 @@
     color: var(--ac-selection-text);
   }
 
+  /*
+   * Page normalize for the pages that do not load Tailwind's preflight
+   * (popup, options). Scoped to `.agent-theme` and kept inside this same
+   * `base` layer on purpose: an unlayered reset in a page stylesheet would
+   * outrank every `.ac-*` primitive below no matter how specific those are,
+   * which is how a `* { padding: 0 }` reset silently flattens every button.
+   * The sidepanel already gets the same values from preflight, so this
+   * block changes nothing there.
+   */
+  .agent-theme,
+  .agent-theme *,
+  .agent-theme *::before,
+  .agent-theme *::after {
+    box-sizing: border-box;
+  }
+
+  .agent-theme h1,
+  .agent-theme h2,
+  .agent-theme h3,
+  .agent-theme h4,
+  .agent-theme p,
+  .agent-theme pre,
+  .agent-theme ul,
+  .agent-theme ol,
+  .agent-theme figure {
+    margin: 0;
+  }
+
+  .agent-theme ul,
+  .agent-theme ol {
+    padding: 0;
+    list-style: none;
+  }
+
+  .agent-theme button,
+  .agent-theme input,
+  .agent-theme select,
+  .agent-theme textarea {
+    font-family: inherit;
+  }
+
   /* ========================================
      Shared primitives (2026-09-06 Toss pass)
 

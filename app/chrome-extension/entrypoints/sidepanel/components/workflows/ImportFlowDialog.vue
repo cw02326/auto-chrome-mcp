@@ -85,7 +85,7 @@
  */
 import { computed, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
-import { useDialogA11y } from '../../composables/useDialogA11y';
+import { useDialogA11y } from '@/ui/useDialogA11y';
 import * as daily from '../../utils/daily-messages';
 import type { ImportPreviewFlow } from '../../utils/import-flow';
 import {

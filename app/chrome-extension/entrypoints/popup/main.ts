@@ -1,9 +1,8 @@
 import { createApp } from 'vue';
 import { NativeMessageType } from 'auto-chrome-mcp-shared';
 import './style.css';
-// agent-theme 디자인 토큰 시스템 (popup/sidepanel/welcome 공통). v1.0.36 에서
-// chat UI 는 제거됐으나 CSS 변수 (--ac-*) 는 popup 색 시스템의 기반이라 유지.
-import '../sidepanel/styles/agent-chat.css';
+// 사이드패널·팝업·옵션이 함께 쓰는 디자인 토큰과 .ac-* 프리미티브.
+import '@/ui/theme.css';
 import { preloadAgentTheme } from '../sidepanel/composables/useAgentTheme';
 import App from './App.vue';
 

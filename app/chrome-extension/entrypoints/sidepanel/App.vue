@@ -443,7 +443,7 @@ import {
 } from './components/workflows';
 import { DailyView, DailyScheduleForm } from './components/daily';
 import { useAgentTheme } from './composables/useAgentTheme';
-import { useDialogA11y } from './composables/useDialogA11y';
+import { useDialogA11y } from '@/ui/useDialogA11y';
 import { useWorkflowsV3, type FlowLite } from './composables/useWorkflowsV3';
 import { useDailySchedules } from './composables/useDailySchedules';
 import { useRecorder } from './composables/useRecorder';

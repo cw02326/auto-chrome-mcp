@@ -189,7 +189,7 @@
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
-import { useDialogA11y } from '../../composables/useDialogA11y';
+import { useDialogA11y } from '@/ui/useDialogA11y';
 import RunVariablesDialog from './RunVariablesDialog.vue';
 import * as rr from '../../utils/rr-messages';
 import { runFlowInTemporaryTab } from '../../utils/test-run';

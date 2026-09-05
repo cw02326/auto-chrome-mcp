@@ -10,11 +10,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import {
-  getFocusableElements,
-  handleFocusTrapKeydown,
-  isEscapeKey,
-} from '@/entrypoints/sidepanel/composables/useDialogA11y';
+import { getFocusableElements, handleFocusTrapKeydown, isEscapeKey } from '@/ui/useDialogA11y';
 
 /** container 안에 버튼 몇 개(+비활성/포커스 제외)를 넣은 뒤 컨테이너를 돌려준다. */
 function buildContainer(): {
