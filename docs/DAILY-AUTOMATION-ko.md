@@ -120,6 +120,48 @@ Claude Code 를 켜야만 돌아가는 자동화는 자동화가 아닙니다. M
 
 알림이 오면 크롬에서 그 사이트에 다시 로그인만 하면 됩니다. 다음 회차부터 정상입니다.
 
+## 사이드패널에서 녹화한 흐름도 같은 방법으로 예약합니다
+
+단축뿐 아니라 사이드패널에서 녹화해 **발행한 흐름**도 `chrome_shortcut` 으로 예약할 수
+있습니다. `name` 대신 `flowId` 를 주면 됩니다. 흐름 id 는
+`record_replay_list_published` 로 확인합니다.
+
+```json
+{
+  "action": "schedule",
+  "flowId": "flow-board-check",
+  "schedule": { "daily": ["08:00"], "days": ["mon", "tue", "wed", "thu", "fri"] },
+  "params": { "keyword": "공지" },
+  "loginCheck": "check-logged-in"
+}
+```
+
+- `params` 는 흐름 변수 값입니다. 실행할 때 그대로 흐름에 전달됩니다.
+- `loginCheck` 는 단축과 달리 **그 흐름의 단계 id** 입니다. 그 단계가 실패하면
+  `login_required` 로 기록됩니다.
+- 예약 이름은 `flow:<흐름 id>` 이고, 사이드패널의 매일 작업 목록과 같은 예약입니다.
+  어느 쪽에서 만들어도 양쪽에 함께 보입니다.
+- 해제와 이력 조회도 `flowId` 로 합니다.
+
+```json
+{ "action": "history", "flowId": "flow-board-check", "limit": 5 }
+```
+
+```json
+{ "action": "unschedule", "flowId": "flow-board-check" }
+```
+
+예약을 만들 때 세 가지를 먼저 확인하고, 걸리면 그 자리에서 거절합니다.
+
+| 거절 코드                 | 뜻                                                           |
+| ------------------------- | ------------------------------------------------------------ |
+| `flow_not_published`      | 발행하지 않은 흐름입니다. 사이드패널에서 먼저 발행하세요.    |
+| `flow_start_url_required` | 시작 URL 이 없습니다. 예약 실행은 스스로 탭을 열어야 합니다. |
+| `flow_has_sensitive_vars` | 민감 변수가 있습니다. 예약 레코드에 비밀값을 담지 않습니다.  |
+
+`name` 과 `flowId` 를 함께 주면 무엇을 뜻하는지 고를 수 없으므로 `target_ambiguous` 로
+거절합니다.
+
 ## 5단계: 아침에 Claude 가 하는 일
 
 Claude 에게 "밤새 예약 결과 정리해 줘" 라고 하면 됩니다. Claude 는 이 순서로 읽습니다.

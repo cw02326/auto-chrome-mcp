@@ -469,51 +469,6 @@ async function activeTabIdForRecording(): Promise<number | undefined> {
   }
 }
 
-const runFlow = async (flowId: string) => {
-  try {
-    // load flow to get runOptions
-    let flow: any = null;
-    try {
-      const getRes = await chrome.runtime.sendMessage({
-        type: BACKGROUND_MESSAGE_TYPES.RR_GET_FLOW,
-        flowId,
-      });
-      if (getRes && getRes.success) flow = getRes.flow;
-    } catch {}
-    const runOptions = (flow && flow.meta && flow.meta.runOptions) || {};
-    // No per-run overrides in popup; sidepanel/editor manage advanced options
-    const ov: any = {};
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW,
-      flowId,
-      options: { ...runOptions, ...ov, returnLogs: true },
-    });
-    if (!(res && res.success)) {
-      console.warn('回放失败');
-      return;
-    }
-    // If failed, open builder and focus the failed node
-    try {
-      const result = res.result;
-      if (result && result.success === false) {
-        const logs = result.logs || [];
-        const failed = logs.find((l: any) => l.status === 'failed');
-        if (failed && failed.stepId) {
-          // 打开独立编辑窗口并定位失败节点
-          if (flow) openBuilderWindow(flow.id, String(failed.stepId));
-        }
-      } else if (result && result.success === true) {
-        // If run succeeded but selector fallback was used, suggest updating priorities
-        const logs = result.logs || [];
-        const fb = logs.find((l: any) => l.fallbackUsed && l.fallbackTo);
-        if (fb && flow) openBuilderWindow(flow.id, String(fb.stepId || ''));
-      }
-    } catch {}
-  } catch (e) {
-    console.error('回放失败:', e);
-  }
-};
-
 // 旧的“克隆/发布/定时/覆盖项”在侧边栏或编辑器中处理
 
 const nativeConnectionStatus = ref<'unknown' | 'connected' | 'disconnected'>('unknown');
@@ -768,13 +723,6 @@ async function openWelcomePage() {
   } catch {
     // ignore
   }
-}
-
-function openBuilderWindow(flowId?: string, focusNodeId?: string) {
-  const url = new URL(chrome.runtime.getURL('builder.html'));
-  if (flowId) url.searchParams.set('flowId', flowId);
-  if (focusNodeId) url.searchParams.set('focus', focusNodeId);
-  chrome.windows.create({ url: url.toString(), type: 'popup', width: 1280, height: 800 });
 }
 
 const getStatusText = () => {
@@ -1717,7 +1665,7 @@ const switchModel = async (newModel: ModelPreset) => {
     modelInitializationStatus.value = 'error';
     isModelDownloading.value = false;
 
-    const errorMessage = error?.message || '未知错误';
+    const errorMessage = error?.message || getMessage('unknownErrorMessage');
     if (
       errorMessage.includes('network') ||
       errorMessage.includes('fetch') ||
@@ -2822,46 +2770,6 @@ onUnmounted(() => {
     gap: 8px;
   }
 
-  .rr-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .rr-controls {
-    display: flex;
-    gap: 8px;
-  }
-  .rr-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .rr-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px;
-    border: 1px solid #eee;
-    border-radius: 6px;
-  }
-  .rr-runoverrides {
-    margin-top: 6px;
-    border: 1px dashed #e5e7eb;
-    border-radius: 8px;
-    padding: 8px;
-    background: #f9fafb;
-  }
-  .rr-meta {
-    display: flex;
-    flex-direction: column;
-  }
-  .rr-name {
-    font-weight: 600;
-  }
-  .rr-desc {
-    font-size: 12px;
-    color: #666;
-  }
   .empty {
     color: #888;
     font-size: 13px;
@@ -2897,117 +2805,6 @@ onUnmounted(() => {
   .stats-value {
     font-size: 24px;
   }
-}
-
-/* 快捷工具icon按钮样式 */
-.rr-icon-buttons {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-start;
-  padding: 16px;
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-}
-
-.rr-icon-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ac-surface-muted, #f2f0eb);
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #6e6e6e);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.rr-icon-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
-}
-
-.rr-icon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.rr-icon-btn svg {
-  width: 24px;
-  height: 24px;
-}
-
-/* 录制按钮 - 红色 */
-.rr-icon-btn-record {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-
-.rr-icon-btn-record:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.2);
-  color: #dc2626;
-}
-
-/* 录制中状态 - 脉冲动画 */
-.rr-icon-btn-recording {
-  animation: pulse-recording 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-recording {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
-  }
-}
-
-/* 停止按钮 - 深红色 */
-.rr-icon-btn-stop {
-  background: rgba(185, 28, 28, 0.1);
-  color: #b91c1c;
-}
-
-.rr-icon-btn-stop:hover:not(:disabled) {
-  background: rgba(185, 28, 28, 0.2);
-  color: #991b1b;
-}
-
-/* 编辑按钮 - 蓝色 */
-.rr-icon-btn-edit {
-  background: rgba(37, 99, 235, 0.1);
-  color: #2563eb;
-}
-
-.rr-icon-btn-edit:hover:not(:disabled) {
-  background: rgba(37, 99, 235, 0.2);
-  color: #1d4ed8;
-}
-
-/* 标注按钮 - 绿色 */
-.rr-icon-btn-marker {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.rr-icon-btn-marker:hover:not(:disabled) {
-  background: rgba(16, 185, 129, 0.2);
-  color: #059669;
-}
-
-/* Coming Soon 按钮样式 */
-.rr-icon-btn-coming-soon {
-  opacity: 0.5;
-  cursor: default !important;
-}
-
-.rr-icon-btn-coming-soon:hover {
-  transform: none !important;
-  box-shadow: none !important;
-  opacity: 0.6;
 }
 
 /* CSS Tooltip - instant display */
@@ -3152,50 +2949,6 @@ onUnmounted(() => {
 .entry-arrow {
   color: var(--ac-text-subtle, #a8a29e);
   flex-shrink: 0;
-}
-
-/* Coming Soon Badge */
-.coming-soon-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 2px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--ac-accent, #d97757);
-  background: rgba(217, 119, 87, 0.12);
-  border-radius: 4px;
-  vertical-align: middle;
-}
-
-.entry-item-coming-soon {
-  opacity: 0.7;
-}
-
-.entry-item-coming-soon:hover {
-  opacity: 0.85;
-}
-
-/* Coming Soon Toast */
-.coming-soon-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  background: var(--ac-text, #1a1a1a);
-  color: var(--ac-text-inverse, #ffffff);
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.15));
-  z-index: 1000;
-  white-space: nowrap;
 }
 
 .toast-icon {

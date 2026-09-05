@@ -3,9 +3,12 @@
  *
  * 2026-09-05 Codex 검토 항목 2 의 회귀 테스트.
  *
- * 사용자가 시작하지 않은 진입점(URL 트리거, DOM 트리거, 알람 스케줄)이 사용자가 보고 있는
- * 탭을 빌려 자동 실행하면 안 된다. 이 셋은 세션 소유의 백그라운드 탭을 새로 열어 거기서
- * 돌고, 끝나면 닫는다. 사용자 탭에서 직접 돌리려면 흐름이 runInTriggeringTab 을 켜야 한다.
+ * 사용자가 시작하지 않은 진입점(URL 트리거, DOM 트리거)이 사용자가 보고 있는 탭을 빌려
+ * 자동 실행하면 안 된다. 이 둘은 세션 소유의 백그라운드 탭을 새로 열어 거기서 돌고,
+ * 끝나면 닫는다. 사용자 탭에서 직접 돌리려면 흐름이 runInTriggeringTab 을 켜야 한다.
+ *
+ * 알람 스케줄(`rr_schedule_*`)은 2026-09-06(3단계)에 삭제됐다. 예약 엔진은
+ * `chrome_shortcut` 쪽 하나로 통일됐고, 그쪽 회귀 테스트는 tests/utils/ 에 있다.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +19,6 @@ const NEW_TAB_ID = 700;
 const mocks = vi.hoisted(() => ({
   runFlow: vi.fn(),
   listTriggers: vi.fn(),
-  listSchedules: vi.fn(),
   getFlow: vi.fn(),
 }));
 
@@ -33,7 +35,6 @@ vi.mock('@/entrypoints/background/record-replay/flow-store', async (importOrigin
     await importOriginal<typeof import('@/entrypoints/background/record-replay/flow-store')>();
   return {
     ...actual,
-    listSchedules: mocks.listSchedules,
     getFlow: mocks.getFlow,
     appendRun: vi.fn(async () => undefined),
   };
@@ -73,10 +74,6 @@ function messageListeners(): Array<(m: any, s: any, r: any) => any> {
   return (chrome.runtime.onMessage.addListener as any).mock.calls.map((c: any[]) => c[0]);
 }
 
-function alarmListeners(): Array<(a: any) => void> {
-  return (chrome.alarms.onAlarm.addListener as any).mock.calls.map((c: any[]) => c[0]);
-}
-
 /** runFlow 에 넘어간 RunTabContext. */
 function runTabArg(index = 0) {
   return mocks.runFlow.mock.calls[index]?.[1];
@@ -92,8 +89,6 @@ describe('비사용자 진입점은 사용자 탭을 빌리지 않는다', () =>
     mocks.runFlow.mockResolvedValue({ runId: 'r', success: true, summary: {}, logs: [] });
     mocks.listTriggers.mockReset();
     mocks.listTriggers.mockResolvedValue([]);
-    mocks.listSchedules.mockReset();
-    mocks.listSchedules.mockResolvedValue([]);
     mocks.getFlow.mockReset();
     mocks.getFlow.mockResolvedValue(flow());
   });
@@ -217,26 +212,6 @@ describe('비사용자 진입점은 사용자 탭을 빌리지 않는다', () =>
 
     expect(mocks.runFlow).toHaveBeenCalledTimes(1);
     expect(runTabArg().tabId).toBe(NEW_TAB_ID);
-    expect(stub.removedTabs).toContain(NEW_TAB_ID);
-  });
-
-  it('알람 스케줄은 활성 탭을 조회하지 않고 새 탭에서 돈다', async () => {
-    mocks.listSchedules.mockResolvedValue([
-      { id: 's1', flowId: 'trigger-flow', enabled: true, type: 'interval', when: '5' },
-    ]);
-    await loadModule();
-    const queriesBefore = stub.callsTo('tabs.query').length;
-
-    const listeners = alarmListeners();
-    expect(listeners.length).toBeGreaterThan(0);
-    for (const fn of listeners) await fn({ name: 'rr_schedule_s1' });
-    await new Promise((r) => setTimeout(r, 5));
-
-    expect(mocks.runFlow).toHaveBeenCalledTimes(1);
-    expect(runTabArg().tabId).toBe(NEW_TAB_ID);
-    expect(runTabArg().tabId).not.toBe(USER_TAB_ID);
-    // 사용자 활성 탭 조회 없음.
-    expect(stub.callsTo('tabs.query').length).toBe(queriesBefore);
     expect(stub.removedTabs).toContain(NEW_TAB_ID);
   });
 });

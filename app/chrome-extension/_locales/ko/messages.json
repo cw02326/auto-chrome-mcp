@@ -1948,5 +1948,21 @@
         "example": "5"
       }
     }
+  },
+  "markedElementsLabel": {
+    "message": "마킹한 요소",
+    "description": "Label for the count of elements marked on the current page"
+  },
+  "backToHomeTooltip": {
+    "message": "처음으로",
+    "description": "Tooltip on the back button of the local model page"
+  },
+  "backButton": {
+    "message": "뒤로",
+    "description": "Label of the back button"
+  },
+  "localModelPageTitle": {
+    "message": "로컬 모델",
+    "description": "Title of the local model page in the popup"
   }
 }

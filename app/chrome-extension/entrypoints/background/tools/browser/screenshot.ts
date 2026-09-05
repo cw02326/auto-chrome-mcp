@@ -15,19 +15,33 @@ import { screenshotContextManager } from '@/utils/screenshot-context';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { activateTab } from '@/utils/activation-guard';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
-import { waitForFramePaint, waitForHelperReady } from '@/utils/adaptive-wait';
+import { sleep, waitForFramePaint, waitForHelperReady } from '@/utils/adaptive-wait';
 import { redactedArgsForLog } from '@/utils/log-redact';
 import { saveArtifactToDownloads } from '@/utils/artifact-path';
 
 /**
  * auto-chrome-mcp fork v1.9.0: 전용 작업 창(기본 배치 minimized) 안의 비활성 탭은 캡처할 수
- * 없다. 대상이 그 창의 탭이면 캡처 직전에 활성화한다 — 사용자 창은 건드리지 않는다.
+ * 없다. 대상이 그 창의 탭이면 캡처 직전에 활성화한다. 사용자 창은 건드리지 않는다.
+ *
+ * 2026-09-06(3단계 Codex 리뷰 2항): `skipPaintProbe` 는 주입 불가 탭에서 켠다. 페인트 확인
+ * (`waitForFramePaint`)은 속을 열어 보면 `chrome.scripting.executeScript` 라, 확장 자체
+ * 페이지·devtools·view-source 탭에서는 반드시 거부된다. 그 거부는 삼켜지지만 그동안 상한
+ * (300ms)까지 헛기다리고, 무엇보다 "이 탭에는 주입하지 않는다"는 이 도구의 계약을 깬다.
+ * 그런 탭에서는 활성화만 하고 예전 고정 대기(150ms)만 준다.
  */
-async function ensureActiveInWorkWindow(tab: chrome.tabs.Tab): Promise<void> {
+async function ensureActiveInWorkWindow(
+  tab: chrome.tabs.Tab,
+  options: { skipPaintProbe?: boolean } = {},
+): Promise<void> {
   try {
     if (tab.active === true || typeof tab.id !== 'number') return;
     if (!(await isMcpWindow(tab.windowId))) return;
     await activateTab(tab.id, { reason: 'screenshot:work-window' });
+    if (options.skipPaintProbe) {
+      // 주입이 막힌 탭이라 rAF 확인 자체가 불가능하다. 예전 고정 대기만 준다.
+      await sleep(WORK_WINDOW_ACTIVATION_PAINT_MIN_MS);
+      return;
+    }
     // 활성화 직후 첫 프레임이 나올 때까지 기다린다.
     // auto-chrome-mcp fork: rAF 두 번은 "한 번 그렸다"만 보장하므로 예전 고정 대기(150ms)를
     // 하한으로 남기고, rAF 를 확인할 수 없는 탭(최소화된 창 등)에서는 300ms 까지만 기다린다.
@@ -128,6 +142,49 @@ async function captureVisibleTabFallback(tabId: number, windowId?: number): Prom
       : await chrome.tabs.captureVisibleTab({ format: 'png' });
   if (!dataUrl) throw new Error('captureVisibleTab returned empty image data');
   return dataUrl;
+}
+
+/**
+ * auto-chrome-mcp fork(2026-09-06): 콘텐츠 스크립트를 넣을 수 없는 탭인가.
+ *
+ * chrome.scripting.executeScript 는 **확장 자신의 페이지**(chrome-extension://…, 사이드패널을
+ * 탭으로 연 경우 포함)·devtools://·view-source: 에서 항상 실패한다
+ * ("Extension manifest must request permission to access this host" — 호스트 권한으로 열 수
+ * 없는 스킴이라 manifest 를 고쳐도 안 된다).
+ * 반면 CDP 는 같은 탭에서 잘 돈다(확장은 자기 확장 페이지에 디버거를 붙일 수 있다).
+ * 그래서 이런 탭에서는 헬퍼 주입 경로(Path 2)로 되돌아가면 안 되고, CDP 뷰포트 캡처만 쓴다.
+ *
+ * about: 은 일부러 뺐다 — about:blank 는 주입이 되는 경우가 있어 예전 경로를 유지한다.
+ */
+export function isNotInjectableUrl(url?: string): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith('chrome-extension://') ||
+    url.startsWith('chrome-untrusted://') ||
+    url.startsWith('devtools://') ||
+    url.startsWith('view-source:')
+  );
+}
+
+/**
+ * auto-chrome-mcp fork(2026-09-06): CDP 뷰포트 캡처 파라미터를 시도할 순서.
+ *
+ * 1순위는 예전과 완전히 동일하다. 다만 표면(surface)이 아직 없는 탭 — 보이지 않는 확장
+ * 페이지 등 — 에서는 fromSurface 조합이 빈 데이터/에러로 끝난다. 헬퍼 주입으로 되돌아갈 수
+ * 있는 일반 탭은 예전처럼 1순위만 쓰고, 되돌아갈 곳이 없는 주입 불가 탭에서만 아래 조합까지
+ * 차례로 시도한다. 2번째는 실패 진단 스크린샷(tools/index.ts)이 쓰는 "플래그 없는" 호출과
+ * 같은 조합이다(그 경로는 같은 탭에서 성공했다).
+ */
+const CDP_VIEWPORT_CAPTURE_VARIANTS: ReadonlyArray<Record<string, unknown>> = [
+  { format: 'png', fromSurface: true, captureBeyondViewport: false },
+  { format: 'png' },
+  { format: 'png', fromSurface: false },
+];
+
+/** 에러 객체를 한 줄 메시지로. */
+function errorText(error: unknown): string {
+  if (error === undefined) return 'none';
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -403,11 +460,15 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     const explicit = await this.tryGetTab(args.tabId);
     const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
 
+    // auto-chrome-mcp fork(2026-09-06): 주입 가능 여부를 활성화보다 **먼저** 판정한다.
+    // 활성화 경로가 페인트 확인에 executeScript 를 쓰기 때문이다(아래 함수 주석 참고).
+    const notInjectable = isNotInjectableUrl(tab.url);
+
     // auto-chrome-mcp fork v1.9.0: 최소화된 전용 작업 창에서는 **활성 탭만** 캡처된다
     // (2026-09-02 실측: 비활성 탭은 CDP 캡처도 captureVisibleTab 도 실패한다).
     // 병렬 lane 처럼 작업 창에 탭이 여러 개일 때를 위해, 대상이 전용 작업 창의 탭이면
     // 캡처 전에 그 창 안에서 활성화한다. 창은 사용자 화면 밖이라 눈에 보이는 변화가 없다.
-    await ensureActiveInWorkWindow(tab);
+    await ensureActiveInWorkWindow(tab, { skipPaintProbe: notInjectable });
 
     // Check URL restrictions
     if (
@@ -418,6 +479,17 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     ) {
       return createErrorResponse(
         'Cannot capture special browser pages or web store pages due to security restrictions.',
+      );
+    }
+
+    // auto-chrome-mcp fork(2026-09-06): 확장 자체 페이지 등은 콘텐츠 스크립트를 넣을 수 없다.
+    // 뷰포트 캡처는 CDP 만으로 되지만 fullPage/selector 는 헬퍼(주입)가 있어야 하므로,
+    // 여기서 원인이 적힌 코드로 거절한다 — 예전에는 주입 실패 메시지로 끝나 원인이 가려졌다.
+    if (notInjectable && (fullPage || selector)) {
+      return createErrorResponse(
+        `Screenshot error: not_injectable_for_option: ${fullPage ? 'fullPage' : 'selector'} needs a content script, ` +
+          `which Chrome refuses to inject into ${tab.url}. ` +
+          'Retry without fullPage/selector — the viewport is captured via CDP on this page.',
       );
     }
 
@@ -438,25 +510,39 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       const canUseCdpCapture = !fullPage && !selector;
 
       // === Path 1: CDP viewport capture (no content script needed) ===
+      let cdpCaptureError: unknown;
       if (canUseCdpCapture) {
         try {
-          const tabId = tab.id!;
-          await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
-            const metrics = normalizeLayoutMetrics(
-              await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {}),
-            );
-            const base64Data = await this._cdpCaptureScreenshot(tabId, {
-              format: 'png',
-              fromSurface: true,
-              captureBeyondViewport: false,
-            });
-            finalImageDataUrl = `data:image/png;base64,${base64Data}`;
-            // 좌표 스케일링 규약 유지: 컨텍스트에는 CSS 픽셀 기준 뷰포트 크기를 기록한다
-            finalImageWidthCss = metrics.viewportWidthCss;
-            finalImageHeightCss = metrics.viewportHeightCss;
-          });
+          const captured = await this._captureViewportViaCdp(
+            tab.id!,
+            // 일반 탭은 예전과 동일하게 1순위 조합만 쓴다(실패하면 헬퍼 경로가 받는다).
+            notInjectable
+              ? CDP_VIEWPORT_CAPTURE_VARIANTS
+              : CDP_VIEWPORT_CAPTURE_VARIANTS.slice(0, 1),
+          );
+          finalImageDataUrl = captured.dataUrl;
+          // 좌표 스케일링 규약 유지: 컨텍스트에는 CSS 픽셀 기준 뷰포트 크기를 기록한다
+          finalImageWidthCss = captured.viewportWidthCss;
+          finalImageHeightCss = captured.viewportHeightCss;
         } catch (e) {
+          cdpCaptureError = e;
           console.warn('CDP viewport capture failed, falling back to helper path:', e);
+        }
+      }
+
+      // === Path 1b: 주입 불가 탭 — Path 2(헬퍼)로 되돌아갈 수 없다 ===
+      // 여기까지 오면 fullPage/selector 는 이미 위에서 걸러졌으므로 뷰포트 캡처만 남는다.
+      if (!finalImageDataUrl && notInjectable) {
+        try {
+          // 탭이 지금 보이는 상태라면 마지막 기회. 보이지 않으면 이 함수가 자기 에러를 던진다
+          // (사용자 탭을 활성화하지 않는다는 원칙 유지 — 여기서 activate 하지 않는다).
+          finalImageDataUrl = await captureVisibleTabFallback(tab.id!, tab.windowId);
+        } catch (fallbackError) {
+          throw new Error(
+            `not_injectable: Chrome does not allow content-script injection into ${tab.url}, ` +
+              'so the helper capture path is unavailable and the CDP capture failed too. ' +
+              `CDP error: ${errorText(cdpCaptureError)} / captureVisibleTab error: ${errorText(fallbackError)}`,
+          );
         }
       }
 
@@ -719,6 +805,51 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
    */
   private logInfo(message: string) {
     console.log(`[Screenshot Tool] ${message}`);
+  }
+
+  /**
+   * auto-chrome-mcp fork(2026-09-06): CDP 로 뷰포트를 캡처한다 (콘텐츠 스크립트 없이).
+   *
+   * variants 를 순서대로 시도한다. 일반 탭은 1개만 넘겨받아 예전과 동일하게 동작하고,
+   * 주입 불가 탭(확장 자체 페이지 등)만 여러 조합을 시도한다 — 실패해도 되돌아갈 헬퍼
+   * 경로가 없기 때문이다. 같은 이유로 그 경우에는 Page.getLayoutMetrics 실패도 치명적이지
+   * 않게 다루고(뷰포트 크기 없이 캡처는 반환), 좌표 컨텍스트만 생략한다.
+   */
+  private async _captureViewportViaCdp(
+    tabId: number,
+    variants: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<{ dataUrl: string; viewportWidthCss?: number; viewportHeightCss?: number }> {
+    return await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
+      let metrics: NormalizedLayoutMetrics | undefined;
+      try {
+        metrics = normalizeLayoutMetrics(
+          await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {}),
+        );
+      } catch (e) {
+        // 헬퍼 경로로 되돌아갈 수 있는 탭에서는 예전과 똑같이 실패로 취급한다.
+        if (variants.length <= 1) throw e;
+        console.warn('CDP Page.getLayoutMetrics failed; capturing without viewport metrics:', e);
+      }
+
+      let lastError: unknown;
+      for (const params of variants) {
+        try {
+          const base64Data = await this._cdpCaptureScreenshot(tabId, params);
+          return {
+            dataUrl: `data:image/png;base64,${base64Data}`,
+            viewportWidthCss: metrics?.viewportWidthCss,
+            viewportHeightCss: metrics?.viewportHeightCss,
+          };
+        } catch (e) {
+          lastError = e;
+          console.warn(
+            `CDP Page.captureScreenshot failed with ${JSON.stringify(params)}:`,
+            errorText(e),
+          );
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(errorText(lastError));
+    });
   }
 
   /**

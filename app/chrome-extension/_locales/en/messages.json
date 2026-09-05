@@ -1948,5 +1948,21 @@
         "example": "5"
       }
     }
+  },
+  "markedElementsLabel": {
+    "message": "Marked elements",
+    "description": "Label for the count of elements marked on the current page"
+  },
+  "backToHomeTooltip": {
+    "message": "Back to home",
+    "description": "Tooltip on the back button of the local model page"
+  },
+  "backButton": {
+    "message": "Back",
+    "description": "Label of the back button"
+  },
+  "localModelPageTitle": {
+    "message": "Local model",
+    "description": "Title of the local model page in the popup"
   }
 }

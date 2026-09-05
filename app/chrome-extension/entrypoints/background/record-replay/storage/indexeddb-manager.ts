@@ -1,9 +1,10 @@
 // indexeddb-manager.ts
 // IndexedDB storage manager for Record & Replay data.
-// Stores: flows, runs, published, schedules, triggers.
+// Stores: flows, runs, published, triggers.
+// 'schedules' 스토어는 2026-09-06(3단계)에 record-replay 자체 예약 코드를 지우면서 접근자가
+// 사라졌다. 예전 사용자 데이터를 지우지 않으려고 스키마에서는 그대로 둔다.
 
 import type { Flow, RunRecord } from '../types';
-import type { FlowSchedule } from '../flow-store';
 import type { PublishedFlowInfo } from '../flow-store';
 import type { FlowTrigger } from '../trigger-store';
 import { IndexedDbClient } from '@/utils/indexeddb-client';
@@ -100,17 +101,6 @@ export const IndexedDbStorage = {
       return deleteOne('published', id);
     },
   },
-  schedules: {
-    async list(): Promise<FlowSchedule[]> {
-      return getAll<FlowSchedule>('schedules');
-    },
-    async save(s: FlowSchedule): Promise<void> {
-      return putOne<FlowSchedule>('schedules', s);
-    },
-    async delete(id: string): Promise<void> {
-      return deleteOne('schedules', id);
-    },
-  },
   triggers: {
     async list(): Promise<FlowTrigger[]> {
       return getAll<FlowTrigger>('triggers');
@@ -146,20 +136,17 @@ export async function ensureMigratedFromLocal(): Promise<void> {
         'rr_flows',
         'rr_runs',
         'rr_published_flows',
-        'rr_schedules',
         'rr_triggers',
       ]);
       const flows = (res['rr_flows'] as Flow[]) || [];
       const runs = (res['rr_runs'] as RunRecord[]) || [];
       const published = (res['rr_published_flows'] as PublishedFlowInfo[]) || [];
-      const schedules = (res['rr_schedules'] as FlowSchedule[]) || [];
       const triggers = (res['rr_triggers'] as FlowTrigger[]) || [];
 
       // Write into IDB
       if (flows.length) await putMany('flows', flows);
       if (runs.length) await putMany('runs', runs);
       if (published.length) await putMany('published', published);
-      if (schedules.length) await putMany('schedules', schedules);
       if (triggers.length) await putMany('triggers', triggers);
 
       await chrome.storage.local.set({ rr_idb_migrated: true });

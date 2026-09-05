@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.13.0] 사이드패널 녹화·발행·매일 작업 한 화면, 흐름 예약 통일, 죽은 코드 정리 (2026-09-06)
+
+확장과 브리지를 함께 1.13.0 으로 올린다. `chrome_shortcut` 의 `flowId` 파라미터는 브리지 갱신 뒤
+Claude Code 를 재시작해야 보인다. 사이드패널 기능은 확장 리로드만으로 쓸 수 있다.
+
+### Added
+
+- **사이드패널에서 녹화부터 발행까지 한 화면.** 상단 녹화 표시줄(시작/중지, 경과 시간, 단계 수)로
+  녹화하고, 중지하면 저장 화면이 열린다. 이름(기본값 = 녹화 탭 제목 + 날짜), 시작 URL, 감지된 변수
+  (비밀번호 칸은 기본 민감, 값은 저장하지 않음), 단계 목록과 삭제, 임시 백그라운드 탭 시험 실행,
+  "저장하고 발행" 을 한 곳에서 한다. 카드에 발행됨·재발행 필요 배지와 발행/해제 토글.
+  팝업의 녹화 버튼은 사이드패널을 열어 녹화를 시작한다(탭을 지정했는데 없으면 시작하지 않는다).
+- **페이지 이동이 녹화된다.** `chrome.webNavigation` 으로 이동을 `navigate` 단계로 남기되, 클릭·키가
+  일으킨 이동은 그 단계에 합쳐 `waitForNavigation` 으로 남긴다. 흐름에 `startUrl` 이 생겼고,
+  `record_replay_flow_run` 은 작업 탭이 없어도 시작 URL 로 백그라운드 탭을 열어 실행한다
+  (응답 `tabSource`). 발행 slug 는 락 안에서 유일하게 만들고 한글 이름은 `flow-<id>` 로.
+- **매일 작업 탭.** 예약 한 줄(이름, 종류, 예약 요약, 다음 실행, 마지막 결과, 켜기/끄기), 펼치면
+  실행 이력(상태 필터, 더 보기, 실패 단계·오류·스크린샷 열기, 지금 실행, 다시 실행). 흐름 카드의
+  예약 버튼으로 매일/요일/간격·시각 여러 개·변수 값을 정한다. 발행 안 됨, 시작 URL 없음, 민감 변수
+  있음이면 예약을 거절한다. 카드 필터 칩(사이트, 발행됨, 예약 있음, 최근 실패), JSON 가져오기
+  (충돌 시 복사/덮어쓰기), 단축키 Ctrl+Shift+Y, 팝업 "매일 작업" 버튼.
+- **흐름 예약이 `chrome_shortcut` 예약 엔진 하나로 통일됐다.** `ScheduleRecord` 에 `scheduleId`
+  (`shortcut:<name>` / `flow:<flowId>`), `target`, `enabled` 가 생겼다. 알람·잠금·이력 키는 scheduleId 를
+  쓰고, 옛 레코드와 이름 키 이력은 읽을 때 보정·병합한다. 끄기는 알람 해제에 더해 실행 직전
+  재검사로 큐 항목까지 막는다. 예약 흐름 실행은 MCP 도구와 같은 `runPublishedFlow` 를 쓰고 끝나면
+  탭을 닫는다. `chrome_shortcut` 의 `schedules`/`history` 응답에 `target`·`label`.
+- **`chrome_shortcut` 에 `flowId` 파라미터.** `schedule`/`unschedule`/`history` 를 발행된 흐름 id 로
+  부를 수 있다. 사이드패널과 같은 검증(`flow_not_published`, `flow_start_url_required`,
+  `flow_has_sensitive_vars`, `flow_login_check_invalid`)을 쓰고, `name` 과 함께 주면 `target_ambiguous`.
+- **예약 실패 알림을 클릭하면 매일 작업 탭이 열린다.** 사이드패널이 거절하면 탭으로 연다.
+
+### Changed
+
+- 사이드패널 문구 전부 한국어(`getMessage` + `_locales/{ko,en}`), 문서 제목 "흐름 관리".
+- 사이드패널 목록이 녹화·발행·도구와 같은 저장소(`rr_storage`)를 읽는다. 이전에는 다른 저장소
+  (`rr_v3`)를 읽어 방금 녹화한 흐름이 목록에 보이지 않았다.
+- `chrome_screenshot` 이 확장 자체 페이지 같은 주입 불가 탭에서도 뷰포트를 찍는다(CDP 조합
+  재시도, 실패 원인 메시지 유지). `fullPage`/`selector` 는 그런 탭에서 `not_injectable_for_option`.
+
+### Removed
+
+- 구버전 노드 빌더(`entrypoints/builder`, `builder.html`)와 팝업 빌더 컴포넌트, record-replay V3 엔진
+  (RPC·트리거·큐·디버거·`rr_v3` 접근 코드. keepalive 만 `background/keepalive/` 로 이동),
+  record-replay 자체 예약(`RR_SCHEDULE_FLOW`, `FlowSchedule`, `rr_schedule_*` 알람), 팝업
+  `ScheduleDialog`, coming-soon 잔재. 확장 번들 13.2MB → 9.7MB. 시작 시 옛 알람
+  (`rr_schedule_`, `rr_v3_cron_`, `rr_v3_interval_`, `rr_v3_once_`)을 한 번 정리한다.
+  `rr_v3` IndexedDB 는 지우지 않는다.
+
+### 알려진 한계
+
+- 예약 실행은 정확히 한 번을 보장하지 않는다(`running` 이력 기록 실패 시에도 실행). MV3 워커
+  재시작 시 대기 큐가 사라지고 돌던 실행은 `interrupted` 로 정리된다.
+- 흐름 실행의 `user_took_over_tab` 은 종료 후 1회만 판정한다.
+
 ## [v1.12.0] 데일리 자동화(예약 실행·이력)·흐름 실행 도구·작업명 탭 그룹 (2026-09-05)
 
 확장과 브리지를 함께 1.12.0 으로 올린다. chrome_shortcut 의 schedule·history 와 record_replay 도구는

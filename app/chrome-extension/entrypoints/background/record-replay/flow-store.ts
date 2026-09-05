@@ -739,31 +739,3 @@ function randomIdTail(): string {
   }
   return Math.random().toString(36).slice(2, 10);
 }
-
-// Scheduling support
-export type ScheduleType = 'once' | 'interval' | 'daily';
-export interface FlowSchedule {
-  id: string; // schedule id
-  flowId: string;
-  type: ScheduleType;
-  enabled: boolean;
-  // when: ISO string for 'once'; HH:mm for 'daily'; minutes for 'interval'
-  when: string;
-  // optional variables to pass when running
-  args?: Record<string, any>;
-}
-
-export async function listSchedules(): Promise<FlowSchedule[]> {
-  await ensureMigratedFromLocal();
-  return await IndexedDbStorage.schedules.list();
-}
-
-export async function saveSchedule(s: FlowSchedule): Promise<void> {
-  await ensureMigratedFromLocal();
-  await IndexedDbStorage.schedules.save(s);
-}
-
-export async function removeSchedule(scheduleId: string): Promise<void> {
-  await ensureMigratedFromLocal();
-  await IndexedDbStorage.schedules.delete(scheduleId);
-}

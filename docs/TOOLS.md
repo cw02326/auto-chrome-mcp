@@ -1051,6 +1051,10 @@ workflows (login flows, routine collection) survive across sessions.
   `unschedule` | `schedules`
 - `name` (string, optional): shortcut name (`save` / `run` / `delete` / `schedule` /
   `unschedule`; filters `history`)
+- `flowId` (string, optional): for `schedule` / `unschedule` / `history`, target a published
+  flow (the id from `record_replay_list_published`) instead of a shortcut name. Passing both
+  `name` and `flowId` is `target_ambiguous`, and `flowId` on any other action is
+  `flow_target_unsupported`.
 - `steps` (array, optional, max 20): for `save` — steps in `chrome_batch` format
 - `description` (string, optional): for `save` — what this shortcut does
 - `continueOnError` (boolean, optional, default `false`): for `run`
@@ -1277,6 +1281,50 @@ run as `stopped`, which is silent.
 The password box showing up means the session expired: the run is recorded as `login_required`
 and a notification says `crm-export: login_required (step 1)`. Sign in again in Chrome and the
 next run is normal.
+
+#### Scheduling a published flow
+
+`schedule`, `unschedule` and `history` also take a published record-replay flow through
+`flowId`, so a flow recorded in the side panel can be put on a timer without opening the panel.
+The side panel and this tool go through the same validation and the same storage, so a schedule
+made here shows up in the side panel's daily list and the other way round.
+
+- The flow must be **published** (`flow_not_published`) and must have a **start URL**
+  (`flow_start_url_required`). A scheduled run has no work tab and opens its own, exactly like
+  the first `chrome_navigate` step of a scheduled shortcut.
+- A flow with a **sensitive variable** cannot be scheduled (`flow_has_sensitive_vars`): the
+  schedule record lives in plain extension storage, so there is nowhere safe to keep the value.
+  Rely on the Chrome profile session instead.
+- `params` carries the flow variable values (they become the run `args`), and `loginCheck` is a
+  **step id of that flow**, not an `as` name (`flow_login_check_invalid`). When that step is the
+  one that failed, the run is recorded as `login_required`.
+- The schedule id is `flow:<flowId>`, which is also the `history` key, so
+  `{ "action": "history", "flowId": "..." }` lists that flow's scheduled runs. Manual runs
+  through `record_replay_flow_run` keep their own history in the side panel.
+- Everything else is the same as a scheduled shortcut: serial background runs, one alarm per
+  schedule, at most 20 schedules in total, failure screenshots, and notifications on the 1st and
+  3rd consecutive failure.
+
+**Example**, run the published "board check" flow every weekday morning, then look at how it
+went and take it off the timer:
+
+```json
+{
+  "action": "schedule",
+  "flowId": "flow-board-check",
+  "schedule": { "daily": ["08:00"], "days": ["mon", "tue", "wed", "thu", "fri"] },
+  "params": { "keyword": "공지" },
+  "loginCheck": "check-logged-in"
+}
+```
+
+```json
+{ "action": "history", "flowId": "flow-board-check", "limit": 5 }
+```
+
+```json
+{ "action": "unschedule", "flowId": "flow-board-check" }
+```
 
 **Example**, the morning routine:
 

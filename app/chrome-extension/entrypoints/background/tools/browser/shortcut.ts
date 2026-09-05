@@ -34,6 +34,7 @@ import {
   putSchedule,
   readSchedules,
   removeSchedule,
+  scheduleIdForFlow,
   scheduleIdForShortcut,
   summarizeSchedule,
   validateLoginCheck,
@@ -42,6 +43,7 @@ import {
   type ScheduleRecord,
   type ScheduleTarget,
 } from '@/utils/shortcut-schedule';
+import { checkFlowScheduleTarget, commitSchedule } from '../../flow-schedule';
 
 /**
  * auto-chrome-mcp fork: chrome_shortcut — chrome_batch 의 step 목록을 이름 붙여 저장해두고
@@ -56,6 +58,11 @@ type ShortcutStep = RunnerStep;
 interface ShortcutToolParams {
   action: 'save' | 'run' | 'list' | 'delete' | 'history' | 'schedule' | 'unschedule' | 'schedules';
   name?: string;
+  /**
+   * action="schedule"/"unschedule"/"history": 단축 이름 대신 발행된 흐름을 대상으로 한다
+   * (2026-09-06 사이드패널 3단계). `name` 과 함께 오면 `target_ambiguous` 다.
+   */
+  flowId?: string;
   steps?: ShortcutStep[];
   description?: string;
   continueOnError?: boolean;
@@ -118,6 +125,9 @@ interface StoredShortcut {
 }
 
 const MAX_SHORTCUTS = 50;
+
+/** `flowId` 를 받는 액션. 나머지 액션에서 오면 잘못 쓴 것이라 알려 준다. */
+const FLOW_TARGET_ACTIONS = ['schedule', 'unschedule', 'history'] as const;
 const MAX_NAME_LENGTH = 64;
 const STORAGE_KEY = 'mcpShortcuts';
 
@@ -515,6 +525,20 @@ class ShortcutTool extends BaseBrowserToolExecutor {
   async execute(args: ShortcutToolParams): Promise<ToolResult> {
     const action = args?.action;
 
+    // 2026-09-06 사이드패널 3단계: 예약·해제·이력은 단축 이름 대신 발행된 흐름도 대상으로
+    // 받는다. 둘 다 오면 무엇을 뜻하는지 고를 수 없으므로 조용히 한쪽을 고르지 않는다.
+    const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    if (flowId) {
+      if (!FLOW_TARGET_ACTIONS.includes(action as (typeof FLOW_TARGET_ACTIONS)[number])) {
+        return createErrorResponse(
+          `flow_target_unsupported: "flowId" works with ${FLOW_TARGET_ACTIONS.join(', ')} only`,
+        );
+      }
+      if (typeof args?.name === 'string' && args.name.trim().length > 0) {
+        return createErrorResponse('target_ambiguous: pass either "name" or "flowId", not both');
+      }
+    }
+
     switch (action) {
       case 'save':
         return this.handleSave(args);
@@ -817,8 +841,13 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     // 2026-09-05 사이드패널 2단계 D: 예약 실행의 이력 키는 `shortcut:<enc(name)>` 이고
     // 수동 `run` 은 예전 그대로 이름이다. 이름으로 물으면 둘 다 보여 준다 - 사용자에게는
     // 같은 단축의 실행 기록이다.
-    const scoped =
-      name === undefined
+    // 2026-09-06 3단계: 흐름은 키가 하나다(`flow:<enc(flowId)>`). 흐름의 수동 실행은
+    // `record_replay_flow_run` 이 자기 이력에 남기므로 이 저장소에는 예약 실행만 있다.
+    const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const flowKey = flowId ? scheduleIdForFlow(flowId) : '';
+    const scoped = flowKey
+      ? { [flowKey]: Array.isArray(map[flowKey]) ? map[flowKey] : [] }
+      : name === undefined
         ? map
         : {
             [name]: Array.isArray(map[name]) ? map[name] : [],
@@ -855,6 +884,9 @@ class ShortcutTool extends BaseBrowserToolExecutor {
    * shortcut 하나에 예약 하나이고, 다시 걸면 덮어쓴다(`replaced: true`).
    */
   private async handleSchedule(args: ShortcutToolParams): Promise<ToolResult> {
+    const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    if (flowId) return this.handleScheduleFlow(args, flowId);
+
     const name = validateName(args?.name);
     if (!name) {
       return createErrorResponse(
@@ -990,22 +1022,88 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     };
   }
 
+  /**
+   * action="schedule" + flowId: 발행된 흐름을 예약한다 (2026-09-06 사이드패널 3단계).
+   *
+   * 검증도 저장도 사이드패널(`DAILY_PUT_SCHEDULE`)과 **같은 함수**를 지난다
+   * (`entrypoints/background/flow-schedule.ts`). 거절 코드가 두 접점에서 같아야
+   * "화면에서는 막히는데 도구로는 걸리는" 예약이 생기지 않는다.
+   */
+  private async handleScheduleFlow(args: ShortcutToolParams, flowId: string): Promise<ToolResult> {
+    // 흐름에는 `params` 선언이 없다. 도구의 `params` 는 흐름 변수 값(args)으로 간다.
+    const check = await checkFlowScheduleTarget({
+      flowId,
+      args: args?.params,
+      loginCheck: args?.loginCheck,
+    });
+    if (!check.ok) return createErrorResponse(check.error);
+
+    const loginCheck =
+      typeof args?.loginCheck === 'string' && args.loginCheck.trim().length > 0
+        ? args.loginCheck.trim()
+        : undefined;
+
+    const committed = await commitSchedule(check, {
+      schedule: args?.schedule,
+      notify: args?.notify !== false,
+      report: args?.report === true,
+      ...(loginCheck ? { loginCheck } : {}),
+      enabled: true,
+    });
+    if (!committed.ok) return createErrorResponse(committed.error);
+
+    const record = committed.record;
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            flowId,
+            name: record.name,
+            scheduleId: record.scheduleId,
+            target: record.target,
+            replaced: committed.replaced,
+            schedule: record.schedule,
+            nextAt: record.nextAt,
+            nextAtLocal: new Date(record.nextAt).toString(),
+            notify: record.notify,
+            report: record.report,
+            revision: record.revision,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
   /** action="unschedule": 예약 레코드와 알람을 지운다. shortcut 정의는 그대로 둔다. */
   private async handleUnschedule(args: ShortcutToolParams): Promise<ToolResult> {
-    const name = validateName(args?.name);
-    if (!name) {
+    const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const name = flowId ? '' : validateName(args?.name);
+    if (!flowId && !name) {
       return createErrorResponse(
         'name must be a 1-64 character string without "/" or control characters',
       );
     }
     // 실행 중이던 run 이 종료 시 재무장하지 않도록 revision 을 먼저 올린 뒤 지운다.
-    const scheduleId = scheduleIdForShortcut(name);
+    const scheduleId = flowId ? scheduleIdForFlow(flowId) : scheduleIdForShortcut(name as string);
     await bumpScheduleRevision(scheduleId);
     const unscheduled = await removeSchedule(scheduleId);
     await clearScheduleAlarm(scheduleId);
 
     return {
-      content: [{ type: 'text', text: JSON.stringify({ success: true, name, unscheduled }) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            ...(flowId ? { flowId } : { name }),
+            scheduleId,
+            unscheduled,
+          }),
+        },
+      ],
       isError: false,
     };
   }

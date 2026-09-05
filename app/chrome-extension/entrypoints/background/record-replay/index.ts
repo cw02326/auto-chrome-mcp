@@ -9,11 +9,7 @@ import {
   unpublishFlow,
   exportFlow,
   exportAllFlows,
-  listSchedules,
-  saveSchedule,
-  removeSchedule,
   ensurePublishedSensitiveDefaultsMigrated,
-  type FlowSchedule,
 } from './flow-store';
 import { listRuns } from './flow-store';
 // 2026-09-05 사이드패널 1단계 A: 발행 목록 조회. 위 import 블록을 고치지 않으려고 줄을
@@ -30,39 +26,6 @@ import { recordingSession } from './recording/session-manager';
 // Browser/content listeners are initialized via RecorderManager.init
 
 // design note: background listener for record & replay; delegates recording to dedicated modules
-
-// Alarm helpers for schedules
-async function rescheduleAlarms() {
-  const schedules = await listSchedules();
-  // Clear existing rr_schedule_* alarms
-  const alarms = await chrome.alarms.getAll();
-  await Promise.all(
-    alarms
-      .filter((a) => a.name && a.name.startsWith('rr_schedule_'))
-      .map((a) => chrome.alarms.clear(a.name)),
-  );
-  for (const s of schedules) {
-    if (!s.enabled) continue;
-    const name = `rr_schedule_${s.id}`;
-    if (s.type === 'interval') {
-      const minutes = Math.max(1, Math.floor(Number(s.when) || 0));
-      await chrome.alarms.create(name, { periodInMinutes: minutes });
-    } else if (s.type === 'once') {
-      const whenMs = Date.parse(s.when);
-      if (Number.isFinite(whenMs)) await chrome.alarms.create(name, { when: whenMs });
-    } else if (s.type === 'daily') {
-      // daily HH:mm local time
-      const [hh, mm] = String(s.when || '00:00')
-        .split(':')
-        .map((x) => Number(x));
-      const now = new Date();
-      const next = new Date();
-      next.setHours(hh || 0, mm || 0, 0, 0);
-      if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
-      await chrome.alarms.create(name, { when: next.getTime(), periodInMinutes: 24 * 60 });
-    }
-  }
-}
 
 // legacy injection helpers removed — use recording/content-injection when needed
 
@@ -225,8 +188,6 @@ export function initRecordReplayListeners() {
   // (ensurePublishedSensitiveDefaultsMigrated 가 catch 후 0 을 돌려준다) 여기서 별도
   // try/catch 가 필요 없다.
   void ensurePublishedSensitiveDefaultsMigrated();
-  // On startup, re-schedule alarms
-  rescheduleAlarms().catch(() => {});
   // Initialize trigger engine (contextMenus/commands/url/dom)
   initTriggerEngine().catch(() => {});
   // Initialize recorder manager (wires browser and content listeners)
@@ -442,40 +403,6 @@ export function initRecordReplayListeners() {
         case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS: {
           refreshTriggers()
             .then(() => sendResponse({ success: true }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES: {
-          listSchedules()
-            .then((s) => sendResponse({ success: true, schedules: s }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW: {
-          const s = message.schedule as FlowSchedule;
-          if (!s || !s.id || !s.flowId) {
-            sendResponse({ success: false, error: 'invalid schedule' });
-            return true;
-          }
-          saveSchedule(s)
-            .then(async () => {
-              await rescheduleAlarms();
-              sendResponse({ success: true });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW: {
-          const scheduleId = String(message.scheduleId || '');
-          if (!scheduleId) {
-            sendResponse({ success: false, error: 'invalid scheduleId' });
-            return true;
-          }
-          removeSchedule(scheduleId)
-            .then(async () => {
-              await rescheduleAlarms();
-              sendResponse({ success: true });
-            })
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
@@ -731,22 +658,3 @@ async function pingTab(tabId: number, action: string): Promise<boolean> {
     return false;
   }
 }
-
-// Alarm listener executes scheduled flows
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  try {
-    if (!alarm?.name || !alarm.name.startsWith('rr_schedule_')) return;
-    const id = alarm.name.slice('rr_schedule_'.length);
-    const schedules = await listSchedules();
-    const s = schedules.find((x) => x.id === id && x.enabled);
-    if (!s) return;
-    const flow = await getFlow(s.flowId);
-    if (!flow) return;
-    // 스케줄 실행에는 시작 탭이 없다. 예전에는 사용자의 활성 탭을 잡아 거기서 돌렸다 —
-    // 사용자가 뭘 보고 있든 자동화가 그 페이지를 조작했다. 이제는 자기 백그라운드 탭을
-    // 열어 돌고 닫는다.
-    await runFlowFromTrigger(flow, s, {});
-  } catch (e) {
-    // swallow to not spam logs
-  }
-});

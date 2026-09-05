@@ -19,7 +19,6 @@ const FLOW_TAB_ID = 751;
 const mocks = vi.hoisted(() => ({
   runFlow: vi.fn(),
   listTriggers: vi.fn(),
-  listSchedules: vi.fn(),
   getFlow: vi.fn(),
 }));
 
@@ -36,7 +35,6 @@ vi.mock('@/entrypoints/background/record-replay/flow-store', async (importOrigin
     await importOriginal<typeof import('@/entrypoints/background/record-replay/flow-store')>();
   return {
     ...actual,
-    listSchedules: mocks.listSchedules,
     getFlow: mocks.getFlow,
     appendRun: vi.fn(async () => undefined),
   };
@@ -91,8 +89,6 @@ describe('트리거 정리는 자기가 만든 탭을 닫는다 (항목 5)', () 
         match: [{ kind: 'domain', value: 'shop.test' }],
       },
     ]);
-    mocks.listSchedules.mockReset();
-    mocks.listSchedules.mockResolvedValue([]);
     mocks.getFlow.mockReset();
     mocks.getFlow.mockResolvedValue(flow());
 

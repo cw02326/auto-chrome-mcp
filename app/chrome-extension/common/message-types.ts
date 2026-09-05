@@ -51,10 +51,6 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_SAVE_TRIGGER: 'rr_save_trigger',
   RR_DELETE_TRIGGER: 'rr_delete_trigger',
   RR_REFRESH_TRIGGERS: 'rr_refresh_triggers',
-  // Scheduling
-  RR_SCHEDULE_FLOW: 'rr_schedule_flow',
-  RR_UNSCHEDULE_FLOW: 'rr_unschedule_flow',
-  RR_LIST_SCHEDULES: 'rr_list_schedules',
   // 2026-09-05 사이드패널 2단계 D: 가져오기 미리보기 (id 충돌 여부를 먼저 보여 준다).
   RR_IMPORT_FLOW_PREVIEW: 'rr_import_flow_preview',
   // 매일 작업 (예약 엔진 하나로 통일된 화면). 대상은 단축과 흐름 둘 다이고, 예약을

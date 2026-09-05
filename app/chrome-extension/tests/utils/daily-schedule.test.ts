@@ -235,7 +235,11 @@ async function seedFlow(h: Harness, over: AnyRecord = {}): Promise<{ id: string;
     version: 1,
     variables: [],
     startUrl: FLOW_START_URL,
-    nodes: [{ id: 'n1', type: 'navigate', config: { url: FLOW_START_URL } }],
+    // `login-check` 단계는 loginCheck 검증(있는 단계 id 인지)을 지나기 위한 것이다.
+    nodes: [
+      { id: 'n1', type: 'navigate', config: { url: FLOW_START_URL } },
+      { id: 'login-check', type: 'assert', config: {} },
+    ],
     edges: [],
     meta: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
     ...over,
@@ -888,5 +892,161 @@ describe('11. 결과 가공이 실패해도 예약이 연 탭은 남지 않는�
     expect(
       await h.workTab.getSessionScopedTabIds(h.runner.scheduledSessionKey(scheduleId)),
     ).toEqual([]);
+  });
+});
+
+describe('12. chrome_shortcut 으로도 흐름을 예약한다 (도구 경로)', () => {
+  /** 도구를 부르고 응답 본문을 돌려준다. 오류면 isError 와 텍스트를 그대로 준다. */
+  async function tool(args: AnyRecord): Promise<AnyRecord> {
+    const result: any = await h.shortcut.shortcutTool.execute(args as any);
+    return { isError: result.isError === true, text: result.content?.[0]?.text ?? '' };
+  }
+
+  async function scheduleFlowByTool(over: AnyRecord = {}): Promise<AnyRecord> {
+    return await tool({
+      action: 'schedule',
+      flowId: FLOW_ID,
+      schedule: { daily: ['08:00'] },
+      ...over,
+    });
+  }
+
+  it('발행된 흐름을 예약하면 사이드패널과 같은 레코드가 남는다', async () => {
+    await seedFlow(h);
+    const res = await scheduleFlowByTool({ params: { keyword: '공지' } });
+
+    expect(res.isError).toBe(false);
+    const payload = JSON.parse(res.text as string);
+    expect(payload).toMatchObject({
+      success: true,
+      flowId: FLOW_ID,
+      scheduleId: `flow:${FLOW_ID}`,
+      name: '게시판 확인',
+      target: { kind: 'flow', flowId: FLOW_ID, args: { keyword: '공지' } },
+      replaced: false,
+      notify: true,
+      report: false,
+    });
+
+    // 저장소·알람도 사이드패널 경로와 같은 자리에 생긴다.
+    const stored = await h.schedule.readSchedule(`flow:${FLOW_ID}`);
+    expect(stored?.target).toEqual({ kind: 'flow', flowId: FLOW_ID, args: { keyword: '공지' } });
+    expect(stored?.enabled).toBe(true);
+    expect(h.alarms.get(`mcp-shortcut::flow:${FLOW_ID}`)?.scheduledTime).toBe(stored?.nextAt);
+
+    // 같은 예약 목록에 함께 보인다.
+    const listed = body(await h.shortcut.shortcutTool.execute({ action: 'schedules' } as any));
+    expect(listed.schedules).toHaveLength(1);
+    expect(listed.schedules[0]).toMatchObject({ scheduleId: `flow:${FLOW_ID}`, kind: 'flow' });
+  });
+
+  it('사이드패널과 같은 코드로 거절한다 (발행·시작 URL·민감 변수)', async () => {
+    // 흐름 저장소는 이 파일 안에서 이어지므로 사례마다 다른 id 를 쓴다.
+    await seedFlow(h, { id: 'flow-tool-unpublished', publish: false });
+    expect((await scheduleFlowByTool({ flowId: 'flow-tool-unpublished' })).text).toContain(
+      'flow_not_published',
+    );
+
+    await seedFlow(h, { id: 'flow-tool-nostart', startUrl: undefined });
+    expect((await scheduleFlowByTool({ flowId: 'flow-tool-nostart' })).text).toContain(
+      'flow_start_url_required',
+    );
+
+    await seedFlow(h, {
+      id: 'flow-tool-secret',
+      variables: [{ key: 'pw', label: '비밀번호', sensitive: true }],
+    });
+    expect((await scheduleFlowByTool({ flowId: 'flow-tool-secret' })).text).toContain(
+      'flow_has_sensitive_vars',
+    );
+  });
+
+  it('name 과 flowId 를 함께 주면 target_ambiguous 다', async () => {
+    await seedFlow(h);
+    const res = await tool({
+      action: 'schedule',
+      name: 'board-watch',
+      flowId: FLOW_ID,
+      schedule: { every: '1h' },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('target_ambiguous');
+    // 아무것도 저장되지 않았다.
+    expect(await h.schedule.readSchedule(`flow:${FLOW_ID}`)).toBeNull();
+  });
+
+  it('흐름의 loginCheck 은 그 흐름의 단계 id 여야 한다', async () => {
+    await seedFlow(h);
+    const bad = await scheduleFlowByTool({ loginCheck: 'nope' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('flow_login_check_invalid');
+
+    const good = await scheduleFlowByTool({ loginCheck: 'login-check' });
+    expect(good.isError).toBe(false);
+    expect((await h.schedule.readSchedule(`flow:${FLOW_ID}`))?.loginCheck).toBe('login-check');
+  });
+
+  it('flowId 는 예약·해제·이력에서만 쓴다', async () => {
+    const res = await tool({ action: 'run', flowId: FLOW_ID });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('flow_target_unsupported');
+  });
+
+  it('flowId 로 해제하면 레코드와 알람이 사라진다', async () => {
+    await seedFlow(h);
+    await scheduleFlowByTool();
+    expect(h.alarms.has(`mcp-shortcut::flow:${FLOW_ID}`)).toBe(true);
+
+    const res = await tool({ action: 'unschedule', flowId: FLOW_ID });
+    const payload = JSON.parse(res.text as string);
+    expect(payload).toMatchObject({
+      success: true,
+      flowId: FLOW_ID,
+      scheduleId: `flow:${FLOW_ID}`,
+      unscheduled: true,
+    });
+    expect(await h.schedule.readSchedule(`flow:${FLOW_ID}`)).toBeNull();
+    expect(h.alarms.has(`mcp-shortcut::flow:${FLOW_ID}`)).toBe(false);
+  });
+
+  it('history 를 flowId 로 거르면 그 흐름의 실행만 나온다', async () => {
+    const now = Date.now();
+    h.local.mcpShortcutHistory = {
+      [`flow:${FLOW_ID}`]: [
+        {
+          runId: 'run-flow-1',
+          name: `flow:${FLOW_ID}`,
+          label: '게시판 확인',
+          trigger: 'schedule',
+          status: 'success',
+          startedAt: now - 1_000,
+          endedAt: now,
+        },
+      ],
+      'board-watch': [
+        {
+          runId: 'run-shortcut-1',
+          name: 'board-watch',
+          trigger: 'manual',
+          status: 'failed',
+          startedAt: now - 2_000,
+          endedAt: now - 1_500,
+        },
+      ],
+    };
+
+    const filtered = body(
+      await h.shortcut.shortcutTool.execute({ action: 'history', flowId: FLOW_ID } as any),
+    );
+    expect(filtered.runs.map((r: AnyRecord) => r.runId)).toEqual(['run-flow-1']);
+    expect(filtered.runs[0].target).toEqual({ kind: 'flow', flowId: FLOW_ID });
+    expect(filtered.matched).toBe(1);
+
+    // 거르지 않으면 둘 다 보인다 (흐름 이력만 감춰지지 않는다).
+    const all = body(await h.shortcut.shortcutTool.execute({ action: 'history' } as any));
+    expect(all.runs.map((r: AnyRecord) => r.runId).sort()).toEqual([
+      'run-flow-1',
+      'run-shortcut-1',
+    ]);
   });
 });
