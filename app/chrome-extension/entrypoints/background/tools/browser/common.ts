@@ -20,6 +20,7 @@ import {
 } from '@/utils/work-tab-manager';
 import { isTabBusy, markTabBusy, unmarkTabBusy } from '@/utils/tab-lock';
 import { effectiveBackgroundModeOf, isBackgroundModeEnabledFor } from '@/utils/background-mode';
+import { waitBudgetMs } from '@/utils/tool-watchdog';
 import { beginMcpGroupTask, setMcpGroupTitle } from '@/utils/mcp-tab-group';
 import { noWorkTabErrorText } from '@/utils/work-tab-gate';
 import {
@@ -415,10 +416,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
         ? args.waitUntil
         : 'domcontentloaded';
 
-    const timeoutMs =
+    // 흐름 마감이 실려 왔으면 로드 대기도 그 안에서 끝낸다 (발행 전 검토 3).
+    const timeoutMs = waitBudgetMs(
+      args,
       typeof args?.waitTimeoutMs === 'number' && Number.isFinite(args.waitTimeoutMs)
         ? Math.min(60000, Math.max(0, args.waitTimeoutMs))
-        : 15000;
+        : 15000,
+    );
 
     // 결과 payload 에서 대상 탭을 찾는다 (새 창 경로는 tabs[0]).
     const first = result.content.find(
@@ -599,6 +603,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         await this.ensureFocus(targetTab, {
           activate: background !== true,
           focusWindow: background !== true,
+          contextArgs: args,
         });
 
         if (url === 'forward') {
@@ -724,9 +729,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
           navigatedExplicitTab = explicitTab.url !== url;
         }
         // Optionally bring to foreground based on background flag
+        // 실행 컨텍스트가 무간섭을 강제하면 인자 background 와 무관하게 화면을 건드리지
+        // 않는다 (2026-09-05 발행 전 검토 2).
         await this.ensureFocus(existingTab, {
           activate: background !== true,
           focusWindow: background !== true,
+          contextArgs: args,
         });
 
         console.log(`Activated existing Tab ID: ${existingTab.id}`);

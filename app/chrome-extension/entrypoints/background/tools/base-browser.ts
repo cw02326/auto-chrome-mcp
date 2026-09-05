@@ -2,6 +2,7 @@ import { ToolExecutor } from '@/common/tool-handler';
 import type { ToolResult } from '@/common/tool-handler';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { activateTab, focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
+import { effectiveBackgroundModeOf } from '@/utils/background-mode';
 
 const PING_TIMEOUT_MS = 300;
 
@@ -184,20 +185,36 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    *   (사용자가 보고 있는 탭을 MCP 도구가 뺏지 않게). 단 forceActivate:true 를 넘기면 게이트를
    *   우회한다 — 사용자 대면 UI 를 띄우는 도구(element-picker 등)는 탭이 앞에 있어야 하므로.
    *   백그라운드 모드가 OFF 면 이전과 동일하게 항상 활성화.
+   *
+   * 2026-09-05 발행 전 검토 2: `contextArgs` 를 주면 **이 호출의 실행 컨텍스트 모드**가
+   * 전역 토글보다 먼저다. 예약 실행·흐름 실행처럼 사용자가 보고 있지 않은 실행은 전역
+   * 토글이 꺼져 있어도 화면을 가져가면 안 되고, 그 경우 창 포커스도 요청하지 않는다.
    */
   protected async ensureFocus(
     tab: chrome.tabs.Tab,
-    options: { activate?: boolean; focusWindow?: boolean; forceActivate?: boolean } = {},
+    options: {
+      activate?: boolean;
+      focusWindow?: boolean;
+      forceActivate?: boolean;
+      contextArgs?: unknown;
+    } = {},
   ): Promise<void> {
-    const activate = options.activate === true;
-    const focusWindow = options.focusWindow === true;
     const forceActivate = options.forceActivate === true;
+    // 강제 무간섭 실행이면 사용자 대면 도구(forceActivate)를 뺀 나머지는 화면을 건드리지 않는다.
+    const forcedBackground =
+      !forceActivate && effectiveBackgroundModeOf(options.contextArgs) === true;
+    const activate = options.activate === true && !forcedBackground;
+    const focusWindow = options.focusWindow === true && !forcedBackground;
     if (focusWindow) {
       await focusWindowIfAllowed(tab.windowId);
     }
     if (activate && typeof tab.id === 'number') {
       // v1.9.0: 활성화 판정은 utils/activation-guard.ts 한곳에서만 한다.
-      await activateTab(tab.id, { force: forceActivate, reason: `tool:${this.name}` });
+      await activateTab(tab.id, {
+        force: forceActivate,
+        reason: `tool:${this.name}`,
+        contextArgs: options.contextArgs,
+      });
     }
   }
 

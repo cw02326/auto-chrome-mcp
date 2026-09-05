@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { flowDeadlineOf, remainingFlowBudgetMs, waitBudgetMs } from '@/utils/tool-watchdog';
 import {
   RenderAssist,
   RenderKeepAlive,
@@ -496,6 +497,12 @@ class ScrollCollectTool extends BaseBrowserToolExecutor {
       await withRenderKeepAlive(tabId, renderMode, async (handle) => {
         keepAlive = handle;
         for (let pass = 0; pass < maxScrolls; pass++) {
+          // 흐름 마감이 실려 왔고 이미 지났으면 더 모으지 않는다 (발행 전 검토 3).
+          // 지금까지 모은 것은 그대로 돌려준다 - 수집은 중간에 멈춰도 결과가 남는다.
+          if (remainingFlowBudgetMs(flowDeadlineOf(params)) === 0) {
+            stoppedReason = 'deadline';
+            break;
+          }
           const stillOpen = await this.tryGetTab(tabId);
           if (!stillOpen) {
             outcome.failure = `Tab ${tabId} was closed while collecting`;
@@ -594,7 +601,8 @@ class ScrollCollectTool extends BaseBrowserToolExecutor {
               tabId,
               containerSelector,
               { height: result.scrollHeight, nodes: result.nodeCount ?? 0 },
-              delayMs,
+              // 지연 로딩 대기도 흐름 마감을 넘지 않는다.
+              waitBudgetMs(params, delayMs),
               networkWatcher,
             );
           }

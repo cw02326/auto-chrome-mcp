@@ -27,6 +27,8 @@ interface Harness {
   alarms: Map<string, { name: string; scheduledTime: number }>;
   alarmListeners: Array<(alarm: any) => void>;
   tabCreatedListeners: Array<(tab: any) => void>;
+  tabActivatedListeners: Array<(info: any) => void>;
+  windowFocusListeners: Array<(windowId: number) => void>;
   notifications: AnyRecord[];
   downloads: AnyRecord[];
   tabs: Map<number, AnyRecord>;
@@ -45,6 +47,8 @@ function installChrome(h: Partial<Harness>, shared?: { local: AnyRecord; session
   const alarms = new Map<string, { name: string; scheduledTime: number }>();
   const alarmListeners: Array<(alarm: any) => void> = [];
   const tabCreatedListeners: Array<(tab: any) => void> = [];
+  const tabActivatedListeners: Array<(info: any) => void> = [];
+  const windowFocusListeners: Array<(windowId: number) => void> = [];
   const notifications: AnyRecord[] = [];
   const downloads: AnyRecord[] = [];
   const tabs = new Map<number, AnyRecord>();
@@ -159,6 +163,10 @@ function installChrome(h: Partial<Harness>, shared?: { local: AnyRecord; session
         addListener: vi.fn((fn: any) => tabCreatedListeners.push(fn)),
         removeListener: vi.fn(),
       },
+      onActivated: {
+        addListener: vi.fn((fn: any) => tabActivatedListeners.push(fn)),
+        removeListener: vi.fn(),
+      },
       onUpdated: listener(),
     },
     tabGroups: {
@@ -196,7 +204,10 @@ function installChrome(h: Partial<Harness>, shared?: { local: AnyRecord; session
         windows.delete(id);
       }),
       onRemoved: listener(),
-      onFocusChanged: listener(),
+      onFocusChanged: {
+        addListener: vi.fn((fn: any) => windowFocusListeners.push(fn)),
+        removeListener: vi.fn(),
+      },
       WINDOW_ID_NONE: -1,
     },
     webNavigation: {
@@ -269,6 +280,8 @@ function installChrome(h: Partial<Harness>, shared?: { local: AnyRecord; session
     alarms,
     alarmListeners,
     tabCreatedListeners,
+    tabActivatedListeners,
+    windowFocusListeners,
     notifications,
     downloads,
     tabs,
@@ -380,8 +393,26 @@ afterEach(() => {
  * ================================================================== */
 
 describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다', () => {
-  /** 실행 중 작업 탭이 팝업 창을 하나 연다 (target=_blank / window.open). */
-  function openPopupFromWorkTab(harness: Harness): void {
+  /** 사용자가 이 탭·창을 보고 있다고 크롬 이벤트로 알린다. */
+  function userLooksAt(harness: Harness, tabId: number, windowId: number): void {
+    const previousTabId = [...harness.tabs.values()].find(
+      (tab) => tab.windowId === windowId && tab.active === true,
+    )?.id;
+    for (const tab of harness.tabs.values()) {
+      if (tab.windowId === windowId) tab.active = tab.id === tabId;
+    }
+    for (const win of harness.windows.values()) win.focused = win.id === windowId;
+    for (const fn of harness.tabActivatedListeners) fn({ tabId, windowId, previousTabId });
+    for (const fn of harness.windowFocusListeners) fn(windowId);
+  }
+
+  /**
+   * 실행 중 작업 탭이 팝업 창을 하나 연다 (target=_blank / window.open).
+   *
+   * @param announce false 면 `tabs.onActivated`·`windows.onFocusChanged` 를 보내지 않는다
+   *                 (워커가 그 이벤트를 못 본 상태 = 추적 값 없음).
+   */
+  function openPopupFromWorkTab(harness: Harness, announce = true): void {
     harness.windows.set(POPUP_WINDOW_ID, {
       id: POPUP_WINDOW_ID,
       type: 'popup',
@@ -394,10 +425,6 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
       url: 'https://popup.example.com/',
       openerTabId: WORK_TAB_ID,
     });
-    // 사용자 창의 활성 탭도 빼앗겼다고 본다 (target=_blank 는 활성 탭으로 열린다).
-    for (const tab of harness.tabs.values()) {
-      if (tab.windowId === USER_WINDOW_ID) tab.active = false;
-    }
     for (const fn of harness.tabCreatedListeners) {
       fn({
         id: SPAWNED_TAB_ID,
@@ -406,6 +433,41 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
         url: 'https://popup.example.com/',
         active: true,
       });
+    }
+    if (!announce) return;
+    // 새 창이라 그 창에는 직전 탭이 없다(previousTabId 없음). 팝업이 포커스를 가져간다.
+    for (const fn of harness.tabActivatedListeners) {
+      fn({ tabId: SPAWNED_TAB_ID, windowId: POPUP_WINDOW_ID });
+    }
+    for (const fn of harness.windowFocusListeners) fn(POPUP_WINDOW_ID);
+  }
+
+  /** 실행 중 작업 탭이 **사용자 창 안에** 새 탭을 열어 활성 슬롯을 가져간다 (target=_blank). */
+  function openTabInUserWindow(harness: Harness): void {
+    harness.tabs.set(SPAWNED_TAB_ID, {
+      id: SPAWNED_TAB_ID,
+      windowId: USER_WINDOW_ID,
+      active: true,
+      url: 'https://popup.example.com/',
+      openerTabId: WORK_TAB_ID,
+    });
+    const previousTabId = [...harness.tabs.values()].find(
+      (tab) => tab.windowId === USER_WINDOW_ID && tab.active === true && tab.id !== SPAWNED_TAB_ID,
+    )?.id;
+    for (const tab of harness.tabs.values()) {
+      if (tab.windowId === USER_WINDOW_ID) tab.active = tab.id === SPAWNED_TAB_ID;
+    }
+    for (const fn of harness.tabCreatedListeners) {
+      fn({
+        id: SPAWNED_TAB_ID,
+        windowId: USER_WINDOW_ID,
+        openerTabId: WORK_TAB_ID,
+        url: 'https://popup.example.com/',
+        active: true,
+      });
+    }
+    for (const fn of harness.tabActivatedListeners) {
+      fn({ tabId: SPAWNED_TAB_ID, windowId: USER_WINDOW_ID, previousTabId });
     }
   }
 
@@ -422,20 +484,114 @@ describe('1. 페이지가 띄운 탭·팝업 창도 예약 실행의 소유다',
       { tool: 'chrome_extract', as: 'after', args: { fields: { x: '.x' } } },
     ]);
 
+    // 사용자는 자기 창의 탭을 보고 있다.
+    userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
     h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
     await settle(120);
 
     const map = await h.history.readHistory();
     // 팝업이 떴다고 실행이 인계로 끊기지 않는다.
     expect(map.job[0].status).toBe('success');
-    // 사용자가 보던 탭·창으로 즉시 되돌렸다.
-    expect(h.activatedTabs).toContain(USER_TAB_ID);
+    // 스폰 직전에 포커스를 쥐고 있던 사용자 창으로 되돌렸다. 사용자 창의 활성 탭은
+    // 팝업이 가져가지 않았으므로 탭은 건드리지 않는다.
     expect(h.focusedWindows).toContain(USER_WINDOW_ID);
+    expect(h.activatedTabs).toHaveLength(0);
     // 스폰 탭은 실행이 끝나며 닫히고, 팝업 창도 창째로 닫힌다.
     expect(h.removedTabs).toContain(SPAWNED_TAB_ID);
     expect(h.removedWindows).toContain(POPUP_WINDOW_ID);
     // 버킷도 비었다.
     expect(await h.workTab.getSessionScopedTabIds(sessionKey)).toHaveLength(0);
+  });
+
+  it('사용자 창에 열린 탭이 활성 슬롯을 가져가면 직전 탭으로 되돌린다', async () => {
+    h.local.backgroundWorkMode = false;
+
+    const { sessionKey } = wireInvoker(h, 'job', (call) => {
+      if (call.name === 'chrome_extract') openTabInUserWindow(h);
+      return okText({ success: true });
+    });
+    const saved = await saveAndSchedule(h, 'job', [
+      ...BASIC_STEPS,
+      { tool: 'chrome_extract', as: 'after', args: { fields: { x: '.x' } } },
+    ]);
+
+    userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
+    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    await settle(120);
+
+    const map = await h.history.readHistory();
+    expect(map.job[0].status).toBe('success');
+    // 활성 슬롯을 빼앗겼으므로 직전 탭으로 되돌린다.
+    expect(h.activatedTabs).toContain(USER_TAB_ID);
+    // 같은 창 안의 일이라 창 포커스는 건드리지 않는다.
+    expect(h.focusedWindows).toHaveLength(0);
+    expect(h.removedTabs).toContain(SPAWNED_TAB_ID);
+    expect(await h.workTab.getSessionScopedTabIds(sessionKey)).toHaveLength(0);
+  });
+
+  it('실행 중 사용자가 다른 창으로 옮겼으면 그 창을 유지한다 (옛 창으로 끌고 가지 않는다)', async () => {
+    // 발행 전 검토 1: 예전에는 실행 시작 시점의 스냅샷으로 되돌려, 팝업이 뜨는 순간
+    // 사용자가 지금 쓰고 있는 창 B 에서 옛 창 A 로 끌려갔다.
+    h.local.backgroundWorkMode = false;
+    const OTHER_WINDOW_ID = 42;
+    const OTHER_TAB_ID = 43;
+    h.windows.set(OTHER_WINDOW_ID, { id: OTHER_WINDOW_ID, type: 'normal', focused: false });
+    h.tabs.set(OTHER_TAB_ID, {
+      id: OTHER_TAB_ID,
+      windowId: OTHER_WINDOW_ID,
+      active: false,
+      url: 'https://other.example.com/',
+    });
+
+    let extracts = 0;
+    const { sessionKey } = wireInvoker(h, 'job', (call) => {
+      if (call.name === 'chrome_extract') {
+        extracts += 1;
+        // 첫 step 뒤에 사용자가 창 B 로 옮기고, 그 다음 step 에서 팝업이 뜬다.
+        if (extracts === 1) userLooksAt(h, OTHER_TAB_ID, OTHER_WINDOW_ID);
+        else openPopupFromWorkTab(h);
+      }
+      return okText({ success: true });
+    });
+    const saved = await saveAndSchedule(h, 'job', [
+      ...BASIC_STEPS,
+      { tool: 'chrome_extract', as: 'after', args: { fields: { x: '.x' } } },
+    ]);
+
+    // 실행이 시작될 때 사용자는 창 A 를 보고 있었다.
+    userLooksAt(h, USER_TAB_ID, USER_WINDOW_ID);
+    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    await settle(120);
+
+    const map = await h.history.readHistory();
+    expect(map.job[0].status).toBe('success');
+    // 되돌린 곳은 창 B 다. 옛 창 A 로는 한 번도 끌고 가지 않았다.
+    expect(h.focusedWindows).toContain(OTHER_WINDOW_ID);
+    expect(h.focusedWindows).not.toContain(USER_WINDOW_ID);
+    expect(h.activatedTabs).not.toContain(USER_TAB_ID);
+    expect(await h.workTab.getSessionScopedTabIds(sessionKey)).toHaveLength(0);
+  });
+
+  it('추적한 화면이 없으면 아무것도 되돌리지 않는다 (강제 이동 금지)', async () => {
+    // 워커가 방금 깨어 활성 탭·포커스 이벤트를 한 번도 못 본 상태.
+    h.local.backgroundWorkMode = false;
+    wireInvoker(h, 'job', (call) => {
+      // 활성화·포커스 이벤트 없이 탭만 생긴다 (추적 값이 하나도 없는 상태).
+      if (call.name === 'chrome_extract') openPopupFromWorkTab(h, false);
+      return okText({ success: true });
+    });
+    const saved = await saveAndSchedule(h, 'job', [
+      ...BASIC_STEPS,
+      { tool: 'chrome_extract', as: 'after', args: { fields: { x: '.x' } } },
+    ]);
+
+    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    await settle(120);
+
+    expect(h.focusedWindows).toHaveLength(0);
+    expect(h.activatedTabs).toHaveLength(0);
+    // 그래도 소유·정리는 그대로 일어난다.
+    expect(h.removedTabs).toContain(SPAWNED_TAB_ID);
   });
 });
 
@@ -555,6 +711,61 @@ describe('4. 워커 둘이 같은 due 를 집어도 실행은 한 번뿐이다',
     expect(workers.size).toBe(1);
 
     second.runner.resetScheduleRunnerState();
+  });
+});
+
+/* ================================================================== *
+ * 4b. 잠금은 남의 nonce 를 덮어쓰지 않는다 (발행 전 검토 4)
+ * ================================================================== */
+
+describe('4b. 하트비트·해제는 자기 nonce 일 때만 잠금을 건드린다', () => {
+  it('실행 중 다른 nonce 가 잠금을 잡으면 하트비트도 해제도 그 잠금을 건드리지 않는다', async () => {
+    vi.useFakeTimers();
+    const gate: { release: () => void } = { release: () => undefined };
+    const downloadGate = new Promise<void>((resolve) => {
+      gate.release = resolve;
+    });
+    (chrome.downloads.download as any).mockImplementation(async (options: AnyRecord) => {
+      h.downloads.push(options);
+      await downloadGate;
+      return h.downloads.length;
+    });
+
+    wireInvoker(h, 'job', () => okText({ success: true, values: { id: '1' } }));
+    const saved = await saveAndSchedule(
+      h,
+      'job',
+      BASIC_STEPS,
+      { every: '1h' },
+      { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
+    );
+
+    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    await vi.advanceTimersByTimeAsync(5);
+
+    // 실행은 report 저장에서 멈춰 있다 - 이 실행의 잠금이 세션 저장소에 있다.
+    expect(h.downloads).toHaveLength(1);
+    expect(typeof h.session.scheduledRunLock?.nonce).toBe('string');
+
+    // 이 실행이 늘어진 사이에 잠금이 stale 로 회수되고 다른 실행이 새로 잡았다.
+    const foreign = {
+      runId: 'job:other-due',
+      name: 'job',
+      owner: 'other-worker',
+      nonce: 'foreign-nonce-1',
+      heartbeatAt: 1_700_000_000_000,
+    };
+    h.session.scheduledRunLock = { ...foreign };
+
+    // 하트비트 주기를 두 번 넘긴다. 예전에는 여기서 남의 잠금을 내 nonce 로 덮어썼다.
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(h.session.scheduledRunLock).toEqual(foreign);
+
+    // 실행이 끝나며 부르는 해제도 남의 잠금을 지우지 않는다 (compare-and-delete).
+    gate.release();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(h.session.scheduledRunLock).toEqual(foreign);
+    vi.useRealTimers();
   });
 });
 

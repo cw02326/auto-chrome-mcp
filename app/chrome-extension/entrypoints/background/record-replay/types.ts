@@ -64,6 +64,14 @@ export type VariableType = 'string' | 'number' | 'boolean' | 'enum' | 'array';
 export interface VariableDef {
   key: string;
   label?: string;
+  /**
+   * Password / token / anything that must not be written down.
+   *
+   * A sensitive variable's `default` is **not** persisted in a published
+   * snapshot: `publishFlow` drops it (`stripSensitiveDefaults`), so a run
+   * started from the tool surface gets the value only from the caller's `args`
+   * (2026-09-05 pre-release review, item 6). Run outputs mask it as well.
+   */
   sensitive?: boolean;
   // default value can be string/number/boolean/array depending on type
   default?: any; // keep broad for backward compatibility

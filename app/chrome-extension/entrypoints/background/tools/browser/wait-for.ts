@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { waitBudgetMs } from '@/utils/tool-watchdog';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { sleep } from '@/utils/adaptive-wait';
 
@@ -324,10 +325,14 @@ class WaitForTool extends BaseBrowserToolExecutor {
       );
     }
 
-    const timeoutMs =
+    // 흐름 실행이 마감을 실어 보냈으면 그보다 오래 기다리지 않는다 (발행 전 검토 3).
+    // 마감이 지난 뒤의 대기는 아무도 결과를 기다리지 않는 시간이다.
+    const timeoutMs = waitBudgetMs(
+      params,
       typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs)
         ? clamp(params.timeoutMs, 0, MAX_TIMEOUT_MS)
-        : DEFAULT_TIMEOUT_MS;
+        : DEFAULT_TIMEOUT_MS,
+    );
     const pollMs =
       typeof params.pollMs === 'number' && Number.isFinite(params.pollMs)
         ? clamp(params.pollMs, MIN_POLL_MS, Math.max(MIN_POLL_MS, timeoutMs))

@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { focusWindow as focusWindowIfAllowed } from '@/utils/activation-guard';
+import { effectiveBackgroundModeOf } from '@/utils/background-mode';
 import { NETWORK_FILTERS } from '@/common/constants';
 // auto-chrome-mcp fork: url 분기가 사용자 창의 탭에 디버거를 붙이지 않도록 세션 소유 탭으로만 조회한다.
 import { createTabForUrl, findTabByUrlInSessionScope } from './url-target';
@@ -799,9 +800,13 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
         const existing = await findTabByUrlInSessionScope(targetUrl, args);
         if (existing?.id) {
           tabToOperateOn = existing;
-          // Ensure window gets focus (tab activation removed; the CDP Network domain
-          // works fine on background tabs; auto-chrome-mcp fork: OS 윈도우 포커스는 정책 통과 시에만).
-          await focusWindowIfAllowed(tabToOperateOn.windowId);
+          // CDP Network 도메인은 배경 탭에서도 그대로 동작한다. 창 포커스는 어차피 진단에
+          // 필요 없으므로, background 호출과 무간섭을 강제하는 실행에서는 아예 요청하지
+          // 않는다 (2026-09-05 발행 전 검토 2: 전역 강제 포커스 토글이 켜져 있으면 예약·
+          // 흐름 실행이 사용자 창을 앞으로 끌어냈다). 나머지 경우에만 정책을 거쳐 요청한다.
+          if (background !== true && effectiveBackgroundModeOf(args) !== true) {
+            await focusWindowIfAllowed(tabToOperateOn.windowId);
+          }
         } else {
           // 지정한 창, 없으면 작업 탭의 창에 만든다.
           tabToOperateOn = await createTabForUrl(targetUrl, {

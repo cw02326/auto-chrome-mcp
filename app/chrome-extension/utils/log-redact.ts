@@ -57,18 +57,25 @@ const LOGGABLE_ARG_KEYS: ReadonlySet<string> = new Set([
 const TRIMMED_URL_KEYS: ReadonlySet<string> = new Set(['url']);
 
 /**
- * 쿼리·해시를 떼고 origin + 경로만 남긴다 (토큰이 쿼리로 오는 경우가 흔하다).
+ * origin 만 남긴다 (경로·쿼리·해시를 전부 뗀다).
  *
  * 2026-09-05 Codex 재확인 1: 진입부 로그만 `redactedArgsForLog` 로 가려 놓고,
  * 그 뒤 "어느 탭을 찾는다 / 새 탭을 만든다" 같은 후속 로그가 같은 URL 을 원문으로
  * 다시 찍고 있었다. 후속 로그는 인자 객체가 아니라 URL 문자열 하나만 들고 있으므로
  * 이 함수를 그대로 부른다.
+ *
+ * 2026-09-05 발행 전 검토 5: 경로까지 남기던 것을 origin 으로 줄였다. 경로 자체가
+ * 비밀인 주소가 흔하다 - 공유 링크의 문서 id, 초대·재설정 토큰을 경로 세그먼트로
+ * 받는 서비스, 로그인한 사용자 이름이 들어간 관리 화면이 그렇다. 진단에 필요한 것은
+ * "어느 사이트였나" 까지이고, 그 이상은 서비스워커 콘솔에 남길 이유가 없다.
  */
 export function redactUrlForLog(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0) return '[redacted:url]';
   try {
     const parsed = new URL(value);
-    return `${parsed.origin}${parsed.pathname}`;
+    // file:·about:·data: 는 origin 이 'null' 이라 그대로 찍으면 아무 정보도 아니다.
+    // 스킴만 남긴다 - 경로(=파일 경로·문서 내용)는 어느 쪽으로도 남기지 않는다.
+    return parsed.origin && parsed.origin !== 'null' ? parsed.origin : parsed.protocol;
   } catch {
     return '[redacted:url]';
   }

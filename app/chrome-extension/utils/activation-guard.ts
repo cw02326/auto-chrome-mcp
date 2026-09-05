@@ -14,8 +14,13 @@
  *
  * 예외로 남겨 둔 직접 호출부(의도적):
  *   - 이 모듈 자신과 utils/window-focus-guard.ts(비포커스 전용), utils/mcp-window-manager.ts
- *   - utils/spawned-tab-tracker.ts 의 사용자 창 복귀(windows.update({focused:true}) 만,
- *     대상이 사용자 창일 때. 탭 활성화는 이 모듈의 force 경로를 쓴다)
+ *   - utils/spawned-tab-tracker.ts 의 화면 복구. 페이지가 연 탭·팝업이 가져간 화면을
+ *     **스폰 직전에 실제로 활성이던 탭·창**으로 되돌리는 두 호출만 직접 부른다
+ *     (tabs.update({active:true}) + windows.update({focused:true})). 대상이 사용자가
+ *     방금까지 보고 있던 것이라는 관측이 있을 때만 돌고, 관측이 없으면 아무것도 하지
+ *     않는다. 이 게이트를 거치면 무간섭 모드에서 복구가 막혀 사용자가 팝업에 갇힌다.
+ *     (2026-09-05 발행 전 검토 1: 예전에는 실행 시작 시점 스냅샷을 force 로 밀어 넣어,
+ *      실행 중 다른 창으로 옮긴 사용자를 옛 창으로 끌고 갔다.)
  *   - 사용자 UI 진입점: entrypoints/popup, entrypoints/sidepanel, quick-panel
  *   - 예외 도구 chrome_request_user_consent(사용자 대면 창)
  *

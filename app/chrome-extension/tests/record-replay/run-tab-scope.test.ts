@@ -217,6 +217,61 @@ describe('run 은 자기 탭과 자기가 만든 탭 밖으로 나가지 않는�
     }
   });
 
+  // ------------------------------------------------- 발행 전 검토 2·3 (2026-09-05)
+  it('검토2: 무간섭을 강제하는 실행은 모든 내부 도구 호출에 실행 컨텍스트 모드를 싣는다', async () => {
+    await runFlow(
+      flowOf([{ id: 'n1', type: 'navigate', config: { url: 'https://example.com/go' } }]),
+      runTab({ effectiveBackgroundMode: true } as any),
+      { returnLogs: true },
+    );
+
+    const navs = callsNamed(TOOL_NAMES.BROWSER.NAVIGATE);
+    expect(navs.length).toBeGreaterThan(0);
+    for (const call of navs) expect(call.args._effectiveBackgroundMode).toBe(true);
+  });
+
+  it('검토2: 사이드패널 실행처럼 모드를 켜지 않은 run 은 그 키를 싣지 않는다', async () => {
+    await runFlow(
+      flowOf([{ id: 'n1', type: 'navigate', config: { url: 'https://example.com/go' } }]),
+      runTab({ source: 'sidepanel' } as any),
+      { returnLogs: true },
+    );
+
+    const navs = callsNamed(TOOL_NAMES.BROWSER.NAVIGATE);
+    expect(navs.length).toBeGreaterThan(0);
+    for (const call of navs) expect('_effectiveBackgroundMode' in call.args).toBe(false);
+  });
+
+  it('검토3: timeoutMs 를 준 실행은 모든 내부 도구 호출에 마감을 싣는다', async () => {
+    const startedAt = Date.now();
+    await runFlow(
+      flowOf([{ id: 'n1', type: 'navigate', config: { url: 'https://example.com/go' } }]),
+      runTab(),
+      { returnLogs: true, timeoutMs: 5_000 },
+    );
+
+    const navs = callsNamed(TOOL_NAMES.BROWSER.NAVIGATE);
+    expect(navs.length).toBeGreaterThan(0);
+    for (const call of navs) {
+      expect(typeof call.args._deadlineAt).toBe('number');
+      // 마감은 절대 시각이다 (남은 ms 가 아니다) - 파이프라인 어느 지점에서 봐도 같다.
+      expect(call.args._deadlineAt).toBeGreaterThanOrEqual(startedAt);
+      expect(call.args._deadlineAt).toBeLessThanOrEqual(startedAt + 6_000);
+    }
+  });
+
+  it('검토3: 마감이 없는 실행은 그 키를 싣지 않는다', async () => {
+    await runFlow(
+      flowOf([{ id: 'n1', type: 'navigate', config: { url: 'https://example.com/go' } }]),
+      runTab(),
+      { returnLogs: true },
+    );
+
+    const navs = callsNamed(TOOL_NAMES.BROWSER.NAVIGATE);
+    expect(navs.length).toBeGreaterThan(0);
+    for (const call of navs) expect('_deadlineAt' in call.args).toBe(false);
+  });
+
   it('항목5(actions): openTab 핸들러도 백그라운드·run 창·재고정을 지킨다', async () => {
     const tab = runTab();
     await runFlow(

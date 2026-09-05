@@ -258,6 +258,12 @@ class ExecutionOrchestrator {
     // Set up global deadline
     const globalTimeout = Math.max(0, Number(options.timeoutMs || 0));
     this.deadline = globalTimeout > 0 ? this.startAt + globalTimeout : 0;
+    // The same deadline rides on every tool call this run makes, so a tool that
+    // blocks past it is cut by the pipeline's watchdog instead of running on
+    // inside a run nobody is waiting for (2026-09-05 pre-release review, item 3).
+    if (this.deadline > 0 && this.tab.deadlineAt === undefined) {
+      this.tab.deadlineAt = this.deadline;
+    }
 
     // Initialize plugin manager
     this.pluginManager = new PluginManager(

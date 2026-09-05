@@ -48,7 +48,9 @@ import {
   saveFlow,
   getFlow,
   importFlowFromJson,
+  publishFlow,
 } from '@/entrypoints/background/record-replay/flow-store';
+import { IndexedDbStorage } from '@/entrypoints/background/record-replay/storage/indexeddb-manager';
 import type { Flow } from '@/entrypoints/background/record-replay/types';
 
 function createTestFlow(overrides: Partial<Flow> = {}): Flow {
@@ -276,5 +278,54 @@ describe('Flow Store steps stripping', () => {
       expect(savedFlow.meta.domain).toBe('example.com');
       expect(savedFlow.meta.tags).toEqual(['test', 'example']);
     });
+  });
+});
+
+/**
+ * 2026-09-05 발행 전 검토 6: 발행 스냅샷은 도구 표면이 실제로 실행하는 내용이라 그대로
+ * 영속된다. sensitive 변수의 기본값이 거기 실리면 비밀번호가 IndexedDB 에 평문으로 남는다.
+ */
+describe('publishFlow drops sensitive variable defaults from the snapshot', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (IndexedDbStorage.published.save as any).mockResolvedValue(undefined);
+  });
+
+  it('sensitive 변수의 default 는 스냅샷에 저장되지 않는다', async () => {
+    const flow = createTestFlow({
+      id: 'pub_secret',
+      name: 'Publish Secret',
+      nodes: [{ id: 's1', type: 'click', config: {} }],
+      edges: [],
+      variables: [
+        { key: 'pw', type: 'string', sensitive: true, default: 'hunter2' },
+        { key: 'site', type: 'string', default: 'https://example.com' },
+      ],
+    });
+
+    await publishFlow(flow);
+
+    const saved = (IndexedDbStorage.published.save as any).mock.calls[0][0];
+    const vars = saved.snapshot.variables as Array<Record<string, unknown>>;
+    const pw = vars.find((v) => v.key === 'pw')!;
+    expect(pw.sensitive).toBe(true);
+    // 값 자체가 없어야 한다 (빈 문자열로 남겨도 스냅샷에 흔적이 남는다).
+    expect('default' in pw).toBe(false);
+    expect(JSON.stringify(saved)).not.toContain('hunter2');
+    // sensitive 가 아닌 변수의 기본값은 흐름 설정이므로 그대로 둔다.
+    expect(vars.find((v) => v.key === 'site')!.default).toBe('https://example.com');
+  });
+
+  it('원본 흐름 객체는 건드리지 않는다 (편집 중인 값이 사라지면 안 된다)', async () => {
+    const flow = createTestFlow({
+      id: 'pub_secret2',
+      nodes: [{ id: 's1', type: 'click', config: {} }],
+      edges: [],
+      variables: [{ key: 'pw', type: 'string', sensitive: true, default: 'hunter2' }],
+    });
+
+    await publishFlow(flow);
+
+    expect(flow.variables![0].default).toBe('hunter2');
   });
 });

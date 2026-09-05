@@ -131,6 +131,48 @@ export class FlowDeadlineExceededError extends Error {
   }
 }
 
+/**
+ * 흐름 실행의 **절대 마감**을 도구 호출에 싣는 내부 전용 인자 이름
+ * (2026-09-05 발행 전 검토 3).
+ *
+ * `chrome_batch`·`chrome_shortcut` 은 러너가 `ToolCallParam.deadlineAt` 으로 마감을 넘긴다.
+ * 그런데 `record_replay_flow_run` 의 노드들은 `handleCallTool({ name, args })` 를 수십 군데서
+ * 직접 부르므로 넘길 자리가 없었다. 그래서 마감을 args 에 실어 보내고 `handleCallTool` 이
+ * `ToolCallParam.deadlineAt` 과 같은 값으로 읽는다(둘 다 있으면 **이른 쪽**을 쓴다).
+ *
+ * 이 값은 예산을 **줄이기만** 한다 - 바깥에서 적어 보내도 자기 호출이 일찍 끝날 뿐이라
+ * 게이트를 느슨하게 만들 수 없다. 도구 구현도 이 값을 읽어 긴 대기(wait_for·페이지 로드
+ * 대기·스크롤 수집)를 마감에 맞춰 자른다.
+ */
+export const FLOW_DEADLINE_ARG = '_deadlineAt';
+
+/** args 에 실려 온 흐름 마감을 읽는다. own 속성만 본다(상속 값은 게이트 우회 경로였다). */
+export function flowDeadlineOf(args: unknown): number | undefined {
+  if (args === null || typeof args !== 'object') return undefined;
+  if (!Object.hasOwn(args as object, FLOW_DEADLINE_ARG)) return undefined;
+  const value = (args as Record<string, unknown>)[FLOW_DEADLINE_ARG];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** 두 마감 중 이른 쪽. 둘 다 없으면 undefined. */
+export function earlierDeadline(a?: number, b?: number): number | undefined {
+  if (typeof a !== 'number' || !Number.isFinite(a)) return typeof b === 'number' ? b : undefined;
+  if (typeof b !== 'number' || !Number.isFinite(b)) return a;
+  return Math.min(a, b);
+}
+
+/**
+ * 이 호출에 남은 대기 예산. 마감이 없으면 요청값 그대로, 마감이 있으면 그보다 크지 않게.
+ *
+ * 긴 대기를 가진 도구(wait_for·navigate 의 로드 대기·scroll_collect)가 쓴다. 마감이 이미
+ * 지났으면 0 을 돌려주므로 호출부는 즉시 관측을 끝내고 돌아온다.
+ */
+export function waitBudgetMs(args: unknown, requestedMs: number): number {
+  const remaining = remainingFlowBudgetMs(flowDeadlineOf(args));
+  if (remaining === undefined) return requestedMs;
+  return Math.max(0, Math.min(requestedMs, remaining));
+}
+
 /** 절대 마감까지 남은 시간. 마감이 없으면 undefined, 이미 지났으면 0. */
 export function remainingFlowBudgetMs(deadlineAt?: number): number | undefined {
   if (typeof deadlineAt !== 'number' || !Number.isFinite(deadlineAt)) return undefined;

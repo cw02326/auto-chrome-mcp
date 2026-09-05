@@ -204,9 +204,15 @@ class FlowRunTool {
       return createErrorResponse(noWorkTabErrorText(this.name));
     }
 
+    // 2026-09-05 발행 전 검토 2: 도구로 시작한 흐름은 **항상** 무간섭이다. 호출자는
+    // 화면을 보고 있지 않으므로(모델이 부른 것이다) 탭 활성화·창 포커스가 곧 침해다.
+    // 전역 토글이 꺼져 있어도 이 실행만은 background 규칙으로 돈다 - 모드를 실행 체인에
+    // 실어 보내면 게이트·URL 대상 해석·navigate 재사용·활성화 가드가 같은 답을 낸다.
+    // (사이드패널에서 사용자가 Run 을 누른 실행은 이 값을 켜지 않고 기존 규칙을 따른다.)
     const session = {
       mcpSessionId: typeof _mcpSessionId === 'string' ? _mcpSessionId : undefined,
       lane: typeof lane === 'string' ? lane : undefined,
+      effectiveBackgroundMode: true as const,
     };
 
     let runTab: RunTabContext;
@@ -249,6 +255,10 @@ class FlowRunTool {
     // 항목 4: 마감을 스스로 들고 abort 로 **실행을 멈춘다**. 워치독의 Promise.race 는
     // 응답만 끊고 실행은 계속 돌려 좀비 run 을 남겼다. 상한은 10분.
     const abort = createTimeoutAbort(timeoutMs, MAX_FLOW_RUN_TIMEOUT_MS);
+    // 검토 항목 3: 같은 마감을 **내부 도구 호출까지** 내려보낸다. abort 는 스텝 경계와
+    // 엔진의 대기 루프만 끊는다 - 도구 하나가 마감을 넘겨 매달리면 그 안에서는 아무도
+    // 신호를 보지 않으므로, 마감을 args 로 실어 파이프라인이 워치독 상한으로 쓰게 한다.
+    runTab.deadlineAt = Date.now() + abort.timeoutMs;
 
     let result;
     try {

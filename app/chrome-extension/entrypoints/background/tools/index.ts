@@ -13,13 +13,17 @@ import {
 } from '@/utils/work-tab-gate';
 import {
   EFFECTIVE_BACKGROUND_MODE_ARG,
+  effectiveBackgroundModeOf,
   stripEffectiveBackgroundMode,
 } from '@/utils/background-mode';
 import { LEASE_TOKEN_ARG, withTabLock } from '@/utils/tab-lock';
 import { applyAutomationGuard } from '@/utils/automation-guard';
 import {
+  FLOW_DEADLINE_ARG,
   FlowDeadlineExceededError,
   assertWithinFlowDeadline,
+  earlierDeadline,
+  flowDeadlineOf,
   remainingFlowBudgetMs,
   runWithWatchdog,
 } from '@/utils/tool-watchdog';
@@ -100,8 +104,11 @@ export interface ToolCallParam {
    * auto-chrome-mcp fork(2026-09-05 데일리 자동화 설계 2절): **실행 컨텍스트 모드**.
    *
    * 예약 실행처럼 전역 토글과 무관하게 항상 무간섭이어야 하는 실행에서만 `true` 다.
-   * 스키마에 없는 내부 전용 값이며, 이 필드로만 들어온다 - 도구 인자에 적혀 온 같은
-   * 이름의 키는 아래에서 지운다(호출자가 무간섭 판정을 조작하지 못하게 한다).
+   * 스키마에 없는 내부 전용 값이다. 러너는 이 필드로 넘기고, 흐름 실행(record-replay)은
+   * 노드가 부르는 호출마다 `args._effectiveBackgroundMode` 로 싣는다(엔진에는 이 필드를
+   * 넘길 자리가 없다 - 노드가 `handleCallTool({name, args})` 를 직접 부른다).
+   * 두 경로 중 하나라도 켜져 있으면 이 호출은 무간섭이다: 이 값은 판정을 **조이기만**
+   * 하므로(작업 탭 주입·거절, 활성화 금지) 바깥에서 적어 보내도 게이트가 느슨해지지 않는다.
    *
    * 여기서 받은 값은 게이트에 들어가기 전에 `args._effectiveBackgroundMode` 로 실어
    * 보낸다. 게이트뿐 아니라 url 대상 해석(url-target) · navigate 재사용 판정 ·
@@ -217,23 +224,35 @@ export const handleCallTool = async (param: ToolCallParam) => {
   let gatedArgs: any = param.args;
   let primaryTabId: number | null = null;
 
+  // auto-chrome-mcp fork(설계 2절 + 2026-09-05 발행 전 검토 2·3): 실행 컨텍스트 모드와
+  // 흐름 마감은 두 경로로 들어온다 - 러너는 ToolCallParam 으로, 흐름 실행(record-replay)은
+  // 노드가 부르는 호출의 args 에 실어서. 여기서 한 번만 합친다.
+  const carriedBackgroundMode = effectiveBackgroundModeOf(param.args);
+  /** 러너가 준 마감과 흐름이 실어 보낸 마감 중 **이른 쪽**. */
+  const deadlineAt = earlierDeadline(param.deadlineAt, flowDeadlineOf(param.args));
+
   try {
     // 흐름 제어 마감은 파이프라인 전 구간에서 본다 — 게이트 조회 전이 첫 지점이다.
-    assertWithinFlowDeadline(param.name, param.deadlineAt, 'before the work-tab gate');
+    assertWithinFlowDeadline(param.name, deadlineAt, 'before the work-tab gate');
 
-    // auto-chrome-mcp fork(설계 2절): 실행 컨텍스트 모드는 ToolCallParam 으로만 들어온다.
-    // 인자에 적혀 온 같은 이름의 키는 먼저 지우고, 러너가 준 값이 있을 때만 다시 싣는다.
+    // 인자에 적혀 온 모드 키는 먼저 지우고, 위에서 합친 값이 켜져 있을 때만 다시 싣는다.
     const contextArgs =
       param.args !== null && typeof param.args === 'object' && !Array.isArray(param.args)
         ? { ...param.args }
         : param.args;
     stripEffectiveBackgroundMode(contextArgs);
     if (
-      param.effectiveBackgroundMode === true &&
+      (param.effectiveBackgroundMode === true || carriedBackgroundMode === true) &&
       contextArgs !== null &&
       typeof contextArgs === 'object'
     ) {
       (contextArgs as Record<string, unknown>)[EFFECTIVE_BACKGROUND_MODE_ARG] = true;
+    }
+    // 마감은 정규화해서 다시 싣는다 - 긴 대기를 가진 도구가 이 값으로 대기를 자른다.
+    if (contextArgs !== null && typeof contextArgs === 'object') {
+      if (deadlineAt === undefined)
+        delete (contextArgs as Record<string, unknown>)[FLOW_DEADLINE_ARG];
+      else (contextArgs as Record<string, unknown>)[FLOW_DEADLINE_ARG] = deadlineAt;
     }
 
     const gate = await applyBackgroundModeGate(param.name, contextArgs);
@@ -276,7 +295,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
     }
 
     // 게이트 조회와 속도 제한 지연을 지나오는 동안 마감이 끝났을 수 있다.
-    assertWithinFlowDeadline(param.name, param.deadlineAt, 'after the automation guard delay');
+    assertWithinFlowDeadline(param.name, deadlineAt, 'after the automation guard delay');
 
     // auto-chrome-mcp fork(2026-09-04 Codex 최종 검토, 남은 항목):
     // 잠금·busy·touch 추적은 원래 args.tabId 하나만 봤다. 그런데 url 이 곧 대상 지정인
@@ -353,14 +372,14 @@ export const handleCallTool = async (param: ToolCallParam) => {
       () => {
         // 락 대기가 가장 긴 구간이다 — 락을 잡은 직후 다시 확인하고, 워치독에는 그 시점의
         // 남은 시간을 넘긴다(예전에는 step 시작 시점의 낡은 값이 들어갔다).
-        assertWithinFlowDeadline(param.name, param.deadlineAt, 'after acquiring the tab lock');
+        assertWithinFlowDeadline(param.name, deadlineAt, 'after acquiring the tab lock');
         return runWithWatchdog<ToolResult>(
           param.name,
           args,
           () => tool.execute(args),
           (message) => createErrorResponse(message),
           WATCHDOG_OVERRIDES,
-          remainingFlowBudgetMs(param.deadlineAt),
+          remainingFlowBudgetMs(deadlineAt),
         );
       },
       { token: leaseToken },

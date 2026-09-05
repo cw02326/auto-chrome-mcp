@@ -14,11 +14,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  FLOW_DEADLINE_ARG,
   FlowDeadlineExceededError,
   WATCHDOG_DEFAULT_MS,
   assertWithinFlowDeadline,
+  earlierDeadline,
+  flowDeadlineOf,
   remainingFlowBudgetMs,
   runWithWatchdog,
+  waitBudgetMs,
   watchdogBudgetMs,
 } from '@/utils/tool-watchdog';
 import { withTabLock } from '@/utils/tab-lock';
@@ -253,5 +257,45 @@ describe('절대 마감 (deadlineAt)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * 2026-09-05 발행 전 검토 3: 흐름 실행은 마감을 args 에 실어 보낸다(노드가
+ * `handleCallTool({name, args})` 를 직접 부르므로 ToolCallParam 자리가 없다).
+ * 긴 대기를 가진 도구는 이 값을 대기 상한으로 쓴다.
+ */
+describe('args 에 실린 흐름 마감 (_deadlineAt)', () => {
+  it('flowDeadlineOf 는 own 속성의 유한한 숫자만 읽는다', () => {
+    expect(flowDeadlineOf({ [FLOW_DEADLINE_ARG]: 1_700_000_000_000 })).toBe(1_700_000_000_000);
+    expect(flowDeadlineOf({})).toBeUndefined();
+    expect(flowDeadlineOf({ [FLOW_DEADLINE_ARG]: 'soon' })).toBeUndefined();
+    expect(flowDeadlineOf({ [FLOW_DEADLINE_ARG]: Number.NaN })).toBeUndefined();
+    expect(flowDeadlineOf(null)).toBeUndefined();
+    // 상속된 값은 게이트 우회 경로였다 - own 이 아니면 읽지 않는다.
+    const inherited = Object.create({ [FLOW_DEADLINE_ARG]: 123 });
+    expect(flowDeadlineOf(inherited)).toBeUndefined();
+  });
+
+  it('earlierDeadline 은 둘 중 이른 쪽을 고른다', () => {
+    expect(earlierDeadline(100, 200)).toBe(100);
+    expect(earlierDeadline(300, 200)).toBe(200);
+    expect(earlierDeadline(undefined, 200)).toBe(200);
+    expect(earlierDeadline(100, undefined)).toBe(100);
+    expect(earlierDeadline(undefined, undefined)).toBeUndefined();
+  });
+
+  it('waitBudgetMs 는 요청한 대기를 남은 마감 안으로 자른다', () => {
+    const now = Date.now();
+    // 마감이 없으면 요청값 그대로.
+    expect(waitBudgetMs({}, 10_000)).toBe(10_000);
+    // 남은 시간이 요청보다 짧으면 남은 시간까지만 기다린다.
+    const capped = waitBudgetMs({ [FLOW_DEADLINE_ARG]: now + 500 }, 10_000);
+    expect(capped).toBeGreaterThan(0);
+    expect(capped).toBeLessThanOrEqual(500);
+    // 남은 시간이 더 길면 요청값을 늘리지 않는다.
+    expect(waitBudgetMs({ [FLOW_DEADLINE_ARG]: now + 60_000 }, 1_000)).toBe(1_000);
+    // 이미 지난 마감은 0 - 호출부는 기다리지 않고 바로 돌아온다.
+    expect(waitBudgetMs({ [FLOW_DEADLINE_ARG]: now - 1 }, 10_000)).toBe(0);
   });
 });

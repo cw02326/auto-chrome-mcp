@@ -271,6 +271,16 @@ function nextLockNonce(): string {
  * 읽으면 둘 다 비어 있는 것을 보고 둘 다 썼고, 나중에 쓴 쪽이 먼저 쓴 쪽의 잠금을 덮어
  * 두 실행이 나란히 돌았다. 이제 **쓰고 나서 다시 읽어**(fenced) 내 nonce 가 남아 있을
  * 때만 잡은 것으로 본다. 늦게 쓴 쪽이 이기고 먼저 쓴 쪽은 스스로 물러난다.
+ *
+ * set -> read 사이가 원자적이지 않은 것은 설계상 남겨 둔 창이다. MV3 확장에는 서비스
+ * 워커가 **한 번에 하나**뿐이고, `chrome.storage.session` 은 그 워커 안에서만 쓰인다 -
+ * 워커가 갈릴 때는 옛 워커가 이미 죽어 있으므로 두 쓰기가 겹칠 실제 동시성이 없다
+ * (겹치는 것은 워커 하나 안의 두 비동기 흐름인데, 그 둘은 이 fenced 검사에서 갈린다).
+ * 이 창을 실제로 메워야 하는 상황이 오더라도 마지막 방어선은 잠금이 아니라 **이력
+ * claim** 이다: 같은 due 의 `runId` 가 이력에 이미 있으면 뒤늦게 잠금을 잡은 쪽이
+ * `acquireRunSlot` 에서 `done` 으로 물러난다. 잠금은 "동시에 두 개가 돌지 않게" 하는
+ * 성능·질서 장치이고, "같은 예약이 두 번 실행되지 않게" 하는 것은 이력 claim 이다.
+ * (설계 문서 `docs/plans/2026-09-05-daily-automation-design.md` 7절과 같은 내용이다.)
  */
 async function acquireRunLock(
   runId: string,
@@ -300,6 +310,13 @@ async function acquireRunLock(
   return nonce;
 }
 
+/**
+ * 내 nonce 가 아직 잠금에 남아 있을 때만 지운다 (compare-and-delete).
+ *
+ * 무조건 `remove` 하면, 내 실행이 상한을 넘겨 늘어지는 동안 stale 로 회수돼 **다른 실행이
+ * 새로 잡은 잠금**을 내가 끝나면서 지워 버린다. 그 뒤 세 번째 실행이 빈 잠금을 보고 들어와
+ * 두 실행이 나란히 돈다.
+ */
 async function releaseRunLock(nonce: string): Promise<void> {
   try {
     const current = await readRunLock();
@@ -308,6 +325,36 @@ async function releaseRunLock(nonce: string): Promise<void> {
     }
   } catch {
     // 잠금 해제 실패는 다음 하트비트 만료로 회수된다.
+  }
+}
+
+/**
+ * 하트비트 한 번. **내 nonce 가 아직 잠금에 남아 있을 때만** 갱신한다 (compare-and-set).
+ *
+ * 2026-09-05 발행 전 검토 4: 예전에는 확인 없이 `set` 이었다. 내 실행이 늘어져 잠금이
+ * stale 로 회수되고 다른 실행이 잠금을 새로 잡은 뒤에도 10초마다 그 잠금을 내 runId·내
+ * nonce 로 덮어썼다. 남의 잠금을 훔치고, 그 실행이 끝나면서 부르는 compare-and-delete 는
+ * nonce 가 달라 아무것도 지우지 못해 잠금이 영영 남았다.
+ */
+async function beatRunLock(runId: string, name: string): Promise<void> {
+  const nonce = currentLockNonce;
+  if (!nonce) return;
+  try {
+    const current = await readRunLock();
+    // 내 잠금이 아니면 손대지 않는다. 이 실행은 이미 자리를 잃었고, 정리는
+    // executeScheduledRun 의 finally 와 이력 claim 이 맡는다.
+    if (!current || current.nonce !== nonce) return;
+    await chrome.storage.session.set({
+      [RUN_LOCK_KEY]: {
+        runId,
+        name,
+        owner: OWNER_TOKEN,
+        nonce,
+        heartbeatAt: Date.now(),
+      } satisfies RunLock,
+    });
+  } catch {
+    // 갱신 실패는 다음 주기에 다시 시도한다.
   }
 }
 
@@ -599,27 +646,6 @@ async function acquireRunSlot(item: QueueItem): Promise<RunSlot> {
   }
 }
 
-/** 지금 사용자가 보고 있는 탭·창 (실행 중 팝업이 화면을 가져가면 여기로 되돌린다). */
-async function currentUserView(): Promise<{ tabId: number | null; windowId: number | null }> {
-  let windowId: number | null = null;
-  let tabId: number | null = null;
-  try {
-    const focused = await chrome.windows.getLastFocused();
-    if (typeof focused?.id === 'number' && !(await isMcpWindow(focused.id))) {
-      windowId = focused.id;
-    }
-  } catch {
-    windowId = null;
-  }
-  try {
-    const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (typeof active?.id === 'number') tabId = active.id;
-  } catch {
-    tabId = null;
-  }
-  return { tabId, windowId };
-}
-
 /** 예약 실행 하나. 잠금·이력 claim 은 `acquireRunSlot` 이 이미 끝냈다. */
 async function executeScheduledRun(
   item: QueueItem,
@@ -680,17 +706,7 @@ async function executeScheduledRun(
 
   const deadlineAt = startedAt + RUN_TIMEOUT_MS;
   const heartbeat = setInterval(() => {
-    void chrome.storage.session
-      .set({
-        [RUN_LOCK_KEY]: {
-          runId,
-          name,
-          owner: OWNER_TOKEN,
-          nonce: currentLockNonce ?? '',
-          heartbeatAt: Date.now(),
-        },
-      })
-      .catch(() => undefined);
+    void beatRunLock(runId, name);
   }, HEARTBEAT_MS);
   const keepalive = setInterval(() => {
     // Chrome 110+ 는 확장 API 호출이 유휴 타이머를 되돌린다. chrome_wait_for 처럼
@@ -707,14 +723,10 @@ async function executeScheduledRun(
   // 잠금이 만료된 채로 돌았다.
   try {
     const controller = new AbortController();
-    const view = await currentUserView();
     // 실행 중 페이지가 여는 탭·팝업 창을 이 버킷이 흡수한다 (리뷰 1).
-    beginSpawnScope({
-      sessionKey,
-      forced: true,
-      restoreTabId: view.tabId,
-      restoreWindowId: view.windowId,
-    });
+    // 되돌릴 화면은 여기서 찍지 않는다: 실행은 2분까지 가고 그 사이 사용자는 다른 창으로
+    // 옮길 수 있다. 추적은 spawned-tab-tracker 가 스폰 시점에 한다 (발행 전 검토 1).
+    beginSpawnScope({ sessionKey, forced: true });
 
     let outcome: RunStepsOutcome;
     const running = runSteps({

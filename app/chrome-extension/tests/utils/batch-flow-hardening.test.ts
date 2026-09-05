@@ -163,10 +163,11 @@ describe('로그 마스킹 (2)', () => {
     expect(text).not.toContain('Enter');
   });
 
-  it('2. url 은 origin+경로만 남고 쿼리·해시는 지운다', () => {
+  it('2. url 은 origin 만 남고 경로·쿼리·해시는 지운다', () => {
     const redacted = redactedArgsForLog({ url: 'https://x.example/a?token=SECRET#frag' });
-    expect(redacted!.url).toBe('https://x.example/a');
+    expect(redacted!.url).toBe('https://x.example');
     expect(JSON.stringify(redacted)).not.toContain('SECRET');
+    expect(JSON.stringify(redacted)).not.toContain('/a');
   });
 
   it('2. fill·keyboard·network_request 는 raw args 를 콘솔에 찍지 않는다', async () => {
@@ -458,12 +459,15 @@ describe('repeat 묶음 resultText (7)', () => {
  * ------------------------------------------------------------------ */
 
 describe('후속 로그 URL 마스킹 (재확인 1)', () => {
-  it('재1. redactUrlForLog 는 origin+경로만 남긴다', async () => {
+  it('재1. redactUrlForLog 는 origin 만 남긴다 (경로도 뗀다)', async () => {
     const { redactUrlForLog } = await import('@/utils/log-redact');
-    expect(redactUrlForLog('https://x.example/a/b?token=SECRET#frag')).toBe(
-      'https://x.example/a/b',
-    );
-    expect(redactUrlForLog('https://x.example')).toBe('https://x.example/');
+    // 2026-09-05 발행 전 검토 5: 경로 세그먼트가 곧 비밀인 주소(문서 id·초대 토큰)가
+    // 흔해 경로까지 뗀다.
+    expect(redactUrlForLog('https://x.example/a/b?token=SECRET#frag')).toBe('https://x.example');
+    expect(redactUrlForLog('https://x.example/share/doc-9f3a1?k=SECRET')).toBe('https://x.example');
+    expect(redactUrlForLog('https://x.example')).toBe('https://x.example');
+    // origin 이 'null' 인 스킴은 스킴만 남긴다 (파일 경로를 남기지 않는다).
+    expect(redactUrlForLog('file:///C:/Users/me/secret.txt')).toBe('file:');
     expect(redactUrlForLog('not a url')).toBe('[redacted:url]');
     expect(redactUrlForLog(undefined)).toBe('[redacted:url]');
   });

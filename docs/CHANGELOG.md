@@ -129,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `handleCallTool` 로만 호출하고 반환값을 버리며(ref map 갱신이 목적), `batch-runner.ts` 도
   이 필드들을 참조하지 않아 안전하다.
 - **자동화 가드(`automationGuardEnabled`) 가 매 액션성 도구 호출마다 `chrome.storage.local`
-  을 조회하던 것을 인메모리 캐시로 바꿨다.** 동작은 그대로다 — 팝업에서 토글을 바꾸면
+  을 조회하던 것을 인메모리 캐시로 바꿨다.** 동작은 그대로다, 팝업에서 토글을 바꾸면
   `chrome.storage.onChanged` 로 캐시가 즉시 갱신된다. 조회 실패는 캐시하지 않고 다음 호출에서
   다시 시도한다.
 - **도구 스키마·응답의 토큰 절감 2차 (`packages/shared/src/tools.ts` 측).** 스키마 전체 문자
@@ -139,9 +139,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     온다는 것)를 옮겼다. 위 항목의 TODO 를 처리했다.
   - `chrome_shortcut` 의 `steps` 스키마가 `chrome_batch.steps` 와 같은 step 정의(tool/args/
     as/when/stopIf/repeat/steps, 약 800자)를 그대로 반복하고 있어 `items: { type: 'object' }`
-    로 줄이고 설명에 "same shape as chrome_batch.steps" 만 남겼다. 런타임 검증은
-    `shortcut.ts` 가 이미 하므로 동작은 그대로이며, 스키마 목록형(`vitest`)과 이력 테스트로
-    확인했다. (schema `$ref` 는 MCP 클라이언트 호환이 불확실해 쓰지 않았다.)
+    로 줄이고 설명에 "same shape as chrome_batch.steps" 만 남겼다. **런타임 검증은 동일하고,
+    스키마 문서화만 `chrome_batch` 로 일원화한 것이다** - step 하나하나의 형태 검사(허용
+    도구, `as` 이름, `when`·`stopIf`·`repeat` 규칙, 중첩 깊이)는 예전과 똑같이
+    `tools/browser/shortcut.ts` 의 `validateSteps`·`validateOneStep` 과
+    `batch-runner.ts` 의 `validateFlow` 가 하며, 저장·예약·실행 어느 경로도 스키마에
+    기대지 않는다. 그래서 중첩 키를 스키마에서 뺀 것이 검증을 느슨하게 만들지 않는다.
+    스키마 목록형(`vitest`)과 이력 테스트로 확인했다.
+    (schema `$ref` 는 MCP 클라이언트 호환이 불확실해 쓰지 않았다.)
   - `chrome_storage` description 에서 흔한 용례를 나열하던 문장 하나를 뺐다. 마스킹 동작
     설명은 남겼다.
   - 도구 41개 description 전수 점검에서 "언제 쓰나 / 유사 도구와 차이 / 필수 인자" 를 벗어난
@@ -169,6 +174,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   외부에서 참조하는 선언과 그 선언들이 구조적으로 쓰는 타입은 전부 남겼다.
 
 ### Fixed
+
+- **실행 중 팝업이 뜨면 사용자를 옛 창으로 끌고 가던 것을 고쳤다.** 예약 실행은 시작할 때
+  "지금 사용자가 보고 있는 탭·창" 을 한 번 찍어 두고, 실행 중 페이지가 팝업을 열 때마다 그
+  스냅샷으로 되돌렸다. 실행은 2분까지 가므로 그 사이에 사용자가 다른 창으로 옮겼으면,
+  팝업이 뜨는 순간 지금 쓰고 있던 창에서 옛 창으로 끌려갔다. 이제 되돌릴 대상을 **스폰
+  직전에 실제로 활성이던 것**으로 잡는다: 탭은 스폰 탭이 활성화된 `tabs.onActivated` 의
+  직전 탭, 창은 `windows.onFocusChanged` 이력에서 스폰 창·팝업 창·작업 창을 뺀 마지막 창이다.
+  추적한 값이 없으면 아무것도 되돌리지 않고(강제 이동 금지), 사용자가 크롬 밖의 다른 앱으로
+  나간 기록이 있으면 크롬 창을 앞으로 끌어내지 않는다. 스폰 탭이 활성 슬롯을 가져가지 않은
+  경우(별도 팝업 창)에는 탭을 건드리지 않는다.
+- **`record_replay_flow_run` 과 자동 트리거 실행이 사용자 화면을 가져갈 수 있던 것을 막았다.**
+  흐름 실행에는 실행 컨텍스트 모드가 실리지 않아, 전역 무간섭 토글이 꺼져 있으면 흐름의
+  `navigate` 노드가 예전 동작 그대로 `tabs.update({active:true})` 와
+  `windows.update({focused:true})` 를 불렀다. 모델이 부른 흐름 하나, 또는 URL·DOM·알람
+  트리거 하나가 사용자가 보던 화면을 통째로 바꿨다. 이제 도구 표면과 자동 트리거로 시작한
+  실행은 **항상** background 규칙으로 돌고(모드가 노드의 모든 도구 호출에 실린다), 사이드패널
+  Run 버튼처럼 사용자가 보고 있는 실행만 기존 규칙(전역 토글)을 따른다.
+  `chrome_network_capture` 의 디버거 시작 경로도 background 호출과 강제 모드에서는 창 포커스를
+  요청하지 않는다.
+- **흐름의 마감이 실행 중인 도구 호출 안까지 닿지 않던 것을 고쳤다.** `timeoutMs` 는 스텝
+  경계와 엔진의 대기 루프만 끊었다. 도구 하나가 마감을 넘겨 매달리면 그 안에서는 아무도
+  신호를 보지 않아, 1초 마감을 건 실행이 5초짜리 도구 호출 하나 때문에 5초를 그대로 썼다.
+  응답을 기다리는 쪽은 이미 포기한 뒤라 그 시간은 통째로 좀비 실행이다. 이제 마감을 **절대
+  시각**으로 모든 내부 호출에 실어(`chrome_batch`·`chrome_shortcut` 이 쓰던 경로와 같다)
+  파이프라인이 워치독 상한으로 쓰고, `chrome_wait_for`·`chrome_navigate` 의 로드 대기·
+  `chrome_scroll_collect` 의 수집 루프는 남은 시간을 대기 상한으로 쓴다. 마감에 걸린 실행은
+  `run_aborted` 로 닫히고 자기가 연 탭을 정리한다.
+- **예약 실행 잠금의 하트비트가 남의 잠금을 덮어쓸 수 있던 것을 고쳤다.** 하트비트는 확인
+  없이 10초마다 잠금을 자기 값으로 썼다. 내 실행이 늘어져 잠금이 stale 로 회수되고 다른
+  실행이 새로 잡은 뒤에도 계속 덮어썼고, 그 실행이 끝나며 부르는 해제는 nonce 가 달라 아무것도
+  지우지 못해 잠금이 남았다. 이제 하트비트는 **지금 잠금이 자기 nonce 일 때만** 갱신한다
+  (해제는 이미 그렇게 하고 있었다). 획득의 "쓰고 나서 다시 읽기" 사이의 창은 그대로 두되,
+  MV3 서비스 워커가 한 번에 하나뿐이라 겹칠 실제 동시성이 없다는 것과 같은 예약이 두 번
+  실행되지 않게 하는 최종 방어선이 **이력 claim** 이라는 것을 코드 주석과 설계 문서에 적었다.
 
 - **`chrome_get_web_content`/`chrome_inject_script` 가 새 탭을 만든 뒤 고정 3000ms 를 무조건
   쉬던 것을 관측 기반 대기로 바꿨다.** `url` 로 기존 탭이 없어 새로 만들 때 `chrome_navigate`
@@ -288,6 +327,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   파일에도 없었다. 이제 report 용 결과를 256KiB 예산으로 따로 모은다.
 
 ### Security
+
+- **서비스워커 로그에 남던 URL 을 origin 까지로 줄였다.** 경로를 함께 남기고 있었는데, 경로
+  세그먼트 자체가 비밀인 주소가 흔하다(공유 링크의 문서 id, 초대·재설정 토큰, 사용자 이름이
+  들어간 관리 화면). 진단에 필요한 것은 "어느 사이트였나" 까지다. `file:`·`about:` 처럼
+  origin 이 없는 주소는 스킴만 남긴다(파일 경로를 남기지 않는다).
+- **발행 스냅샷에 비밀 변수의 기본값이 평문으로 남던 것을 막았다.** 흐름을 발행하면 그
+  시점의 전문이 스냅샷으로 저장되고 도구 표면은 그것을 실행한다. `sensitive` 로 표시한
+  변수의 `default` 까지 함께 저장돼, 비밀번호·토큰이 IndexedDB 에 평문으로 남고 흐름을
+  내보내는 경로로 그대로 나갔다. 이제 발행 시 그 값을 빼고 저장하며, 실행 시에는 호출자가
+  `args` 로 준 값만 쓴다. `sensitive` 가 아닌 변수의 기본값은 흐름 설정이므로 그대로 둔다.
+  편집 중인 원본 흐름은 건드리지 않는다.
 
 - **파일 URL 접근 권한 검사를 우회할 수 있던 세 경로를 막았다.** ① 검사가 새 탭을 만들 때만
   걸려 있어, 권한을 끈 뒤 이미 열려 있던 세션 소유 `file:` 탭을 재사용하면 그냥 지나갔다.

@@ -298,6 +298,30 @@ export async function listPublished(): Promise<PublishedFlowInfo[]> {
   return records.map(toPublishedInfo);
 }
 
+/**
+ * 발행 스냅샷에서 `sensitive` 변수의 `default` 를 뺀다 (2026-09-05 발행 전 검토 6).
+ *
+ * 발행 스냅샷은 **도구 표면이 실제로 실행하는 내용**이고, 사이드패널 편집과 무관하게
+ * 그대로 남는다. 여기에 비밀번호·토큰의 기본값이 실리면 그 값이 IndexedDB 에 평문으로
+ * 영속되고, 흐름을 내보내거나 스냅샷을 읽는 모든 경로로 함께 나간다. 실행에 필요한 값은
+ * 호출자가 `args` 로 주는 것 하나뿐이어야 한다 - 스냅샷은 "어떤 비밀이 필요한지" 만 안다.
+ *
+ * `sensitive` 표시가 없는 변수의 기본값은 그대로 둔다. 그것이 흐름의 설정값이다.
+ */
+export function stripSensitiveDefaults(flow: Flow): Flow {
+  const variables = flow.variables;
+  if (!Array.isArray(variables) || variables.length === 0) return flow;
+  if (!variables.some((v) => v?.sensitive === true && v?.default !== undefined)) return flow;
+  return {
+    ...flow,
+    variables: variables.map((v) => {
+      if (v?.sensitive !== true || v?.default === undefined) return v;
+      const { default: _dropped, ...rest } = v;
+      return rest;
+    }),
+  };
+}
+
 export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedFlowInfo> {
   await ensureMigratedFromLocal();
   const info: PublishedFlowInfo = {
@@ -308,8 +332,9 @@ export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedF
     description: flow.description,
   };
   // 발행 시점의 흐름 전문을 함께 저장한다. 저장 형식은 saveFlow 와 같게 맞춘다
-  // (steps → nodes 정규화 후 deprecated steps 제거).
-  const snapshot = stripStepsForSave(normalizeFlowForSave(flow));
+  // (steps → nodes 정규화 후 deprecated steps 제거), 여기에 sensitive 변수의 기본값을
+  // 뺀다 (2026-09-05 발행 전 검토 6).
+  const snapshot = stripSensitiveDefaults(stripStepsForSave(normalizeFlowForSave(flow)));
   await IndexedDbStorage.published.save({ ...info, snapshot } as PublishedFlowInfo);
   return info;
 }

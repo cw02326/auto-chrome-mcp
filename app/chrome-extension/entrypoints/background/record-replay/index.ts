@@ -135,10 +135,20 @@ async function openAutoRunTab(
   }
   autoRunTabIds.add(created.id);
   return {
-    tab: runTabFromId(created.id, 'explicit', created.windowId),
+    tab: runTabFromId(created.id, 'explicit', created.windowId, AUTO_RUN_SESSION),
     disposableTabId: created.id,
   };
 }
+
+/**
+ * 자동 트리거 실행의 컨텍스트 (2026-09-05 발행 전 검토 2).
+ *
+ * 사용자가 실행을 누른 적이 없는 실행이다. 전역 무간섭 토글이 꺼져 있어도 탭을 앞으로
+ * 끌어내면 안 되므로, 모드를 실행 체인에 실어 게이트·활성화 가드가 전역 토글보다 이 값을
+ * 먼저 보게 한다. (사이드패널 Run 버튼·컨텍스트 메뉴·단축키는 사용자가 보고 있는 실행이라
+ * 해당하지 않는다.)
+ */
+const AUTO_RUN_SESSION = { effectiveBackgroundMode: true as const };
 
 /** 자동 진입점의 실행 한 건. 빌린 탭이 아니라 자기 탭에서 돌고, 끝나면 치운다. */
 async function runFlowFromTrigger(
@@ -148,7 +158,7 @@ async function runFlowFromTrigger(
 ): Promise<void> {
   let target: AutoRunTab;
   if (wantsTriggeringTab(flow, trigger) && typeof source.tabId === 'number') {
-    target = { tab: runTabFromId(source.tabId, 'explicit', source.windowId) };
+    target = { tab: runTabFromId(source.tabId, 'explicit', source.windowId, AUTO_RUN_SESSION) };
   } else {
     target = await openAutoRunTab(source.tabId, source.windowId, source.url);
   }

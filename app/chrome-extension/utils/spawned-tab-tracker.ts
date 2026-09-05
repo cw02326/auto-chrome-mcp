@@ -24,11 +24,10 @@ export interface SpawnedTabRecord {
   createdAt: number;
 }
 
-import { activateTab } from '@/utils/activation-guard';
 import { isBackgroundModeEnabled } from '@/utils/background-mode';
 import { addOwnedTab, getAllWorkTabs, getSessionScopedTabIds } from '@/utils/work-tab-manager';
-import { scheduleDeferredUnfocus } from '@/utils/window-focus-guard';
-import { getCurrentUserWindowId } from '@/utils/mcp-window-manager';
+import { CHROME_WINDOW_ID_NONE, scheduleDeferredUnfocus } from '@/utils/window-focus-guard';
+import { getCurrentUserWindowId, isMcpWindow } from '@/utils/mcp-window-manager';
 
 const TTL_MS = 120_000;
 const MAX_RECORDS = 30;
@@ -54,14 +53,9 @@ export interface SpawnScopeInput {
   sessionKey: string;
   /** 전역 토글과 무관하게 무간섭을 강제하는 실행인가. */
   forced: boolean;
-  /** 스폰 전에 사용자가 보고 있던 탭·창. 복구 대상. */
-  restoreTabId?: number | null;
-  restoreWindowId?: number | null;
 }
 
 interface SpawnScope extends SpawnScopeInput {
-  restoreTabId: number | null;
-  restoreWindowId: number | null;
   /** 이 스코프가 흡수한, 페이지가 연 팝업 창들. */
   popupWindowIds: Set<number>;
 }
@@ -88,12 +82,7 @@ export async function settleSpawnAdoptions(): Promise<void> {
 
 /** 이 세션이 도는 동안 열리는 새 탭을 흡수하도록 스코프를 연다. */
 export function beginSpawnScope(input: SpawnScopeInput): void {
-  spawnScopes.set(input.sessionKey, {
-    ...input,
-    restoreTabId: typeof input.restoreTabId === 'number' ? input.restoreTabId : null,
-    restoreWindowId: typeof input.restoreWindowId === 'number' ? input.restoreWindowId : null,
-    popupWindowIds: new Set<number>(),
-  });
+  spawnScopes.set(input.sessionKey, { ...input, popupWindowIds: new Set<number>() });
 }
 
 /** 스코프를 닫고, 실행이 끝날 때 닫아야 하는 팝업 창 id 를 돌려준다. */
@@ -112,10 +101,94 @@ export function isSpawnedPopupWindow(windowId: number | null | undefined): boole
   return false;
 }
 
-/** 테스트·정리용 - 열린 스코프를 모두 버린다. */
+/** 테스트·정리용 - 열린 스코프와 화면 추적을 모두 버린다. */
 export function resetSpawnScopes(): void {
   spawnScopes.clear();
   adoptedTabs.clear();
+  adoptedTabScopes.clear();
+  focusRestoredSpawns.clear();
+  previousActiveBefore.clear();
+  focusHistory.length = 0;
+  lastActivatedTabId = null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 직전 사용자 화면 추적 (2026-09-05 발행 전 검토 1)
+ *
+ * 예전에는 실행을 시작할 때 "지금 사용자가 보고 있는 탭·창" 을 한 번 찍어 두고, 실행 중
+ * 팝업이 뜰 때마다 그 스냅샷으로 되돌렸다. 실행은 2분까지 갈 수 있으므로 그 사이에
+ * 사용자가 다른 창으로 옮겼으면, 팝업이 뜨는 순간 **사용자를 옛 창으로 끌고 갔다**.
+ * 되돌릴 대상은 실행이 시작될 때가 아니라 **스폰 직전에 실제로 활성이던 것**이다.
+ *
+ *  - 탭: 스폰 탭이 활성화된 `tabs.onActivated` 이벤트의 직전 탭.
+ *  - 창: `windows.onFocusChanged` 이력에서 스폰 창·팝업 창·작업 창을 뺀 마지막 창.
+ *
+ * 추적 값이 없으면(워커가 방금 깼다, 이벤트를 놓쳤다) **아무것도 되돌리지 않는다.**
+ * 모르는 채로 화면을 옮기는 것이 옛 창으로 끌려가는 것과 같은 종류의 침해다.
+ * ------------------------------------------------------------------ */
+
+/** 되돌릴 탭을 기억해 두는 상한 (탭 하나당 한 줄). */
+const MAX_PREV_TAB_RECORDS = 30;
+/** 창 포커스 이력 상한. */
+const MAX_FOCUS_HISTORY = 8;
+
+/** 활성화된 탭 id -> 그 활성화 **직전**에 활성이던 탭 id. */
+const previousActiveBefore = new Map<number, number>();
+/** 가장 최근에 활성화된 탭 (크롬이 `previousTabId` 를 주지 않을 때의 대체값). */
+let lastActivatedTabId: number | null = null;
+/** 창 포커스 이력 (뒤가 최근). `CHROME_WINDOW_ID_NONE` = 크롬 밖의 다른 앱. */
+const focusHistory: number[] = [];
+/** 흡수한 탭 -> 그 탭을 흡수한 스코프 (활성화가 흡수보다 늦게 와도 되돌릴 수 있게). */
+const adoptedTabScopes = new Map<number, SpawnScope>();
+/** 창 포커스를 이미 되돌린 스폰 탭 (중복 복귀 방지). */
+const focusRestoredSpawns = new Set<number>();
+
+function rememberActivation(tabId: number, previousTabId?: number): void {
+  const prev = typeof previousTabId === 'number' ? previousTabId : lastActivatedTabId;
+  if (typeof prev === 'number' && prev !== tabId) {
+    previousActiveBefore.set(tabId, prev);
+    while (previousActiveBefore.size > MAX_PREV_TAB_RECORDS) {
+      const oldest = previousActiveBefore.keys().next().value;
+      if (oldest === undefined) break;
+      previousActiveBefore.delete(oldest);
+    }
+  }
+  lastActivatedTabId = tabId;
+}
+
+function rememberFocus(windowId: number): void {
+  if (focusHistory[focusHistory.length - 1] === windowId) return;
+  focusHistory.push(windowId);
+  if (focusHistory.length > MAX_FOCUS_HISTORY) focusHistory.shift();
+}
+
+/**
+ * 되돌릴 사용자 창. 없으면 null (되돌리지 않는다).
+ *
+ * 이력을 뒤에서부터 훑되 스폰 창·팝업 창·MCP 작업 창은 건너뛰고, **크롬 밖으로 나간
+ * 기록(`CHROME_WINDOW_ID_NONE`)을 먼저 만나면 포기한다** - 사용자가 다른 앱을 쓰고 있는데
+ * 크롬 창을 앞으로 끌어내지 않기 위해서다(`utils/window-focus-guard.ts` 와 같은 규칙).
+ */
+async function previousUserFocusedWindow(spawnWindowId: number): Promise<number | null> {
+  for (let i = focusHistory.length - 1; i >= 0; i--) {
+    const id = focusHistory[i];
+    if (id === CHROME_WINDOW_ID_NONE) return null;
+    if (id === spawnWindowId) continue;
+    if (isSpawnedPopupWindow(id)) continue;
+    try {
+      if (await isMcpWindow(id)) continue;
+    } catch {
+      // 판정 불가는 "작업 창일 수 있다" 로 보고 건너뛴다.
+      continue;
+    }
+    try {
+      await chrome.windows.get(id);
+    } catch {
+      continue; // 이미 닫힌 창
+    }
+    return id;
+  }
+  return null;
 }
 
 /** 이 opener 탭을 소유한 열린 스코프. 없으면 null. */
@@ -133,23 +206,38 @@ async function scopeForOpener(openerTabId: number | null): Promise<SpawnScope | 
 }
 
 /**
- * 사용자가 보던 탭·창을 즉시 되돌린다 (스폰 탭이 화면을 가져간 것을 취소한다).
+ * 스폰 탭이 가져간 화면을 **직전 상태로** 되돌린다.
  *
- * 탭은 activation-guard 의 복구 경로(`force: true`)를 쓴다. 창 포커스는 강제 포커스
- * 토글과 무관하게 되돌려야 하므로 `window-focus-guard` 와 같은 이유로 직접 부른다 -
- * 대상이 **사용자 창**일 때만 허용되는 호출이다.
+ * 되돌릴 대상은 위 추적기가 관측한 것뿐이다: 스폰 탭 활성화 직전의 탭과, 스폰 직전에
+ * 포커스를 쥐고 있던 사용자 창. 둘 중 관측값이 없는 쪽은 그냥 두고, 어느 쪽도 없으면
+ * 아무것도 하지 않는다 (`force` 로 밀어 넣던 옛 경로는 없앴다 - 스냅샷이 낡았을 때
+ * 사용자를 옛 창으로 끌고 가는 원인이 그 강제 경로였다).
+ *
+ * 두 호출 모두 activation-guard 를 거치지 않고 크롬 API 를 직접 부른다. 대상이 **사용자가
+ * 방금까지 보고 있던 탭·창** 일 때만 허용되는 예외이고(activation-guard 상단 주석의
+ * 예외 목록), 게이트를 거치면 무간섭 모드에서 복구 자체가 막혀 사용자가 팝업에 갇힌다.
  */
-async function restoreUserView(scope: SpawnScope): Promise<void> {
-  if (scope.restoreTabId !== null) {
+async function restoreUserView(tabId: number, windowId: number): Promise<void> {
+  const prevTabId = previousActiveBefore.get(tabId);
+  // 직전 탭이 이 실행이 연 다른 탭이면 되돌릴 사용자 화면이 아니다.
+  if (typeof prevTabId === 'number' && !adoptedTabs.has(prevTabId)) {
     try {
-      await activateTab(scope.restoreTabId, { force: true, reason: 'spawned-tab:restore' });
+      // 그 탭이 아직 활성이면 스폰 탭이 활성 슬롯을 가져가지 않았다는 뜻이다
+      // (별도 팝업 창으로 떴다). 되돌릴 것이 없으므로 건드리지 않는다.
+      const prev = await chrome.tabs.get(prevTabId);
+      if (prev?.active !== true) await chrome.tabs.update(prevTabId, { active: true });
     } catch {
       // 탭이 이미 닫혔을 수 있다 - best-effort
     }
   }
-  if (scope.restoreWindowId !== null) {
+  // 창 포커스는 스폰 탭 하나당 한 번만 되돌린다. 흡수와 활성화 이벤트가 둘 다 이 함수를
+  // 부르므로(어느 쪽이 먼저 올지는 정해져 있지 않다) 확인이 없으면 두 번 건다.
+  if (focusRestoredSpawns.has(tabId)) return;
+  const prevWindowId = await previousUserFocusedWindow(windowId);
+  if (prevWindowId !== null) {
+    focusRestoredSpawns.add(tabId);
     try {
-      await chrome.windows.update(scope.restoreWindowId, { focused: true });
+      await chrome.windows.update(prevWindowId, { focused: true });
     } catch {
       // 창이 이미 닫혔을 수 있다 - best-effort
     }
@@ -165,13 +253,14 @@ async function adoptSpawnedTab(record: SpawnedTabRecord, windowType: string): Pr
   const scope = await scopeForOpener(record.openerTabId);
   if (!scope) return false;
   adoptedTabs.add(record.tabId);
+  adoptedTabScopes.set(record.tabId, scope);
   try {
     await addOwnedTab(record.tabId, scope.sessionKey);
   } catch {
     // 소유 등록 실패는 정리 경로가 창 단위로 한 번 더 걷는다.
   }
   if (windowType === 'popup') scope.popupWindowIds.add(record.windowId);
-  await restoreUserView(scope);
+  await restoreUserView(record.tabId, record.windowId);
   return true;
 }
 
@@ -240,6 +329,23 @@ async function resolveWindowType(windowId: number): Promise<string> {
 // 리스너 등록 — background service worker 밖(테스트/popup 등)에서 import 되어도
 // 죽지 않도록 API 존재를 가드한다 (auto-chrome-mcp fork)
 try {
+  // 화면 추적: 되돌릴 대상을 "스폰 직전에 실제로 활성이던 것" 으로 잡기 위한 두 리스너.
+  chrome.tabs?.onActivated?.addListener((activeInfo) => {
+    if (!activeInfo || typeof activeInfo.tabId !== 'number') return;
+    // 크롬은 `previousTabId` 를 주지 않는 채널이 있어, 없으면 우리가 본 마지막 활성 탭을 쓴다.
+    rememberActivation(activeInfo.tabId, (activeInfo as { previousTabId?: number }).previousTabId);
+    // 흡수가 활성화보다 먼저 끝났을 수 있다(흡수는 storage 조회를 기다린다). 그 경우
+    // 흡수 시점에는 직전 탭을 몰랐으므로, 활성화가 온 지금 되돌린다.
+    if (adoptedTabScopes.has(activeInfo.tabId)) {
+      trackAdoption(() => restoreUserView(activeInfo.tabId, activeInfo.windowId));
+    }
+  });
+
+  chrome.windows?.onFocusChanged?.addListener((windowId) => {
+    if (typeof windowId !== 'number') return;
+    rememberFocus(windowId);
+  });
+
   chrome.tabs?.onCreated?.addListener((tab) => {
     if (typeof tab.id !== 'number') return;
     const rec = {
@@ -301,6 +407,14 @@ try {
     const idx = records.findIndex((r) => r.tabId === tabId);
     if (idx >= 0) records.splice(idx, 1);
     adoptedTabs.delete(tabId);
+    adoptedTabScopes.delete(tabId);
+    focusRestoredSpawns.delete(tabId);
+    previousActiveBefore.delete(tabId);
+    // 닫힌 탭으로는 되돌리지 않는다.
+    for (const [key, prev] of previousActiveBefore.entries()) {
+      if (prev === tabId) previousActiveBefore.delete(key);
+    }
+    if (lastActivatedTabId === tabId) lastActivatedTabId = null;
   });
 } catch {
   // chrome API 불가 환경 — 추적 없이 동작 (getSpawnedTabsSince 는 빈 결과)

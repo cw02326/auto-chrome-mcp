@@ -18,6 +18,8 @@
  */
 
 import { LEASE_TOKEN_ARG, acquireTabLease, isTabLeasedBy, releaseTabLease } from '@/utils/tab-lock';
+import { EFFECTIVE_BACKGROUND_MODE_ARG } from '@/utils/background-mode';
+import { FLOW_DEADLINE_ARG } from '@/utils/tool-watchdog';
 
 /** Where the pinned tab came from. Recorded for diagnostics only. */
 export type RunTabSource = 'mcp' | 'sidepanel' | 'explicit';
@@ -47,6 +49,31 @@ export interface RunTabContext {
   mcpSessionId?: string;
   /** Parallel-agent lane of the caller, for the same reason as mcpSessionId. */
   lane?: string;
+  /**
+   * Execution-context background mode (2026-09-05 pre-release review, item 2).
+   *
+   * `true` means "this run must not touch the user's screen, whatever the global
+   * toggle says". MCP `record_replay_flow_run` and automatic triggers set it: the
+   * caller is not watching, so activating a tab or focusing a window would take
+   * the screen away from whatever the user is doing. `runToolArgs` puts it on
+   * every inner tool call, where the work-tab gate, the URL target resolver,
+   * chrome_navigate's reuse filter and the activation guard all read it before
+   * the global toggle.
+   *
+   * A side panel run (the user pressed Run and is watching) leaves it unset and
+   * keeps the existing rules.
+   */
+  effectiveBackgroundMode?: true;
+  /**
+   * Absolute deadline (epoch ms) for the whole run, when the caller set one.
+   *
+   * Rides on every inner tool call as `_deadlineAt` so the tool pipeline caps its
+   * watchdog with the run's remaining budget, and long waits (wait_for, page load,
+   * scroll collection) stop at the same instant instead of running past the
+   * deadline inside a call that nobody is waiting for any more
+   * (2026-09-05 pre-release review, item 3).
+   */
+  deadlineAt?: number;
   /**
    * Owner token of the tab lease this run holds (utils/tab-lock.ts).
    *
@@ -309,6 +336,10 @@ export async function queryEntryPointTab(
 export interface RunSessionContext {
   mcpSessionId?: string;
   lane?: string;
+  /** See `RunTabContext.effectiveBackgroundMode`. */
+  effectiveBackgroundMode?: true;
+  /** See `RunTabContext.deadlineAt`. */
+  deadlineAt?: number;
   leaseToken?: string;
   ownedTabIds?: Set<number>;
   /**
@@ -340,6 +371,8 @@ export function runTabFromId(
     source,
     mcpSessionId: typeof session?.mcpSessionId === 'string' ? session.mcpSessionId : undefined,
     lane: typeof session?.lane === 'string' ? session.lane : undefined,
+    effectiveBackgroundMode: session?.effectiveBackgroundMode === true ? true : undefined,
+    deadlineAt: typeof session?.deadlineAt === 'number' ? session.deadlineAt : undefined,
     leaseToken: typeof session?.leaseToken === 'string' ? session.leaseToken : undefined,
     // The owned-tab set is shared by reference on purpose: a tab opened through
     // a derived context still belongs to the run that opened it.
@@ -373,6 +406,16 @@ export function runToolArgs<T extends Record<string, any>>(
     out._mcpSessionId = ctx.mcpSessionId;
   }
   if (typeof ctx.lane === 'string' && out.lane === undefined) out.lane = ctx.lane;
+  // Execution-context background mode: an MCP or trigger run never borrows the
+  // user's screen, whatever the global toggle says (pre-release review, item 2).
+  // The caller cannot set this from a step: `handleCallTool` strips the key from
+  // incoming args and only the engine puts it back here.
+  if (ctx.effectiveBackgroundMode === true) out[EFFECTIVE_BACKGROUND_MODE_ARG] = true;
+  // The run's deadline, so the tool pipeline caps its watchdog and long waits
+  // stop with the run instead of after it (pre-release review, item 3).
+  if (typeof ctx.deadlineAt === 'number' && Number.isFinite(ctx.deadlineAt)) {
+    out[FLOW_DEADLINE_ARG] = ctx.deadlineAt;
+  }
   // Lease token: says "the run that already owns this tab is calling", so the
   // tool pipeline can let the call re-enter instead of queueing it behind the
   // lease the same run is holding.
