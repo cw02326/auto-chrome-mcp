@@ -16,6 +16,7 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { OFFSCREEN_MESSAGE_TYPES, MessageTarget } from '@/common/message-types';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
+import { sleep } from '@/utils/adaptive-wait';
 import {
   pruneActionEventsInPlace,
   renderGifEnhancedOverlays,
@@ -84,10 +85,6 @@ const tabStates = new Map<number, TabCaptureState>();
 // ============================================================================
 // Utilities
 // ============================================================================
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function normalizeActionMetadata(action: ActionMetadata, atMs: number): ActionMetadata {
   const normalized: ActionMetadata = {

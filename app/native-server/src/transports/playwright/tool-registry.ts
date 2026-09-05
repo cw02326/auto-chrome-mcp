@@ -24,6 +24,11 @@ import { navigateHandler } from './handlers/navigate.js';
 import { screenshotHandler } from './handlers/screenshot.js';
 import { getContentHandler } from './handlers/get-content.js';
 
+/**
+ * `'workaround'` 는 아직 어떤 도구에도 붙어 있지 않다(현재 1to1 3 / stub 45 / workaround 0).
+ * CDP event capture 로 우회 구현하는 도구(network_capture 계열, console)를 실제로 만들 때
+ * 그 항목의 status 를 이 값으로 올린다. docs/PLAYWRIGHT_FALLBACK.md 의 표와 같은 분류다.
+ */
 export type ToolStatus = '1to1' | 'workaround' | 'stub';
 
 export interface ToolHandler {

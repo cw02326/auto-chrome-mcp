@@ -1,9 +1,10 @@
 # Auto Chrome MCP API Reference 📚
 
-Complete reference for all 41 tools and their parameters.
+Complete reference for all 43 tools and their parameters.
 
-39 tools are served by the extension; `chrome_list_browsers` and `chrome_use_browser` are
-handled locally by the stdio proxy and never reach the browser.
+41 tools are served by the extension (the `TOOL_SCHEMAS` list); `chrome_list_browsers` and
+`chrome_use_browser` are added by the stdio proxy, which answers them locally so they never
+reach the browser.
 
 > Parameters here mirror `packages/shared/src/tools.ts` (the schemas actually advertised over
 > MCP). If the two disagree, the schema wins — please fix this file.
@@ -1540,6 +1541,15 @@ mistake them for dead code.
 - **`chrome_get_interactive_elements`** (deprecated) - see its own entry under
   [Content Analysis](#-content-analysis). Replaced by `chrome_read_page`, kept only for
   backward compatibility.
+- **`chrome_network_capture_start`** / **`chrome_network_capture_stop`** - the start/stop
+  halves of the `webRequest`-based capture. `chrome_network_capture` is the advertised
+  wrapper that runs both around a scripted interaction; the halves stay hidden because a bare
+  `start` with no matching `stop` leaks a listener. The record-replay engine calls
+  `start` directly (`rr-utils.ts`).
+- **`chrome_network_debugger_start`** / **`chrome_network_debugger_stop`** - the same split
+  for the `chrome.debugger` (CDP) capture path, which also returns response bodies. Hidden for
+  the same pairing reason; the record-replay scheduler calls `start` directly
+  (`engine/scheduler.ts`).
 
 If you need one of these from an MCP client, call it by its exact name anyway - the dispatcher
 still accepts it, it is just not listed for the model to discover on its own.

@@ -1,5 +1,6 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
+import { sleep } from '@/utils/adaptive-wait';
 
 /**
  * auto-chrome-mcp fork: chrome_wait_for — "너무 일찍 클릭 / 빈 페이지 읽기" 실패를 없애는 대기 도구.
@@ -241,10 +242,6 @@ export class NetworkIdleWatcher {
   isIdle(idleMs: number): boolean {
     return this.inFlight.size === 0 && Date.now() - this.lastActivityAt >= idleMs;
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function clamp(value: number, min: number, max: number): number {

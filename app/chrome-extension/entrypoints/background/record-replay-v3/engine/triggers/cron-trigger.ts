@@ -20,6 +20,7 @@ import type { UnixMillis } from '../../domain/json';
 import type { TriggerId } from '../../domain/ids';
 import type { TriggerSpecByKind } from '../../domain/triggers';
 import type { TriggerFireCallback, TriggerHandler, TriggerHandlerFactory } from './trigger-handler';
+import { parseTriggerIdFromAlarmName } from './alarm-name';
 
 // ==================== Types ====================
 
@@ -90,15 +91,6 @@ function normalizeTimezone(value: unknown): string | undefined {
  */
 function alarmNameForTrigger(triggerId: TriggerId): string {
   return `${ALARM_PREFIX}${triggerId}`;
-}
-
-/**
- * Parse trigger ID from alarm name
- */
-function parseTriggerIdFromAlarmName(name: string): TriggerId | null {
-  if (!name.startsWith(ALARM_PREFIX)) return null;
-  const id = name.slice(ALARM_PREFIX.length);
-  return id ? (id as TriggerId) : null;
 }
 
 /**
@@ -490,7 +482,7 @@ export function createCronTriggerHandler(
    * Handle alarm event
    */
   const onAlarm = (alarm: chrome.alarms.Alarm): void => {
-    const triggerId = parseTriggerIdFromAlarmName(alarm?.name ?? '');
+    const triggerId = parseTriggerIdFromAlarmName(ALARM_PREFIX, alarm?.name ?? '');
     if (!triggerId) return;
 
     const entry = installed.get(triggerId);

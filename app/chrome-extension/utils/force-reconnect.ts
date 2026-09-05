@@ -21,6 +21,7 @@ import {
   getBridgeAuthHeaders,
   isBridgeAuthFailure,
 } from '@/utils/bridge-auth';
+import { sleep } from '@/utils/adaptive-wait';
 
 export type StageStep =
   | 'process_kill'
@@ -71,11 +72,6 @@ const DEFAULT_TIMEOUTS: Record<StageStep, number> = {
   connect: 8000,
   mcp_ping: 5000,
 };
-
-/**
- * Sleep helper.
- */
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * fetch 가 throw 하면 false (서버 죽음), 200 이면 true.

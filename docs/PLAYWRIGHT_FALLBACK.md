@@ -60,6 +60,12 @@ Playwright 로도 전달되지 않으므로 이 표에 없다. `record_replay_fl
 | 🔴 stub (native-only, upstream, performance)  | 3     | performance_start_trace, performance_stop_trace, performance_analyze_insight                                                                                                                                                                                         |
 | 🔴 stub (native-only, fork 추가 12개, 미포팅) | 12    | chrome_request_user_consent, chrome_batch, chrome_set_work_tab, chrome_wait_for, chrome_scroll_collect, chrome_storage, chrome_save_pdf, chrome_emulate, chrome_network_rules, chrome_extract, chrome_find, chrome_shortcut                                          |
 
+위 표의 아이콘은 **최종 목표 분류**다. 코드의 현재 상태는 다르다 —
+`tool-registry.ts` 의 `status` 값을 그대로 세면 `1to1` 3개, `stub` 45개이고
+`workaround` 는 **0개**다. 🟡 행의 7개도 아직 전부 stub 이라 `ToolStatus` 의
+`'workaround'` 값은 지금 어떤 도구에도 붙어 있지 않다. CDP event capture 를 실제로
+구현할 때 그 도구들의 status 를 `'workaround'` 로 올리면 된다.
+
 2026-09-04 이전에는 `chrome_semantic_search`·`chrome_performance_start_trace`·
 `chrome_performance_stop_trace`·`chrome_performance_analyze_insight`·
 `chrome_get_windows_and_tabs` 키가 실제 도구 이름과 `chrome_` 접두사가 어긋나 있어(또는 이름

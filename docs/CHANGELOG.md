@@ -73,6 +73,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **중복 `sleep` 정의 7개를 `utils/adaptive-wait.ts` 의 것 하나로 합쳤다.** 배경 스크립트
+  곳곳에 `new Promise((resolve) => setTimeout(resolve, ms))` 가 파일마다 따로 선언돼 있었다
+  (`quick-panel/agent-handler.ts`, `record-replay-v3/engine/kernel/runner.ts`,
+  `tools/browser/batch-runner.ts`, `tools/browser/gif-auto-capture.ts`,
+  `tools/browser/wait-for.ts`, `tools/index.ts`, `utils/force-reconnect.ts`). 전부 공용
+  `sleep` 을 import 하도록 바꿨다. 동작은 같다. AbortSignal 을 보는
+  `record-replay/actions/registry.ts` 의 `sleep` 은 `sleepWithSignal` 을 감싸는 별개 함수라
+  그대로 뒀다.
+- **`parseTriggerIdFromAlarmName` 3벌을 `record-replay-v3/engine/triggers/alarm-name.ts` 로
+  합쳤다.** cron·interval·once 트리거가 접두사만 다른 같은 파서를 각자 들고 있었다. 접두사를
+  인자로 받는 함수 하나로 바꿨다.
+- **주석 처리된 코드를 지웠다.** `popup/App.vue` 의 녹화 시작·중지 `sendMessage` 블록
+  (기능은 이미 `showComingSoonToast` 로 막혀 있어 TODO 한 줄만 남겼다)과
+  `sidepanel/App.vue` 의 "keeping for reference" 리스너다.
+- **`utils/step-template.ts` 의 낡은 주석을 고쳤다.** `when`·`stopIf`·`repeat` 이 "3단계에서
+  붙는다", `loop`·`params` 가 "지금은 항상 undefined" 라고 적혀 있었으나 실제로는
+  `batch-runner` 가 셋 다 해석해 실행하고 `loop`·`params` 도 채운다.
+- **문서 수치를 실제 코드에 맞췄다.** `docs/TOOLS.md` 의 도구 수를 41개에서 43개로
+  (`TOOL_SCHEMAS` 41개 + stdio 프록시가 직접 답하는 `chrome_list_browsers`,
+  `chrome_use_browser` 2개), Hidden Tools 절에 `chrome_network_capture_start`/`_stop` 과
+  `chrome_network_debugger_start`/`_stop` 을 추가했다. `README.md`,
+  `docs/INSTALL-GUIDE-ko.md`, `app/native-server/skill/SKILL.md` 의 doctor "11개 항목" 은
+  실제로 설치된 브라우저 수와 OS 에 따라 늘어나므로 "12개 이상" 으로 고쳤다.
+- **`docs/PLAYWRIGHT_FALLBACK.md` 표가 목표 분류임을 명시했다.** 표의 🟡 우회 구현 7개를
+  포함해 레지스트리의 현재 status 는 `1to1` 3개, `stub` 45개, `workaround` 0개다.
+  `ToolStatus` 선언에도 같은 설명을 주석으로 달았다.
+- **타입 오류 27건을 고쳤다(런타임 동작 변경 없음).** MCP `content` 유니온에서 `.text` 를
+  읽을 때의 내로잉(`record-replay/engine/scheduler.ts`, `tests/utils/batch-flow.test.ts`),
+  `new Blob([Uint8Array])` 의 `BlobPart` 불일치(`tools/browser/gif-recorder.ts`),
+  항상 정의된 함수에 대한 truthiness 검사(`tools/browser/network-capture-web-request.ts`),
+  `chrome.notifications.clear` 반환형과 `ContentSetting` 제네릭 인자
+  (`tools/browser/user-consent.ts`), `switch-model` 핸들러 시그니처(`popup/App.vue`),
+  테스트 하네스의 `number | null` 창 id 2건이다. `vue-tsc --noEmit` 오류가 162건에서
+  135건으로 줄었고 새로 생긴 오류는 없다.
+
 - **`chrome_find` 응답에서 매치마다 반복되던 `hint` 문구를 없앴다.** 118자짜리 안내(`ref` 로
   `chrome_click_element`/`chrome_fill_or_select` 를 쓰라는 문구)가 `match` 항목마다 실려
   `maxResults` 가 5면 다섯 번 반복됐다. 이제 응답 최상위에 매치가 하나 이상일 때만 1회 싣는다.
@@ -122,6 +157,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 구조 불변 증명: 41개 도구의 파라미터 이름·타입·`required`·`enum`(설명 제외)을 전후로
     스냅샷 비교한 결과 `chrome_shortcut.steps.items` 한 곳만 달랐고(위에서 명시한 예외),
     나머지 40개는 완전히 동일했다.
+
+### Removed
+
+- **`packages/shared/src/constants.ts` 의 `DEFAULT_SERVER_PORT` 를 지웠다.** 저장소 어디서도
+  참조하지 않는 상수였다. 실제로 쓰는 포트 상수는 native-server 의 `NATIVE_SERVER_PORT`
+  하나뿐이다.
+- **`record-replay/actions/types.ts` 에서 아무데서도 닿지 않는 선언 7개를 지웠다**
+  (`ActionSpec`, `ActionSpecDisplay`, `ActionSpecPorts`, `ActionCategory`,
+  `BuiltinEdgeLabel`, `ACTION_TYPES`, `EXECUTABLE_ACTION_TYPES`, 983줄에서 913줄로).
+  외부에서 참조하는 선언과 그 선언들이 구조적으로 쓰는 타입은 전부 남겼다.
 
 ### Fixed
 

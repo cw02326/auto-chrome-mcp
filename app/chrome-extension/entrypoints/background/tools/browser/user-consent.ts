@@ -103,7 +103,7 @@ function ensureOsBlockedClickListener(): void {
     } catch (e: any) {
       console.error('[user-consent] OS deep link 실패:', e?.message || e);
     }
-    chrome.notifications.clear(notificationId).catch(() => {});
+    Promise.resolve(chrome.notifications.clear(notificationId)).catch(() => {});
   });
 }
 
@@ -209,7 +209,10 @@ async function applyOriginAllow(action: SensitivePermission): Promise<void> {
     }
     const csKey = CS_KEY[action];
     const setting = (
-      chrome.contentSettings as unknown as Record<string, chrome.contentSettings.ContentSetting>
+      chrome.contentSettings as unknown as Record<
+        string,
+        chrome.contentSettings.ContentSetting<string>
+      >
     )[csKey];
     if (!setting?.set) {
       console.warn(`[user-consent] chrome.contentSettings.${csKey} 미지원 — skip`);

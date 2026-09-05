@@ -736,11 +736,6 @@ onMounted(async () => {
   // No need to manually call refresh here
 
   // V2 push-based refresh is no longer needed - V3 uses event subscription
-  // Keeping commented for reference:
-  // const onMessage = (message: { type?: string }) => {
-  //   if (message?.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) refresh();
-  // };
-  // chrome.runtime.onMessage.addListener(onMessage);
 });
 
 onUnmounted(() => {

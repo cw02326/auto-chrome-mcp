@@ -137,7 +137,7 @@ irm https://raw.githubusercontent.com/cw02326/auto-chrome-mcp/main/install.ps1 |
 auto-chrome-mcp-bridge doctor
 ```
 
-11개 항목이 나오는데 전부 OK 면 정상입니다.
+12개 이상의 항목이 나오는데(설치된 브라우저 수와 OS 에 따라 늘어납니다) 전부 OK 면 정상입니다.
 **Connectivity** 만 실패한다면 크롬이 꺼져 있거나 2단계(확장 등록)를 아직 안 한 것입니다.
 
 **윈도우 사용자는 여기까지입니다.** 마지막의 "이걸 설치하면 뭐가 좋은가요"로 넘어가세요.
@@ -259,7 +259,7 @@ curl -fsSL https://raw.githubusercontent.com/cw02326/auto-chrome-mcp/main/instal
 auto-chrome-mcp-bridge doctor
 ```
 
-11개 항목이 나오는데 전부 OK 면 정상입니다.
+12개 이상의 항목이 나오는데(설치된 브라우저 수와 OS 에 따라 늘어납니다) 전부 OK 면 정상입니다.
 **Connectivity** 만 실패한다면 크롬이 꺼져 있거나 2단계(확장 등록)를 아직 안 한 것입니다.
 
 ### 1단계가 아예 안 될 때 (대체 방법)

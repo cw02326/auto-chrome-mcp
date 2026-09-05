@@ -44,6 +44,7 @@ import {
   validateCondition,
   type ConditionPathResolver,
 } from '@/utils/step-condition';
+import { sleep } from '@/utils/adaptive-wait';
 
 export const MAX_STEPS = 20;
 export const MAX_RESULT_TEXT_LENGTH = 4000;
@@ -631,10 +632,6 @@ function limitReached(ctx: RunContext): BatchStopReason | null {
   if (ctx.totalRuns >= MAX_TOTAL_RUNS) return 'total_runs_exceeded';
   if (Date.now() >= ctx.deadline) return 'timeout';
   return null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** 회차 사이 대기. 남은 예산을 넘겨 기다리지 않는다. */

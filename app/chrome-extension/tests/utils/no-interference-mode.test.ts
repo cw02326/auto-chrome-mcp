@@ -688,7 +688,7 @@ describe('2-d. 작업 창 표지 검증', () => {
     }
     h.tabs.push({
       id: 9999,
-      windowId: id,
+      windowId: id!,
       url: 'https://someone-elses.example/',
       active: true,
       status: 'complete',

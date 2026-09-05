@@ -285,7 +285,7 @@ describe('mcp-window-manager (auto-chrome-mcp fork — 작업 창 모드)', () =
       const mod = await loadWindowManager();
       const dedicatedId = await mod.getOrCreateMcpWindow();
       h.userWindows.push(
-        { id: dedicatedId, type: 'normal', incognito: false, focused: true },
+        { id: dedicatedId!, type: 'normal', incognito: false, focused: true },
         { id: 41, type: 'normal', incognito: false, focused: false },
       );
       h.lastFocusedId.value = dedicatedId;

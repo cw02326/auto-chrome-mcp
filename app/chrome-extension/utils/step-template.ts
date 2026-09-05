@@ -78,8 +78,8 @@ const FORBIDDEN_ARG_KEY_NAMES: ReadonlySet<string> = FORBIDDEN_PATH_SEGMENTS;
 const META_KEYS: ReadonlySet<string> = new Set(['$ok', '$text', '$error']);
 
 /**
- * 치환을 켜는 흐름 키. `when`/`stopIf`/`repeat` 은 3단계에서 실제 동작이 붙지만,
- * 활성화 판정은 설계 1절대로 지금부터 이 목록 전체를 본다.
+ * 치환을 켜는 흐름 키. `when`/`stopIf`/`repeat` 은 batch-runner 가 실제로 해석해 실행한다.
+ * 활성화 판정은 설계 1절대로 이 목록 전체를 본다.
  */
 export const STEP_FLOW_KEYS = ['as', 'when', 'stopIf', 'repeat'] as const;
 export const TOP_LEVEL_FLOW_KEYS = ['return', 'params'] as const;
@@ -126,9 +126,9 @@ export interface StepCapture {
 export interface TemplateScope {
   named: Map<string, StepCapture>;
   prev?: StepCapture;
-  /** 3단계 repeat 용. 지금은 항상 undefined. */
+  /** repeat 회차 정보. batch-runner 가 회차마다 채우고 묶음이 끝나면 되돌린다. */
   loop?: { index: number; count: number };
-  /** 4단계 shortcut params 용. 지금은 항상 undefined. */
+  /** shortcut 호출 인자. batch-runner 가 params 가 있을 때 채운다. */
   params?: Record<string, unknown>;
 }
 

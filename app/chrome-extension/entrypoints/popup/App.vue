@@ -280,7 +280,7 @@
       :is-managing-cache="isManagingCache"
       @back="currentView = 'home'"
       @initialize-semantic-engine="initializeSemanticEngine"
-      @switch-model="switchModel"
+      @switch-model="(preset: string) => switchModel(preset as ModelPreset)"
       @retry-model-initialization="retryModelInitialization"
       @show-clear-confirmation="showClearConfirmation = true"
       @cleanup-cache="cleanupCache"
@@ -465,34 +465,12 @@ const startRecording = async () => {
   // TODO: 录制回放功能开发中，暂时拦截
   showComingSoonToast('录制回放');
   return;
-  // if (rrRecording.value) return;
-  // try {
-  //   const res = await chrome.runtime.sendMessage({
-  //     type: BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING,
-  //     meta: { name: '新录制' },
-  //   });
-  //   rrRecording.value = !!(res && res.success);
-  // } catch (e) {
-  //   console.error('开始录制失败:', e);
-  //   rrRecording.value = false;
-  // }
 };
 
 const stopRecording = async () => {
   // TODO: 录制回放功能开发中，暂时拦截
   showComingSoonToast('录制回放');
   return;
-  // if (!rrRecording.value) return;
-  // try {
-  //   const res = await chrome.runtime.sendMessage({
-  //     type: BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING,
-  //   });
-  //   rrRecording.value = false;
-  //   if (res && res.success) await loadFlows();
-  // } catch (e) {
-  //   console.error('停止录制失败:', e);
-  //   rrRecording.value = false;
-  // }
 };
 
 const runFlow = async (flowId: string) => {

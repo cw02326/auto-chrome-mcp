@@ -87,7 +87,7 @@ claude mcp add --scope user --transport stdio chrome-mcp-stdio `
 2. 확장 로드는 **대신 해줄 수 없다.** 위 1단계를 사람에게 그대로 안내하고 기다린다 —
    `chrome://extensions` 는 스크립트·자동화가 접근할 수 없다.
 3. 사람이 확장을 로드했다고 하면, 클로드 코드 재시작을 안내한다. 재시작 전에는 도구가 안 보인다.
-4. 확인: `auto-chrome-mcp-bridge doctor` 가 11개 항목 전부 OK 인지 본다.
+4. 확인: `auto-chrome-mcp-bridge doctor` 가 모든 항목 OK 인지 본다 (12개 이상 — 설치된 브라우저 수와 OS 에 따라 늘어난다).
    `Connectivity` 만 실패하면 크롬이 꺼져 있거나 확장이 아직 로드되지 않은 것이다.
 
 ## 무간섭 모드 (v1.9.0 기본값)
@@ -213,7 +213,7 @@ auto-chrome-mcp 는 AI 자동화가 끊기지 않도록 Chrome 사이트 권한 
 설치가 꼬였다면:
 
 ```bash
-auto-chrome-mcp-bridge doctor          # 상태 점검 (11개 항목)
+auto-chrome-mcp-bridge doctor          # 상태 점검 (12개 이상, 브라우저 수·OS 에 따라 늘어남)
 auto-chrome-mcp-bridge doctor --fix    # 자동 복구
 auto-chrome-mcp-bridge report --copy   # 진단 리포트 (이슈 등록용)
 ```

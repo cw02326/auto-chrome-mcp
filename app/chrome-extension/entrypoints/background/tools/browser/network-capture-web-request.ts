@@ -354,7 +354,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
    */
   private setupListeners(): void {
     // Skip if listeners are already set up
-    if (this.listeners.onBeforeRequest) {
+    if (this.listeners.onBeforeRequest !== undefined) {
       return;
     }
 

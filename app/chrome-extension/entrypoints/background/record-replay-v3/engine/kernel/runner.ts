@@ -31,6 +31,7 @@ import { createNotImplementedArtifactService } from './artifacts';
 import { getBreakpointRegistry, type BreakpointManager } from './breakpoints';
 import { findEdgeByLabel, findNextNode, validateFlowDAG } from './traversal';
 import type { RunResult } from './kernel';
+import { sleep } from '@/utils/adaptive-wait';
 
 // ==================== Types ====================
 
@@ -126,10 +127,6 @@ function createDeferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errorMessage(err: unknown): string {

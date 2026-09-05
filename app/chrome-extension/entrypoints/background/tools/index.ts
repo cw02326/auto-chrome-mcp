@@ -33,6 +33,7 @@ import { setBatchToolInvoker } from './browser/batch';
 // auto-chrome-mcp fork: url 로 대상을 고르는 호출의 대상 탭을 잠금 전에 미리 해석한다.
 // (barrel 로 재수출하면 함수가 toolsMap 에 섞이므로 직접 import — batch.ts 주석과 같은 이유)
 import { resolveUrlTargetTabId } from './browser/url-target';
+import { sleep } from '@/utils/adaptive-wait';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
@@ -110,8 +111,6 @@ export interface ToolCallParam {
 }
 
 // 탭 단위 직렬화는 utils/tab-lock.ts 로 분리했다 (navigate 의 재사용 판정도 같은 busy 상태를 본다).
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * auto-chrome-mcp fork(F4): 도구 실패 시 대상 탭 화면을 JPEG 로 캡처해 결과에 첨부.

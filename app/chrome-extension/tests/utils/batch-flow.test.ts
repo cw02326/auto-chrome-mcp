@@ -13,12 +13,18 @@ import {
   setShortcutToolInvoker,
 } from '@/entrypoints/background/tools/browser/shortcut';
 
+/**
+ * MCP 결과의 content 는 text | image | resource 유니온이라 `.text` 를 바로 못 읽는다.
+ * 테스트에서 첫 블록의 본문만 꺼내 쓰는 용도.
+ */
+const firstText = (res: { content: unknown[] }): string =>
+  (res.content[0] as { text: string }).text;
 const txt = (text: string) => ({ type: 'text', text });
 const ok = (text: string) => ({ content: [txt(text)], isError: false });
 const fail = (text: string) => ({ content: [txt(text)], isError: true });
 
 function summary(result: any) {
-  return JSON.parse(result.content[0].text);
+  return JSON.parse(firstText(result));
 }
 
 /** invoker 를 mock 으로 갈아끼우고 호출 기록을 돌려준다. */
@@ -509,7 +515,7 @@ describe('shortcut v2 저장 제한 (13a)', () => {
         steps: [{ tool: 'chrome_click_element', as: 'hit', args }],
       } as any);
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('stale_target_forbidden');
+      expect(firstText(result)).toContain('stale_target_forbidden');
     }
   });
 
@@ -522,7 +528,7 @@ describe('shortcut v2 저장 제한 (13a)', () => {
       steps: [{ tool: 'chrome_close_tabs', args: { url: 'https://x.test/' } }],
     } as any);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('stale_target_forbidden');
+    expect(firstText(result)).toContain('stale_target_forbidden');
   });
 
   it('13a. legacy(v1) 저장은 literal tabId 를 그대로 받는다', async () => {
@@ -565,7 +571,7 @@ describe('return (14)', () => {
     } as any);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('unknown_return_name');
+    expect(firstText(result)).toContain('unknown_return_name');
     expect(calls).toHaveLength(0);
   });
 
@@ -704,7 +710,7 @@ describe('조건 when (8, 8a, 8b)', () => {
         steps: [{ tool: 'chrome_screenshot', when }],
       } as any);
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('condition_invalid');
+      expect(firstText(result)).toContain('condition_invalid');
       expect(calls).toHaveLength(0);
     }
   });
@@ -987,7 +993,7 @@ describe('반복 묶음 거절 규칙 (2c, 10c, 10d)', () => {
       const calls = recordInvoker(() => ok('{}'));
       const result = await batchTool.execute({ steps: [step] } as any);
       expect(result.isError, label).toBe(true);
-      expect(result.content[0].text, label).toContain(code);
+      expect(firstText(result), label).toContain(code);
       expect(calls, label).toHaveLength(0);
     }
   });
@@ -1024,7 +1030,7 @@ describe('반복 묶음 거절 규칙 (2c, 10c, 10d)', () => {
 
     const rejected = await batchTool.execute({ steps: [group, group, ...plain(19)] } as any);
     expect(rejected.isError).toBe(true);
-    expect(rejected.content[0].text).toContain('steps must contain at most 20 items');
+    expect(firstText(rejected)).toContain('steps must contain at most 20 items');
   });
 
   it('2c. 묶음 as 와 안쪽 as 가 충돌하면 duplicate_as 다', async () => {
@@ -1040,7 +1046,7 @@ describe('반복 묶음 거절 규칙 (2c, 10c, 10d)', () => {
     } as any);
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('duplicate_as');
+    expect(firstText(result)).toContain('duplicate_as');
     expect(calls).toHaveLength(0);
   });
 });
@@ -1275,8 +1281,8 @@ describe('문서 예시 통합 (12)', () => {
     expect(body.steps[7].status).toBe('skipped');
     expect(body.stoppedBy.reason).toBe('stopIf');
     // 비밀번호는 응답에도 저장소에도 원문으로 남지 않는다.
-    expect(result.content[0].text).not.toContain('sup3rsecret!');
-    expect(result.content[0].text).toContain('***');
+    expect(firstText(result)).not.toContain('sup3rsecret!');
+    expect(firstText(result)).toContain('***');
     expect(JSON.stringify(store)).not.toContain('sup3rsecret!');
   });
 });
@@ -1306,7 +1312,7 @@ describe('shortcut params 선언 (12)', () => {
         steps: oneStep,
       } as any);
       expect(result.isError, label).toBe(true);
-      expect(result.content[0].text, label).toContain('param_declaration_invalid');
+      expect(firstText(result), label).toContain('param_declaration_invalid');
     }
   });
 
@@ -1354,7 +1360,7 @@ describe('shortcut params 선언 (12)', () => {
       steps: [{ tool: 'chrome_navigate', args: { url: '{{params.url}}' } }],
     } as any);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('undeclared_param');
+    expect(firstText(result)).toContain('undeclared_param');
   });
 });
 
@@ -1379,7 +1385,7 @@ describe('shortcut params 실행 (13)', () => {
 
     const missing = await shortcutTool.execute({ action: 'run', name: 'login' } as any);
     expect(missing.isError).toBe(true);
-    expect(missing.content[0].text).toContain('missing_param');
+    expect(firstText(missing)).toContain('missing_param');
 
     const unknown = await shortcutTool.execute({
       action: 'run',
@@ -1387,7 +1393,7 @@ describe('shortcut params 실행 (13)', () => {
       params: { user: 'me', nope: 1 },
     } as any);
     expect(unknown.isError).toBe(true);
-    expect(unknown.content[0].text).toContain('unknown_param');
+    expect(firstText(unknown)).toContain('unknown_param');
     expect(calls).toHaveLength(0);
   });
 
@@ -1430,7 +1436,7 @@ describe('shortcut params 실행 (13)', () => {
         params: { pw },
       } as any);
       expect(result.isError, String(pw)).toBe(true);
-      expect(result.content[0].text, String(pw)).toContain('param_type_invalid');
+      expect(firstText(result), String(pw)).toContain('param_type_invalid');
     }
   });
 
@@ -1527,7 +1533,7 @@ describe('대시 스캔 (15)', () => {
       },
     ];
     for (const args of batchCases) {
-      texts.push((await batchTool.execute(args)).content[0].text);
+      texts.push(firstText(await batchTool.execute(args)));
     }
 
     const shortcutCases: any[] = [
@@ -1546,7 +1552,7 @@ describe('대시 스캔 (15)', () => {
       { action: 'run', name: 'nope' },
     ];
     for (const args of shortcutCases) {
-      texts.push((await shortcutTool.execute(args)).content[0].text);
+      texts.push(firstText(await shortcutTool.execute(args)));
     }
 
     const joined = texts.join('\n');

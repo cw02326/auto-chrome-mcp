@@ -29,6 +29,7 @@ import {
 import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
 import { getBridgeAuthHeaders } from '@/utils/bridge-auth';
+import { sleep } from '@/utils/adaptive-wait';
 
 // ============================================================
 // Constants
@@ -117,10 +118,6 @@ function createRequestId(): string {
     // Fallback for environments without crypto.randomUUID
   }
   return `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isTerminalStatus(status: string): boolean {

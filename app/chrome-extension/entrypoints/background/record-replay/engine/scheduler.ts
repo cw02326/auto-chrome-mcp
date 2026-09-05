@@ -455,7 +455,9 @@ class ExecutionOrchestrator {
         });
         let values: Record<string, any> | null = null;
         try {
-          const t = (res?.content || []).find((c: any) => c.type === 'text')?.text;
+          const t = (res?.content || []).find(
+            (c: any): c is { type: 'text'; text: string } => c.type === 'text',
+          )?.text;
           const j = t ? JSON.parse(t) : null;
           if (j && j.success && j.values) values = j.values;
         } catch {
@@ -539,7 +541,9 @@ class ExecutionOrchestrator {
         });
         let started = false;
         try {
-          const t = res?.content?.find?.((c: any) => c.type === 'text')?.text;
+          const t = res?.content?.find?.(
+            (c: any): c is { type: 'text'; text: string } => c.type === 'text',
+          )?.text;
           if (t) {
             const j = JSON.parse(t);
             started = !!j?.success;
@@ -973,7 +977,9 @@ class ExecutionOrchestrator {
           name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP,
           args: runToolArgs(this.tab, {}),
         });
-        const text = (stopRes?.content || []).find((c: any) => c.type === 'text')?.text;
+        const text = (stopRes?.content || []).find(
+          (c: any): c is { type: 'text'; text: string } => c.type === 'text',
+        )?.text;
         if (text) {
           try {
             const data = JSON.parse(text);

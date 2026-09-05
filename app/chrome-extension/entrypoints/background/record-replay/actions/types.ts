@@ -45,7 +45,6 @@ export const EDGE_LABELS = {
   ON_ERROR: 'onError',
 } as const;
 
-export type BuiltinEdgeLabel = (typeof EDGE_LABELS)[keyof typeof EDGE_LABELS];
 export type EdgeLabel = string;
 
 // ================================
@@ -912,72 +911,3 @@ export interface Flow {
     { nodes: ReadonlyArray<AnyAction>; edges: ReadonlyArray<ActionEdge> }
   >;
 }
-
-// ================================
-// Action 规格（用于 UI）
-// ================================
-
-export type ActionCategory = 'Flow' | 'Actions' | 'Logic' | 'Tools' | 'Tabs' | 'Page';
-
-export interface ActionSpecDisplay {
-  label: string;
-  description?: string;
-  category: ActionCategory;
-  icon?: string;
-  docUrl?: string;
-}
-
-export interface ActionSpecPorts {
-  inputs: number | 'any';
-  outputs: Array<{ label?: EdgeLabel }> | 'any';
-  maxConnection?: number;
-  allowedInputs?: boolean;
-}
-
-export interface ActionSpec<T extends ActionType = ActionType> {
-  type: T;
-  version: number;
-  display: ActionSpecDisplay;
-  ports: ActionSpecPorts;
-  defaults?: Partial<ActionParamsByType[T]>;
-  /** 需要进行模板替换的字段路径 */
-  refDataKeys?: ReadonlyArray<string>;
-}
-
-// ================================
-// 常量导出
-// ================================
-
-export const ACTION_TYPES: ReadonlyArray<ActionType> = [
-  'trigger',
-  'delay',
-  'click',
-  'dblclick',
-  'fill',
-  'key',
-  'scroll',
-  'drag',
-  'wait',
-  'assert',
-  'extract',
-  'script',
-  'http',
-  'screenshot',
-  'triggerEvent',
-  'setAttribute',
-  'switchFrame',
-  'loopElements',
-  'if',
-  'foreach',
-  'while',
-  'executeFlow',
-  'navigate',
-  'openTab',
-  'switchTab',
-  'closeTab',
-  'handleDownload',
-] as const;
-
-export const EXECUTABLE_ACTION_TYPES: ReadonlyArray<ExecutableActionType> = ACTION_TYPES.filter(
-  (t): t is ExecutableActionType => t !== 'trigger',
-);
