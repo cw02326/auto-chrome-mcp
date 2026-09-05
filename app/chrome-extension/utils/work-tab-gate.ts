@@ -27,7 +27,7 @@
  */
 
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
-import { isBackgroundModeEnabledFor } from '@/utils/background-mode';
+import { EFFECTIVE_BACKGROUND_MODE_ARG, isBackgroundModeEnabledFor } from '@/utils/background-mode';
 import { getWorkTabId, sessionKeyOf } from '@/utils/work-tab-manager';
 
 const B = TOOL_NAMES.BROWSER;
@@ -69,6 +69,22 @@ function ownSessionArgs(args: any): { _mcpSessionId?: unknown; lane?: unknown } 
  * 여기에 다시 넣는다.
  */
 export const BACKGROUND_MODE_UNSUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([]);
+
+/**
+ * 게이트가 **전역 토글과 무관하게 항상 강제 background 모드로 판정**하는 도구.
+ *
+ * 2026-09-05 Codex 최종 확인 2: `record_replay_flow_run` 은 자기 실행을 강제 모드로 돌린다
+ * (`tools/record-replay.ts` 가 `effectiveBackgroundMode: true` 를 실행 컨텍스트에 싣는다).
+ * 그런데 그 코드는 **게이트를 지난 뒤에** 돈다. 전역 토글이 OFF 인 상태로 `tabId` 없이
+ * 부르면 게이트가 예전 동작으로 빠져 작업 탭을 주입하지 않았고, 그 결과 도구는 자기
+ * 강제 모드를 켜 보지도 못한 채 `no_work_tab` 으로 끝났다 - 작업 탭이 **있어도** 그랬다.
+ *
+ * 강제 모드는 실행이 시작되기 전에 정해져야 한다. 그래서 판정을 게이트로 끌어올린다:
+ * 이 목록의 도구는 전역 토글을 읽지 않고 곧바로 무간섭 규칙을 받는다(작업 탭 주입,
+ * 없으면 `no_work_tab` 거절). 사용자가 사이드패널에서 Run 을 누른 실행은 이 게이트를
+ * 지나지 않으므로 예전 규칙 그대로다.
+ */
+export const FORCED_BACKGROUND_TOOLS: ReadonlySet<string> = new Set<string>([RR.FLOW_RUN]);
 
 /**
  * 백그라운드 작업 모드 게이트에서 완전히 제외되는 도구 — 정의상 사용자 대면 동작.
@@ -466,7 +482,10 @@ export async function applyBackgroundModeGate(
   // ③ 모드가 꺼져 있으면 인자를 보정하지 않는다(예전 동작). 작업 탭 조회는
   //   handleCallTool 의 팝업 감지(opener 후보)가 쓰므로 남긴다 — 단, 호출자가 대상
   //   탭을 직접 지정했으면 그 탭이 이미 첫 후보라 조회를 생략해도 잃는 것이 없다.
-  if (!(await isBackgroundModeEnabledFor(args))) {
+  //   FORCED_BACKGROUND_TOOLS 는 이 분기를 타지 않는다 — 그 도구의 강제 모드는
+  //   실행이 시작되기 전에 정해져야 하고, 그 지점이 여기다.
+  const forcedBackground = FORCED_BACKGROUND_TOOLS.has(name);
+  if (!forcedBackground && !(await isBackgroundModeEnabledFor(args))) {
     const workTabId = explicitTab ? null : await getWorkTabId(sessionKeyOf(ownSessionArgs(args)));
     return {
       args,
@@ -493,6 +512,11 @@ export async function applyBackgroundModeGate(
   const patched = { ...(args ?? {}) };
   if (patched.background === undefined) {
     patched.background = true;
+  }
+  // 강제 도구는 판정 결과를 인자에도 남긴다. 도구 구현과 그 아래 파이프라인이 전역
+  // 토글 대신 이 값을 읽어, 게이트와 같은 답을 낸다.
+  if (forcedBackground) {
+    patched[EFFECTIVE_BACKGROUND_MODE_ARG] = true;
   }
 
   // ④ 대상 탭을 직접 지정한 호출은 작업 탭이 아예 필요 없다.

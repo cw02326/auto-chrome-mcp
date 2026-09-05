@@ -13,6 +13,7 @@ import {
   listSchedules,
   saveSchedule,
   removeSchedule,
+  ensurePublishedSensitiveDefaultsMigrated,
   type FlowSchedule,
 } from './flow-store';
 import { listRuns } from './flow-store';
@@ -200,6 +201,10 @@ async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?:
 
 export function initRecordReplayListeners() {
   // Storage state sync is handled within session manager and recorder manager
+  // 발행 스냅샷에 남아 있는 sensitive 변수 기본값을 한 번 걷어 낸다. 새 발행은
+  // publishFlow 가 이미 막지만, 그 전에 저장된 레코드는 워커가 뜰 때 정리해야 한다
+  // (2026-09-05 Codex 최종 확인 5).
+  void ensurePublishedSensitiveDefaultsMigrated();
   // On startup, re-schedule alarms
   rescheduleAlarms().catch(() => {});
   // Initialize trigger engine (contextMenus/commands/url/dom)

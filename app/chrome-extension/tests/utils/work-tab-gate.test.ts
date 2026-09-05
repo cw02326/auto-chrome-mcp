@@ -688,3 +688,53 @@ describe('WINDOW_ID_AWARE_TOOLS 매트릭스 동기화', () => {
     }
   });
 });
+
+/* ================================================================== *
+ * 강제 background 도구 (2026-09-05 Codex 최종 확인 2)
+ * ================================================================== */
+
+describe('flow_run 은 전역 토글과 무관하게 게이트에서 강제 background 로 판정된다', () => {
+  const RR = TOOL_NAMES.RECORD_REPLAY;
+  let h: Harness;
+
+  beforeEach(() => {
+    h = installChrome();
+    // 재현 조건: 전역 무간섭 토글이 꺼져 있다.
+    h.localStore['backgroundWorkMode'] = false;
+  });
+
+  it('전역 OFF + tabId 생략이면 이 세션의 작업 탭을 주입한다', async () => {
+    const gate = await loadGate();
+    seedWorkTab(h, SESSION, 701);
+
+    const result = await gate.applyBackgroundModeGate(RR.FLOW_RUN, {
+      flowId: 'daily',
+      _mcpSessionId: SESSION,
+    });
+
+    // 예전에는 전역 토글이 꺼져 있다는 이유로 인자를 손대지 않았고, 그 결과 도구는
+    // tabId 없이 실행돼 작업 탭이 **있는데도** no_work_tab 으로 끝났다.
+    expect(result.args.tabId).toBe(701);
+    expect(result.args.background).toBe(true);
+    expect(result.args._effectiveBackgroundMode).toBe(true);
+    expect(result.noWorkTab).toBe(false);
+  });
+
+  it('전역 OFF + 작업 탭 없음이면 no_work_tab 으로 거절한다 (사용자 탭으로 흘리지 않는다)', async () => {
+    const gate = await loadGate();
+
+    const result = await gate.applyBackgroundModeGate(RR.FLOW_RUN, {
+      flowId: 'daily',
+      _mcpSessionId: SESSION,
+    });
+
+    expect(result.noWorkTab).toBe(true);
+    expect(result.args.tabId).toBeUndefined();
+  });
+
+  it('강제 목록은 flow_run 하나이고, 그 도구는 tabId 주입 대상이다', async () => {
+    const gate = await loadGate();
+    expect([...gate.FORCED_BACKGROUND_TOOLS]).toEqual([RR.FLOW_RUN]);
+    expect(gate.TAB_ID_INJECT_TOOLS.has(RR.FLOW_RUN)).toBe(true);
+  });
+});

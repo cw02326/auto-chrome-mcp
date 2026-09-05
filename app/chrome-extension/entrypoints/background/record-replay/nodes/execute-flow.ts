@@ -1,6 +1,6 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { getRunTabInfo } from '../engine/tab-context';
-import { sleepWithSignal } from '@/utils/tool-watchdog';
+import { abortErrorOf, sleepWithSignal } from '@/utils/tool-watchdog';
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -17,6 +17,15 @@ export const executeFlowNode: NodeRuntime<any> = {
     if (!inline) {
       const { runFlow } = await import('../flow-runner');
       // The sub-run inherits this run's pinned tab; it never resolves its own.
+      //
+      // It also inherits the parent's deadline, cancellation signal, execution
+      // context mode and lease token (2026-09-05 Codex final check, item 3).
+      // Passing only the tab dropped all four: the sub-run took the user's
+      // screen because it fell back to the global toggle, it queued behind the
+      // lease the parent itself was holding, and — worst — it kept running long
+      // after the parent had been aborted, because nothing inside it knew the
+      // caller had given up. A 60 second delay in a sub-flow outlived a parent
+      // whose budget was one second.
       await runFlow(
         flow,
         {
@@ -25,9 +34,21 @@ export const executeFlowNode: NodeRuntime<any> = {
           source: 'explicit',
           mcpSessionId: ctx.mcpSessionId,
           lane: ctx.lane,
+          effectiveBackgroundMode: ctx.effectiveBackgroundMode,
+          deadlineAt: ctx.deadlineAt,
+          leaseToken: ctx.leaseToken,
+          // Shared by reference on purpose: only the top-level run releases the
+          // leases (`releaseRunTabLeases` in tools/record-replay.ts). A sub-run
+          // with a set of its own would take leases under the parent's token
+          // that nobody ever gives back.
+          leasedTabIds: ctx.leasedTabIds,
         },
-        { args: s.args || {}, returnLogs: false },
+        { args: s.args || {}, returnLogs: false, signal: ctx.signal },
       );
+      // 하위 run 은 취소를 결과로 돌려주고 예외를 던지지 않는다. 여기서 다시 세우지 않으면
+      // 부모는 "스텝 하나가 성공했다" 로 읽고, 노드가 하나뿐인 흐름은 스텝 경계 확인도
+      // 지나지 않은 채 success 로 끝난다.
+      if (ctx.signal?.aborted === true) throw abortErrorOf(ctx.signal);
       return {} as ExecResult;
     }
     const { defaultEdgesOnly, topoOrder, mapDagNodeToStep, waitForNetworkIdle, waitForNavigation } =

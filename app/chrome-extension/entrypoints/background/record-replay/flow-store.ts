@@ -322,6 +322,54 @@ export function stripSensitiveDefaults(flow: Flow): Flow {
   };
 }
 
+/**
+ * 이미 저장된 발행 스냅샷에서 `sensitive` 변수의 기본값을 지운다 (한 번만).
+ *
+ * `stripSensitiveDefaults` 는 **앞으로 발행하는** 스냅샷만 막는다. 그 전에 발행된 레코드는
+ * IndexedDB 에 비밀번호·토큰 기본값을 평문으로 그대로 들고 있고, 사용자가 그 흐름을 다시
+ * 발행할 이유가 없으므로 영영 남는다. 워커가 뜰 때 한 번 걷어 낸다
+ * (2026-09-05 Codex 최종 확인 5).
+ *
+ * 되돌릴 수 없는 변경이지만 지우는 값이 "저장돼 있으면 안 되는 값" 이라 그대로 진행한다.
+ * 흐름 자체(draft)의 기본값은 건드리지 않는다 - 사이드패널에서 사용자가 편집하는 값이고,
+ * 실행되는 것은 스냅샷 쪽이다.
+ *
+ * @returns 실제로 고친 레코드 수.
+ */
+export async function migratePublishedSensitiveDefaults(): Promise<number> {
+  await ensureMigratedFromLocal();
+  const records = (await IndexedDbStorage.published.list()) as PublishedRecord[];
+  let fixed = 0;
+  for (const record of records) {
+    const snapshot = record.snapshot;
+    if (!snapshot) continue;
+    const cleaned = stripSensitiveDefaults(snapshot);
+    // 참조가 같으면 지울 것이 없었다는 뜻이다 (stripSensitiveDefaults 가 원본을 돌려준다).
+    if (cleaned === snapshot) continue;
+    await IndexedDbStorage.published.save({ ...record, snapshot: cleaned } as PublishedFlowInfo);
+    fixed += 1;
+  }
+  return fixed;
+}
+
+/** 워커 하나당 한 번만 돌게 잡아 두는 자리. */
+let sensitiveDefaultsMigration: Promise<number> | null = null;
+
+/**
+ * 위 마이그레이션을 워커 초기화 시 한 번 돌린다 (`initRecordReplayListeners`).
+ * 실패해도 배경 초기화를 막지 않는다 - 다음 워커 평가에서 다시 시도한다.
+ */
+export function ensurePublishedSensitiveDefaultsMigrated(): Promise<number> {
+  if (!sensitiveDefaultsMigration) {
+    sensitiveDefaultsMigration = migratePublishedSensitiveDefaults().catch((error) => {
+      console.warn('[record-replay] 발행 스냅샷 sensitive 기본값 정리 실패:', error);
+      sensitiveDefaultsMigration = null;
+      return 0;
+    });
+  }
+  return sensitiveDefaultsMigration;
+}
+
 export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedFlowInfo> {
   await ensureMigratedFromLocal();
   const info: PublishedFlowInfo = {

@@ -265,6 +265,36 @@ function nextLockNonce(): string {
 }
 
 /**
+ * 잠금 연산 직렬화 체인 (2026-09-05 Codex 최종 확인 4).
+ *
+ * 잠금 연산은 모두 `읽기 -> 판단 -> 쓰기` 인데, 그 사이가 전부 `await` 다. 하나의 워커
+ * 안에서도 두 흐름이 그 틈으로 서로를 앞질렀다:
+ *
+ *   하트비트가 `readRunLock()` 을 기다리는 사이에 실행이 끝나 `releaseRunLock` 이 돌면,
+ *   해제가 잠금을 지운 **뒤에** 하트비트가 돌아와 자기 nonce 로 잠금을 다시 만든다.
+ *   러너는 이미 끝났으니 그 잠금은 아무도 갱신하지 않고, 30초 stale 판정이 회수해 줄
+ *   때까지 다음 예약이 전부 `busy` 로 밀린다. (`void beatRunLock()` 이라 해제가 진행 중인
+ *   하트비트를 기다릴 방법도 없었다.)
+ *
+ * 그래서 획득·하트비트·해제·stale 회수를 하나의 promise 체인에 세운다. 앞선 연산이 끝나야
+ * 다음 연산이 저장소를 읽으므로, 해제는 진행 중인 하트비트가 끝난 상태를 보고, 하트비트는
+ * 이미 지워진 잠금을 되살리지 않는다(자기 nonce 가 없으므로 아무것도 하지 않는다).
+ *
+ * MV3 서비스 워커는 한 번에 하나뿐이라 이 체인이 곧 전체 직렬화다. 워커 사이의 경쟁은
+ * 예전과 같이 fenced 획득과 이력 claim 이 맡는다.
+ */
+let lockChain: Promise<unknown> = Promise.resolve();
+
+function withLockChain<T>(op: () => Promise<T>): Promise<T> {
+  const next = lockChain.then(op, op);
+  lockChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/**
  * 잠금을 잡는다. 잡았으면 nonce, 못 잡았으면 null.
  *
  * 2026-09-05 Codex 리뷰 4: 예전에는 "읽어서 비어 있으면 쓴다" 였다. 두 워커가 같은 순간에
@@ -286,6 +316,14 @@ async function acquireRunLock(
   runId: string,
   name: string,
   now: number = Date.now(),
+): Promise<string | null> {
+  return await withLockChain(() => acquireRunLockImpl(runId, name, now));
+}
+
+async function acquireRunLockImpl(
+  runId: string,
+  name: string,
+  now: number,
 ): Promise<string | null> {
   const current = await readRunLock();
   if (current && current.owner !== OWNER_TOKEN && lockIsAlive(current, now)) {
@@ -318,6 +356,11 @@ async function acquireRunLock(
  * 두 실행이 나란히 돈다.
  */
 async function releaseRunLock(nonce: string): Promise<void> {
+  // 체인에 세우는 것이 곧 "진행 중인 하트비트를 기다린다" 이다.
+  return await withLockChain(() => releaseRunLockImpl(nonce));
+}
+
+async function releaseRunLockImpl(nonce: string): Promise<void> {
   try {
     const current = await readRunLock();
     if (current && current.nonce === nonce) {
@@ -337,6 +380,12 @@ async function releaseRunLock(nonce: string): Promise<void> {
  * nonce 가 달라 아무것도 지우지 못해 잠금이 영영 남았다.
  */
 async function beatRunLock(runId: string, name: string): Promise<void> {
+  return await withLockChain(() => beatRunLockImpl(runId, name));
+}
+
+async function beatRunLockImpl(runId: string, name: string): Promise<void> {
+  // nonce 는 체인 차례가 왔을 때 읽는다. 해제가 먼저 돌았으면 이미 null 이라
+  // 지워진 잠금을 되살리지 않는다.
   const nonce = currentLockNonce;
   if (!nonce) return;
   try {
@@ -360,6 +409,10 @@ async function beatRunLock(runId: string, name: string): Promise<void> {
 
 /** 하트비트가 30초 넘게 멈춘 잠금을 회수한다 (워커가 죽은 경우). */
 async function releaseStaleRunLock(now: number = Date.now()): Promise<boolean> {
+  return await withLockChain(() => releaseStaleRunLockImpl(now));
+}
+
+async function releaseStaleRunLockImpl(now: number): Promise<boolean> {
   const current = await readRunLock();
   if (!current) return false;
   if (current.owner === OWNER_TOKEN) return false;

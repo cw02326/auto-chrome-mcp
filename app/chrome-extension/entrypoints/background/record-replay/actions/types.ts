@@ -806,6 +806,20 @@ export interface ActionExecutionContext {
    */
   mcpSessionId?: string;
   lane?: string;
+  /**
+   * Execution-context background mode of the run (`true` = never touch the
+   * user's screen, whatever the global toggle says).
+   *
+   * `actionToolArgs` puts it on every tool call a handler makes, so the actions
+   * path answers the same way as the legacy path (2026-09-05 Codex final check,
+   * item 2).
+   */
+  effectiveBackgroundMode?: true;
+  /**
+   * Absolute deadline (epoch ms) of the run, when the caller set one. Rides on
+   * every tool call a handler makes so long waits stop with the run.
+   */
+  deadlineAt?: number;
   /** 日志记录函数 */
   log: (message: string, level?: 'info' | 'warn' | 'error') => void;
   /** 截图函数 */

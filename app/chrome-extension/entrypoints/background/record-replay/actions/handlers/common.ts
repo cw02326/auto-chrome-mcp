@@ -19,6 +19,8 @@ import {
 import { tryResolveString } from '../registry';
 import type { ActionExecutionContext, ElementTarget, Resolvable, VariableStore } from '../types';
 import { LEASE_TOKEN_ARG } from '@/utils/tab-lock';
+import { EFFECTIVE_BACKGROUND_MODE_ARG } from '@/utils/background-mode';
+import { FLOW_DEADLINE_ARG } from '@/utils/tool-watchdog';
 import { acquireRunTabLease } from '../../engine/tab-context';
 
 // ================================
@@ -36,6 +38,13 @@ import { acquireRunTabLease } from '../../engine/tab-context';
  *
  * An explicit value in `args` wins: a step that deliberately addresses another
  * tab says so.
+ *
+ * It also carries the run's execution-context background mode and deadline, the
+ * same two keys `runToolArgs` puts on the legacy path. Without them the actions
+ * path lost both the moment a step ran through a handler: an MCP flow run fell
+ * back to the global toggle (so it could activate a tab and focus a window), and
+ * a tool call could block past the run's deadline inside a call nobody was
+ * waiting for any more (2026-09-05 Codex final check, item 2).
  */
 export function actionToolArgs<T extends Record<string, any>>(
   ctx: ActionExecutionContext,
@@ -47,6 +56,12 @@ export function actionToolArgs<T extends Record<string, any>>(
     out._mcpSessionId = ctx.mcpSessionId;
   }
   if (typeof ctx.lane === 'string' && out.lane === undefined) out.lane = ctx.lane;
+  // The caller cannot set this from a step: `handleCallTool` strips the key from
+  // incoming args, and only the engine puts it back here.
+  if (ctx.effectiveBackgroundMode === true) out[EFFECTIVE_BACKGROUND_MODE_ARG] = true;
+  if (typeof ctx.deadlineAt === 'number' && Number.isFinite(ctx.deadlineAt)) {
+    out[FLOW_DEADLINE_ARG] = ctx.deadlineAt;
+  }
   if (typeof ctx.leaseToken === 'string' && out[LEASE_TOKEN_ARG] === undefined) {
     out[LEASE_TOKEN_ARG] = ctx.leaseToken;
   }

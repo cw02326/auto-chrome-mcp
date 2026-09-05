@@ -109,6 +109,11 @@ export function execCtxToActionCtx(
     runId: options?.runId,
     mcpSessionId: ctx.mcpSessionId,
     lane: ctx.lane,
+    // The run's execution-context mode and deadline have to reach the handlers
+    // too, or a step that runs through the actions path silently loses both
+    // (2026-09-05 Codex final check, item 2).
+    effectiveBackgroundMode: ctx.effectiveBackgroundMode,
+    deadlineAt: ctx.deadlineAt,
     leaseToken: ctx.leaseToken,
     ownedTabIds: ctx.ownedTabIds,
     entryTabId: ctx.entryTabId,
