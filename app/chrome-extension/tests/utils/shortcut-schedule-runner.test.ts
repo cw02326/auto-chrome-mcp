@@ -194,7 +194,8 @@ function wireInvoker(
   handler: (call: AnyRecord) => any = () => okText({ success: true }),
   workTabId = 501,
 ) {
-  const sessionKey = h.runner.scheduledSessionKey(name);
+  // 2026-09-05 사이드패널 2단계: 버킷 키는 표시 이름이 아니라 scheduleId 로 만든다.
+  const sessionKey = h.runner.scheduledSessionKey(`shortcut:${name}`);
   h.runner.setScheduleToolInvoker(async (call: any) => {
     h.toolCalls.push({ name: call.name, args: call.args, mode: call.effectiveBackgroundMode });
     if (call.name === 'chrome_navigate') {
@@ -257,7 +258,7 @@ describe('7. 알람은 항상 일회성이고 실행 후 다시 무장된다', (
   it('예약하면 when 만 가진 알람이 하나 생긴다', async () => {
     wireInvoker(h, 'job');
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS);
-    expect(chrome.alarms.create).toHaveBeenCalledWith('mcp-shortcut::job', {
+    expect(chrome.alarms.create).toHaveBeenCalledWith('mcp-shortcut::shortcut:job', {
       when: saved.nextAt,
     });
     const [, info] = (chrome.alarms.create as any).mock.calls[0];
@@ -271,29 +272,29 @@ describe('7. 알람은 항상 일회성이고 실행 후 다시 무장된다', (
 
     // 알람은 due 시각에 울린다. 격자를 지금에 맞춰 그 상황을 만든다.
     const due = Date.now();
-    await h.schedule.patchSchedule('job', { nextAt: due, anchorAt: due - 60 * 60_000 });
+    await h.schedule.patchSchedule('shortcut:job', { nextAt: due, anchorAt: due - 60 * 60_000 });
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: due });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: due });
     await settle();
 
-    const record = await h.schedule.readSchedule('job');
+    const record = await h.schedule.readSchedule('shortcut:job');
     expect(record?.nextAt).toBeGreaterThan(due);
     expect(record?.lastStatus).toBe('success');
-    const armed = h.alarms.get('mcp-shortcut::job');
+    const armed = h.alarms.get('mcp-shortcut::shortcut:job');
     expect(armed?.scheduledTime).toBe(record?.nextAt);
   });
 
   it('실행은 scheduled 세션·lane·강제 background 로 돈다', async () => {
     wireInvoker(h, 'job');
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS);
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle();
 
     expect(h.toolCalls.length).toBeGreaterThan(0);
     for (const call of h.toolCalls) {
       expect(call.mode).toBe(true);
       expect(call.args._mcpSessionId).toBe('scheduled');
-      expect(call.args.lane).toBe('job');
+      expect(call.args.lane).toBe('shortcut:job');
       expect(call.args.background).toBe(true);
     }
   });
@@ -304,7 +305,7 @@ describe('8. 따라잡기는 1회이고 이중 실행이 없다', () => {
     wireInvoker(h, 'job');
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS);
     const overdue = Date.now() - 8 * 60 * 60_000;
-    await h.schedule.patchSchedule('job', { nextAt: overdue, anchorAt: overdue });
+    await h.schedule.patchSchedule('shortcut:job', { nextAt: overdue, anchorAt: overdue });
 
     await h.runner.reconcileSchedules();
     await settle();
@@ -312,9 +313,9 @@ describe('8. 따라잡기는 1회이고 이중 실행이 없다', () => {
     await settle();
 
     const map = await h.history.readHistory();
-    expect(map.job).toHaveLength(1);
-    expect(map.job[0].runId).toBe(h.schedule.scheduleRunId('job', overdue));
-    const record = await h.schedule.readSchedule('job');
+    expect(map['shortcut:job']).toHaveLength(1);
+    expect(map['shortcut:job'][0].runId).toBe(h.schedule.scheduleRunId('shortcut:job', overdue));
+    const record = await h.schedule.readSchedule('shortcut:job');
     expect(record?.nextAt).toBeGreaterThan(Date.now());
     expect(record!.nextAt).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
     expect(saved.nextAt).toBeGreaterThan(0);
@@ -324,14 +325,14 @@ describe('8. 따라잡기는 1회이고 이중 실행이 없다', () => {
     wireInvoker(h, 'job');
     await saveAndSchedule(h, 'job', BASIC_STEPS);
     const overdue = Date.now() - 60_000;
-    await h.schedule.patchSchedule('job', { nextAt: overdue, anchorAt: overdue });
+    await h.schedule.patchSchedule('shortcut:job', { nextAt: overdue, anchorAt: overdue });
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: overdue });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: overdue });
     void h.runner.reconcileSchedules();
     await settle();
 
     const map = await h.history.readHistory();
-    expect(map.job).toHaveLength(1);
+    expect(map['shortcut:job']).toHaveLength(1);
   });
 });
 
@@ -362,7 +363,7 @@ describe('12. reconcile 은 중단된 실행·잠금·알람을 되돌린다', (
     await h.runner.reconcileSchedules();
     await settle();
 
-    const armed = h.alarms.get('mcp-shortcut::job');
+    const armed = h.alarms.get('mcp-shortcut::shortcut:job');
     expect(armed?.scheduledTime).toBe(saved.nextAt);
   });
 
@@ -435,9 +436,10 @@ describe('13. 큐는 직렬이고 오래 밀린 항목은 실행하지 않는다
     }
 
     h.runner.setScheduleToolInvoker(async (call: any) => {
-      const lane = call.args?.lane;
+      // lane 은 이제 scheduleId 다 (`shortcut:a-job`). 표시 이름만 떼어 순서를 기록한다.
+      const lane = String(call.args?.lane ?? '').replace('shortcut:', '');
       if (call.name === 'chrome_navigate') {
-        const key = h.runner.scheduledSessionKey(lane);
+        const key = h.runner.scheduledSessionKey(`shortcut:${lane}`);
         const tabId = lane === 'a-job' ? 701 : 702;
         h.tabs.set(tabId, { id: tabId, windowId: 1, active: false });
         await h.workTab.addOwnedTab(tabId, key);
@@ -455,10 +457,10 @@ describe('13. 큐는 직렬이고 오래 밀린 항목은 실행하지 않는다
     });
 
     const due = Date.now();
-    expect(h.runner.enqueueScheduledRun('a-job', due)).toBe(true);
-    expect(h.runner.enqueueScheduledRun('b-job', due)).toBe(true);
-    // 같은 이름은 큐에 두 번 들어가지 않는다.
-    expect(h.runner.enqueueScheduledRun('a-job', due)).toBe(false);
+    expect(h.runner.enqueueScheduledRun('shortcut:a-job', due).queued).toBe(true);
+    expect(h.runner.enqueueScheduledRun('shortcut:b-job', due).queued).toBe(true);
+    // 같은 예약은 큐에 두 번 들어가지 않는다.
+    expect(h.runner.enqueueScheduledRun('shortcut:a-job', due).queued).toBe(false);
     await settle();
 
     expect(order).toEqual(['start:a-job']);
@@ -474,12 +476,12 @@ describe('13. 큐는 직렬이고 오래 밀린 항목은 실행하지 않는다
     await saveAndSchedule(h, 'job', BASIC_STEPS);
     const due = Date.now();
     const stale = Date.now() - (h.runner.QUEUE_MAX_WAIT_MS + 1_000);
-    h.runner.enqueueScheduledRun('job', due, stale);
+    h.runner.enqueueScheduledRun('shortcut:job', due, stale);
     await settle();
 
     const map = await h.history.readHistory();
-    expect(map.job).toHaveLength(1);
-    expect(map.job[0].status).toBe('skipped_queue');
+    expect(map['shortcut:job']).toHaveLength(1);
+    expect(map['shortcut:job'][0].status).toBe('skipped_queue');
     expect(h.toolCalls).toHaveLength(0);
     expect(h.notifications).toHaveLength(0);
   });
@@ -487,10 +489,11 @@ describe('13. 큐는 직렬이고 오래 밀린 항목은 실행하지 않는다
 
 describe('14. 알림은 연속 실패 1회째와 3회째만', () => {
   async function failOnce(name: string, dueOffset: number) {
-    const record = await h.schedule.readSchedule(name);
+    const scheduleId = `shortcut:${name}`;
+    const record = await h.schedule.readSchedule(scheduleId);
     const due = (record?.nextAt ?? Date.now()) + dueOffset;
-    await h.schedule.patchSchedule(name, { nextAt: due });
-    h.alarmListeners[0]({ name: `mcp-shortcut::${name}`, scheduledTime: due });
+    await h.schedule.patchSchedule(scheduleId, { nextAt: due });
+    h.alarmListeners[0]({ name: `mcp-shortcut::shortcut:${name}`, scheduledTime: due });
     await settle(80);
   }
 
@@ -500,7 +503,7 @@ describe('14. 알림은 연속 실패 1회째와 3회째만', () => {
 
     for (let i = 0; i < 5; i++) await failOnce('job', i + 1);
 
-    const record = await h.schedule.readSchedule('job');
+    const record = await h.schedule.readSchedule('shortcut:job');
     expect(record?.failStreak).toBe(5);
     expect(h.notifications).toHaveLength(2);
     // 본문 allowlist: 이름·코드·step 번호 뿐. 페이지 텍스트가 새지 않는다.
@@ -521,7 +524,7 @@ describe('14. 알림은 연속 실패 1회째와 3회째만', () => {
     expect(h.notifications).toHaveLength(1);
     shouldFail = false;
     await failOnce('job', 2);
-    expect((await h.schedule.readSchedule('job'))?.failStreak).toBe(0);
+    expect((await h.schedule.readSchedule('shortcut:job'))?.failStreak).toBe(0);
     shouldFail = true;
     await failOnce('job', 3);
     expect(h.notifications).toHaveLength(2);
@@ -547,12 +550,15 @@ describe('15. 타임존이 바뀌면 nextAt 을 다시 계산한다', () => {
   it('reconcile 이 새 존 기준으로 nextAt 과 서명을 갱신한다', async () => {
     wireInvoker(h, 'job');
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS, { daily: ['08:00'] });
-    await h.schedule.patchSchedule('job', { timeZone: 'Pacific/Kiritimati', offsetMinutes: -840 });
+    await h.schedule.patchSchedule('shortcut:job', {
+      timeZone: 'Pacific/Kiritimati',
+      offsetMinutes: -840,
+    });
 
     await h.runner.reconcileSchedules();
     await settle();
 
-    const record = await h.schedule.readSchedule('job');
+    const record = await h.schedule.readSchedule('shortcut:job');
     const signature = h.schedule.currentTimeZoneSignature();
     expect(record?.timeZone).toBe(signature.timeZone);
     expect(record?.offsetMinutes).toBe(signature.offsetMinutes);
@@ -573,7 +579,7 @@ describe('16. 실행 중 예약이 바뀌면 superseded 로 끝난다', () => {
     });
     const saved = await saveAndSchedule(h, 'job', BASIC_STEPS);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle();
 
     await h.shortcut.shortcutTool.execute({ action: 'unschedule', name: 'job' } as any);
@@ -581,10 +587,10 @@ describe('16. 실행 중 예약이 바뀌면 superseded 로 끝난다', () => {
     await settle(120);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].superseded).toBe(true);
-    expect(map.job[0].status).toBe('success');
-    expect(await h.schedule.readSchedule('job')).toBeNull();
-    expect(h.alarms.has('mcp-shortcut::job')).toBe(false);
+    expect(map['shortcut:job'][0].superseded).toBe(true);
+    expect(map['shortcut:job'][0].status).toBe('success');
+    expect(await h.schedule.readSchedule('shortcut:job')).toBeNull();
+    expect(h.alarms.has('mcp-shortcut::shortcut:job')).toBe(false);
   });
 });
 
@@ -606,11 +612,11 @@ describe('17. 사용자가 작업 탭을 가져가면 실행을 멈춘다', () =
       { tool: 'chrome_screenshot', args: {} },
     ]);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(80);
 
     const map = await h.history.readHistory();
-    expect(map.job[0].status).toBe('user_took_over_tab');
+    expect(map['shortcut:job'][0].status).toBe('user_took_over_tab');
     expect(h.removedTabs).not.toContain(workTabId);
     expect(h.tabs.has(workTabId)).toBe(true);
     expect(await h.workTab.getSessionScopedTabIds(sessionKey)).toHaveLength(0);
@@ -628,7 +634,7 @@ describe('19. report 파일은 secret 을 다시 검사하고 상한을 지킨�
       { saveExtra: { return: ['latest'] }, scheduleExtra: { report: true } },
     );
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::job', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({ name: 'mcp-shortcut::shortcut:job', scheduledTime: saved.nextAt });
     await settle(80);
 
     expect(h.downloads).toHaveLength(1);
@@ -644,7 +650,7 @@ describe('19. report 파일은 secret 을 다시 검사하고 상한을 지킨�
     expect(json.status).toBe('success');
 
     const map = await h.history.readHistory();
-    expect(map.job[0].report).toBe(h.downloads[0].filename);
+    expect(map['shortcut:job'][0].report).toBe(h.downloads[0].filename);
   });
 
   it('256KiB 를 넘는 항목은 통째로 빠지고 resultsTruncated 에 이름이 남는다', () => {
@@ -693,12 +699,15 @@ describe('통합: 설계 예시 (b) 게시판 확인', () => {
     );
     expect(saved.success).toBe(true);
 
-    h.alarmListeners[0]({ name: 'mcp-shortcut::board-watch', scheduledTime: saved.nextAt });
+    h.alarmListeners[0]({
+      name: 'mcp-shortcut::shortcut:board-watch',
+      scheduledTime: saved.nextAt,
+    });
     await settle(80);
 
     const map = await h.history.readHistory();
-    expect(map['board-watch']).toHaveLength(1);
-    const run = map['board-watch'][0];
+    expect(map['shortcut:board-watch']).toHaveLength(1);
+    const run = map['shortcut:board-watch'][0];
     expect(run.status).toBe('success');
     expect(run.trigger).toBe('scheduled');
     expect(run.results?.latest).toMatchObject({ values: { id: '10423' } });
@@ -714,11 +723,22 @@ describe('통합: 설계 예시 (b) 게시판 확인', () => {
     const summary = body(
       await h.shortcut.shortcutTool.execute({ action: 'history', limit: 20 } as any),
     );
-    expect(summary.runs[0].name).toBe('board-watch');
+    // 이력 키는 scheduleId 이고, 사람이 읽는 이름은 label 로 함께 온다.
+    expect(summary.runs[0].name).toBe('shortcut:board-watch');
+    expect(summary.runs[0].label).toBe('board-watch');
+    expect(summary.runs[0].target).toEqual({ kind: 'shortcut', name: 'board-watch' });
     expect(summary.runs[0].status).toBe('success');
     expect(summary.runs[0].results).toBeUndefined();
 
     const schedules = body(await h.shortcut.shortcutTool.execute({ action: 'schedules' } as any));
-    expect(schedules.schedules[0]).toMatchObject({ name: 'board-watch', lastStatus: 'success' });
+    expect(schedules.schedules[0]).toMatchObject({
+      scheduleId: 'shortcut:board-watch',
+      name: 'board-watch',
+      label: 'board-watch',
+      kind: 'shortcut',
+      target: { kind: 'shortcut', name: 'board-watch' },
+      enabled: true,
+      lastStatus: 'success',
+    });
   });
 });

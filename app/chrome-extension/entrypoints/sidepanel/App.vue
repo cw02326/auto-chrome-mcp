@@ -24,6 +24,10 @@
         :search="search"
         :total-count="flows.length"
         :statuses="flowStatuses"
+        :schedules="schedulesByFlowId"
+        :last-success-at="lastSuccessByFlowId"
+        :filter="flowFilter"
+        :sites="filterSites"
         @refresh="handleWorkflowRefresh"
         @create="createFlow"
         @run="run"
@@ -32,11 +36,52 @@
         @export="exportFlow"
         @publish="publish"
         @unpublish="unpublish"
+        @schedule="openScheduleForm"
+        @import="importOpen = true"
         @update:only-bound="onlyBound = $event"
         @update:search="search = $event"
+        @update:filter="flowFilter = $event"
         @toggle-run="toggleRun"
       />
     </div>
+
+    <!-- 매일 작업 탭: 예약 목록과 그 실행 이력 -->
+    <div v-show="activeTab === 'daily'" class="h-full flex flex-col">
+      <DailyView
+        class="flex-1 min-h-0"
+        :schedules="dailySchedules.schedules.value"
+        :error="dailySchedules.error.value"
+        :reload-key="historyReloadKey"
+        @refresh="refreshDaily"
+        @edit="editSchedule"
+        @remove="removeSchedule"
+        @toggle="toggleSchedule"
+        @run-now="runScheduleNow"
+        @go-flows="handleTabChange('workflows')"
+        @toast="showToast($event.text, $event.kind)"
+      />
+    </div>
+
+    <!-- 예약 폼: 흐름 카드의 예약 버튼과 매일 작업 탭의 수정이 같은 화면을 연다 -->
+    <DailyScheduleForm
+      v-if="scheduleForm"
+      :target="scheduleForm.target"
+      :label="scheduleForm.label"
+      :existing="scheduleForm.existing"
+      :variables="scheduleForm.variables"
+      :block-reason="scheduleForm.blockReason"
+      @cancel="scheduleForm = null"
+      @save="saveSchedule"
+      @open-wizard="openWizardFromScheduleForm"
+    />
+
+    <!-- 가져오기 -->
+    <ImportFlowDialog
+      v-if="importOpen"
+      @close="importOpen = false"
+      @imported="handleImported"
+      @toast="showToast($event.text, $event.kind)"
+    />
 
     <!-- 저장 화면(마법사): 녹화 중지 직후와 카드의 편집 버튼이 같은 화면을 연다 -->
     <SaveFlowWizard
@@ -350,21 +395,42 @@ import {
   RecordingBar,
   SaveFlowWizard,
   RunVariablesDialog,
+  ImportFlowDialog,
 } from './components/workflows';
+import { DailyView, DailyScheduleForm } from './components/daily';
 import { useAgentTheme } from './composables/useAgentTheme';
 import { useWorkflowsV3, type FlowLite } from './composables/useWorkflowsV3';
+import { useDailySchedules } from './composables/useDailySchedules';
 import { useRecorder } from './composables/useRecorder';
 import { requiredRunVariables, type WizardVariableDef } from './utils/flow-wizard';
+import {
+  flowScheduleBlockReason,
+  runNowMessageKey,
+  schedulableVariables,
+  type FlowScheduleBlockReason,
+} from './utils/daily-form';
+import * as daily from './utils/daily-messages';
+import type { PutScheduleInput, ScheduleTarget, ScheduleView } from './utils/daily-messages';
+import { mergeFlowOutcomes } from './utils/flow-outcomes';
+import { parseScheduleId } from '@/utils/shortcut-schedule';
+import {
+  EMPTY_FLOW_FILTER,
+  collectSites,
+  filterFlows,
+  type FlowFilterState,
+} from './utils/flow-filters';
 import { isRecordableUrl, parsePanelDeepLink, sidepanelPath } from './utils/panel-deeplink';
 
 // Agent theme for consistent styling
 const { theme: currentTheme, initTheme } = useAgentTheme();
 
 // Tab state - default to workflows (v1.0.36: agent-chat removed)
-const activeTab = ref<'workflows' | 'element-markers'>('workflows');
+// 2026-09-05 2단계: 매일 작업(daily) 탭이 늘었다.
+type PanelTab = 'workflows' | 'daily' | 'element-markers';
+const activeTab = ref<PanelTab>('workflows');
 
 // Handle tab change and update URL for deep linking
-function handleTabChange(tab: 'workflows' | 'element-markers') {
+function handleTabChange(tab: PanelTab) {
   activeTab.value = tab;
   // Update URL params for deep link
   const url = new URL(window.location.href);
@@ -394,6 +460,96 @@ const runAskFlowId = ref<string | null>(null);
 
 // 흐름별 마지막 실행 결과. 카드에 그대로 표시한다.
 const flowStatuses = ref<Record<string, { kind: 'running' | 'ok' | 'error'; text: string }>>({});
+
+// ==================== 매일 작업(예약) ====================
+
+/**
+ * 예약 목록. 진실은 백그라운드에 있고 이 컴포저블이 방송·폴링으로 따라간다.
+ *
+ * 탭 전환은 `v-show` 라 다른 탭을 봐도 문서는 계속 보인다. 그래서 "지금 매일 작업 탭인가"
+ * 를 따로 넘겨 폴링만 멈춘다 (방송 구독은 유지한다).
+ */
+const dailyTabActive = computed(() => activeTab.value === 'daily');
+const dailySchedules = useDailySchedules({ active: dailyTabActive });
+
+/**
+ * 예약 실행 이력(전역).
+ *
+ * 카드의 마지막 성공·최근 실패는 수동 실행만으로는 알 수 없다. 밤새 예약이 돌았으면 그
+ * 결과도 함께 봐야 한다. 예약을 지워도 이력은 남으므로 목록이 아니라 이력을 읽는다.
+ */
+const scheduledRuns = ref<daily.DailyRunRecord[]>([]);
+
+/** 카드 배지가 볼 만큼만 읽는다. 상세는 매일 작업 탭이 예약별로 다시 조회한다. */
+const SCHEDULED_HISTORY_PEEK = 100;
+
+async function refreshScheduledRuns(): Promise<void> {
+  try {
+    const page = await daily.queryHistory({ limit: SCHEDULED_HISTORY_PEEK });
+    scheduledRuns.value = page.runs;
+  } catch {
+    // 백그라운드가 아직 없거나 실패해도 카드는 수동 이력만으로 그려진다.
+  }
+}
+
+/** 예약 이력의 저장소 키(scheduleId)를 흐름 id 로 되돌린다. 단축 예약이면 null 이다. */
+function flowIdOfScheduleId(scheduleId: string): string | null {
+  const target = parseScheduleId(scheduleId);
+  return target && target.kind === 'flow' ? target.flowId : null;
+}
+
+/** 예약 폼에 지금 무엇을 띄우고 있는가. */
+const scheduleForm = ref<{
+  target: ScheduleTarget;
+  label: string;
+  existing: ScheduleView | null;
+  variables: WizardVariableDef[];
+  blockReason: FlowScheduleBlockReason | null;
+  /** 시작 주소가 없어 저장 화면으로 보내야 할 때 쓸 흐름 id. */
+  flowId?: string;
+} | null>(null);
+
+/** 가져오기 대화상자. */
+const importOpen = ref(false);
+
+/**
+ * 값이 바뀌면 펼쳐 둔 실행 이력을 다시 읽는다.
+ *
+ * 화면에서 올린 값과 백그라운드 방송 번호(`changeSeq`)를 더한다. 방송은 예약 목록만
+ * 갱신하므로, 이것을 함께 보지 않으면 펼쳐 둔 이력이 옛 내용 그대로 남는다.
+ */
+const localReloadKey = ref(0);
+const historyReloadKey = computed(() => localReloadKey.value + dailySchedules.changeSeq.value);
+
+/** 흐름 카드 필터 바 상태. */
+const flowFilter = ref<FlowFilterState>({ ...EMPTY_FLOW_FILTER });
+
+const schedulesByFlowId = computed(() => {
+  const map: Record<string, ScheduleView> = {};
+  for (const schedule of dailySchedules.schedules.value) {
+    if (schedule.target?.kind === 'flow' && schedule.target.flowId) {
+      map[schedule.target.flowId] = schedule;
+    }
+  }
+  return map;
+});
+
+/**
+ * 흐름별 마지막 결과. 수동 실행 이력과 예약 실행 이력을 시각순으로 합친다.
+ *
+ * 합치는 규칙은 `utils/flow-outcomes.ts` 의 순수 함수가 들고 있다.
+ */
+const flowOutcomes = computed(() =>
+  mergeFlowOutcomes(runs.value, scheduledRuns.value, flowIdOfScheduleId),
+);
+
+/** 흐름별 마지막 성공 시각. */
+const lastSuccessByFlowId = computed(() => flowOutcomes.value.lastSuccessAt);
+
+/** 마지막 실행이 실패로 끝난 흐름. "최근 실패" 필터가 본다. */
+const failedFlowIds = computed(() => flowOutcomes.value.failedFlowIds);
+
+const filterSites = computed(() => collectSites(flows.value));
 
 // 토스트 한 개
 const toast = ref<{ text: string; kind: 'ok' | 'error' } | null>(null);
@@ -480,7 +636,12 @@ const groupedMarkers = computed(() => {
 const totalMarkersCount = computed(() => filteredMarkers.value.length);
 
 const filtered = computed(() => {
-  const list = onlyBound.value ? flows.value.filter(isBoundToCurrent) : flows.value;
+  const bound = onlyBound.value ? flows.value.filter(isBoundToCurrent) : flows.value;
+  // 필터 바(사이트·발행됨·예약 있음·최근 실패)를 먼저 적용하고 검색어로 다시 좁힌다.
+  const list = filterFlows(bound, flowFilter.value, {
+    scheduledFlowIds: dailySchedules.scheduledFlowIds.value,
+    failedFlowIds: failedFlowIds.value,
+  });
   const q = search.value.trim().toLowerCase();
   if (!q) return list;
   return list.filter((f) => {
@@ -512,7 +673,8 @@ function isBoundToCurrent(f: FlowLite) {
 
 // V3 Workflows methods - delegating to composable
 async function handleWorkflowRefresh() {
-  await workflowsV3.refresh();
+  // 카드 배지가 예약 실행 결과까지 보여 주려면 두 이력을 함께 다시 읽어야 한다.
+  await Promise.all([workflowsV3.refresh(), refreshScheduledRuns()]);
 }
 
 /**
@@ -620,6 +782,111 @@ async function executeFlow(id: string, args: Record<string, string>) {
 /** 카드의 편집 버튼. 저장 화면(마법사)을 그 흐름으로 연다. */
 function edit(id: string) {
   wizardFlowId.value = id;
+}
+
+// ==================== 예약 ====================
+
+/**
+ * 흐름 카드의 예약 버튼.
+ *
+ * 폼을 열기 전에 예약할 수 있는 흐름인지 먼저 본다(발행됨·시작 주소·민감 변수). 저장을
+ * 눌러 본 뒤 백그라운드가 거절하면 사용자는 이유를 모른 채 저장이 안 되는 것만 본다.
+ */
+async function openScheduleForm(flowId: string) {
+  try {
+    const lite = flows.value.find((f) => f.id === flowId) || null;
+    const flow = await workflowsV3.getFlowById(flowId);
+    const blockReason = flowScheduleBlockReason(flow, !!lite?.published);
+    scheduleForm.value = {
+      target: { kind: 'flow', flowId },
+      label: flow?.name || lite?.name || flowId,
+      existing: schedulesByFlowId.value[flowId] || null,
+      variables: schedulableVariables(flow),
+      blockReason,
+      flowId,
+    };
+  } catch (e) {
+    showToast(getMessage('sidepanel_daily_save_failed', [errorText(e)]), 'error');
+  }
+}
+
+/** 매일 작업 목록에서 예약 수정. 흐름이면 그 흐름의 변수도 함께 읽는다. */
+async function editSchedule(schedule: ScheduleView) {
+  if (schedule.target?.kind === 'flow') {
+    await openScheduleForm(schedule.target.flowId);
+    if (scheduleForm.value) scheduleForm.value.existing = schedule;
+    return;
+  }
+  scheduleForm.value = {
+    target: schedule.target,
+    label: schedule.label,
+    existing: schedule,
+    variables: [],
+    blockReason: null,
+  };
+}
+
+/** 시작 주소가 없어 예약할 수 없을 때, 저장 화면을 열어 바로 고치게 한다. */
+function openWizardFromScheduleForm() {
+  const flowId = scheduleForm.value?.flowId;
+  scheduleForm.value = null;
+  if (flowId) wizardFlowId.value = flowId;
+}
+
+async function saveSchedule(payload: PutScheduleInput) {
+  try {
+    await dailySchedules.save(payload);
+    scheduleForm.value = null;
+    localReloadKey.value += 1;
+    showToast(getMessage('sidepanel_daily_saved'), 'ok');
+  } catch (e) {
+    showToast(getMessage('sidepanel_daily_save_failed', [errorText(e)]), 'error');
+  }
+}
+
+async function removeSchedule(scheduleId: string) {
+  const ok = confirm(getMessage('sidepanel_daily_remove_confirm'));
+  if (!ok) return;
+  try {
+    await dailySchedules.remove(scheduleId);
+    showToast(getMessage('sidepanel_daily_removed'), 'ok');
+  } catch (e) {
+    showToast(getMessage('sidepanel_daily_save_failed', [errorText(e)]), 'error');
+  }
+}
+
+async function toggleSchedule(payload: { scheduleId: string; enabled: boolean }) {
+  try {
+    await dailySchedules.setEnabled(payload.scheduleId, payload.enabled);
+  } catch (e) {
+    showToast(getMessage('sidepanel_daily_toggle_failed', [errorText(e)]), 'error');
+    await dailySchedules.refresh();
+  }
+}
+
+/** 지금 실행. 예약 큐를 그대로 타므로 다른 실행과 겹치지 않는다. */
+async function runScheduleNow(scheduleId: string) {
+  try {
+    const result = await dailySchedules.runNow(scheduleId);
+    localReloadKey.value += 1;
+    void refreshScheduledRuns();
+    // 같은 예약이 이미 줄을 서 있으면 새로 넣지 않는다. 그때 "시작했다" 고 말하면 안 된다.
+    showToast(getMessage(runNowMessageKey(result.queued)), 'ok');
+  } catch (e) {
+    showToast(getMessage('sidepanel_daily_run_failed', [errorText(e)]), 'error');
+  }
+}
+
+async function refreshDaily() {
+  await Promise.all([dailySchedules.refresh(), refreshScheduledRuns()]);
+  localReloadKey.value += 1;
+}
+
+/** 가져오기가 끝났다. 검색어를 비워 새 카드가 곧바로 보이게 한다. */
+async function handleImported() {
+  importOpen.value = false;
+  search.value = '';
+  await handleWorkflowRefresh();
 }
 
 /** 흐름은 녹화로 만든다. 빈 목록의 버튼도 녹화를 시작한다. */
@@ -969,9 +1236,20 @@ watch(markerSearch, (query) => {
   expandedDomains.value = domainsToExpand;
 });
 
+// 예약·이력이 바뀌었다는 방송이 오면 카드 배지 재료도 다시 읽는다.
+watch(
+  () => dailySchedules.changeSeq.value,
+  () => {
+    void refreshScheduledRuns();
+  },
+);
+
 onMounted(async () => {
   // Initialize theme
   await initTheme();
+
+  // 카드의 마지막 성공·최근 실패는 예약 이력도 함께 본다.
+  void refreshScheduledRuns();
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -984,6 +1262,9 @@ onMounted(async () => {
   if (deepLink.tab === 'element-markers') {
     activeTab.value = 'element-markers';
     await loadMarkers();
+  } else if (deepLink.tab === 'daily') {
+    // 예약 실패 알림을 눌렀을 때와 팝업의 "매일 작업" 버튼이 이 길로 들어온다.
+    activeTab.value = 'daily';
   } else if (deepLink.tab === 'workflows') {
     activeTab.value = 'workflows';
   }

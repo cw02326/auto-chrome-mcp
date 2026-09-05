@@ -91,14 +91,28 @@ export const RUN_STATUSES: readonly RunStatus[] = ['running', ...FINAL_RUN_STATU
 export type RunTrigger = 'manual' | 'scheduled';
 
 export interface FailedStep {
-  /** 0-based 선언 step 인덱스. */
+  /** 0-based 선언 step 인덱스. 흐름 실행은 실패한 로그 항목의 순번이다. */
   index: number;
   tool: string;
+  /**
+   * 흐름 실행에서 실패한 노드 id (2026-09-05 사이드패널 2단계 D).
+   * 단축 실행에는 없다 - 단축의 단위는 도구 호출이라 `tool` 로 충분하다.
+   */
+  stepId?: string;
 }
 
 export interface RunRecord {
   runId: string;
+  /**
+   * 이력 저장소의 키.
+   *
+   * 예약 실행은 `scheduleId`(`shortcut:<enc>` / `flow:<enc>`)이고, `chrome_shortcut` 의
+   * 수동 실행은 예전 그대로 단축 이름이다. 두 공간이 겹치지 않도록 예약 쪽에만 접두가
+   * 붙는다 (2026-09-05 Codex 설계 검토 1).
+   */
   name: string;
+  /** 화면에 보여 줄 이름. 예약이 지워진 뒤에도 이력을 읽을 수 있게 남기는 스냅샷이다. */
+  label?: string;
   trigger: RunTrigger;
   status: RunStatus;
   startedAt: number;
@@ -130,6 +144,7 @@ export interface RunRecord {
 export interface RunSummary {
   runId: string;
   name: string;
+  label?: string;
   trigger: RunTrigger;
   status: RunStatus;
   startedAt: number;
@@ -265,6 +280,7 @@ export function summarizeRecord(record: RunRecord): RunSummary {
     startedAt: record.startedAt,
     resultsChars: resultsCharsOf(record),
   };
+  if (record.label !== undefined) summary.label = record.label;
   if (record.durationMs !== undefined) summary.durationMs = record.durationMs;
   if (record.failedStep !== undefined) summary.failedStep = record.failedStep;
   if (record.errorCode !== undefined) summary.errorCode = record.errorCode;
@@ -629,6 +645,8 @@ export async function readHistory(): Promise<HistoryMap> {
 export interface StartRunInput {
   runId: string;
   name: string;
+  /** 표시용 이름 (예약 실행만 싣는다). */
+  label?: string;
   trigger: RunTrigger;
   startedAt?: number;
   revision?: number;
@@ -649,6 +667,7 @@ export async function startRunRecord(input: StartRunInput): Promise<RunRecord> {
     status: 'running',
     startedAt: input.startedAt ?? Date.now(),
   };
+  if (input.label !== undefined) record.label = input.label;
   if (input.revision !== undefined) record.revision = input.revision;
   if (input.generation !== undefined) record.generation = input.generation;
 

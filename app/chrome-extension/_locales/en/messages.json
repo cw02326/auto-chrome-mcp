@@ -1246,5 +1246,707 @@
         "example": "2"
       }
     }
+  },
+  "sidepanel_daily_tab_title": {
+    "message": "Daily tasks",
+    "description": "매일 작업 탭 이름"
+  },
+  "sidepanel_daily_tab_desc": {
+    "message": "Scheduled tasks and run history",
+    "description": "매일 작업 탭 설명"
+  },
+  "sidepanel_daily_title": {
+    "message": "Daily tasks",
+    "description": "매일 작업 화면 제목"
+  },
+  "sidepanel_daily_count": {
+    "message": "$COUNT$ schedules",
+    "description": "예약 개수",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_daily_refresh": {
+    "message": "Refresh",
+    "description": "새로 고침 버튼"
+  },
+  "sidepanel_daily_chrome_note": {
+    "message": "Schedules run only while Chrome is open. Runs due while Chrome was closed are skipped",
+    "description": "예약 실행 조건 안내"
+  },
+  "sidepanel_daily_empty_title": {
+    "message": "No scheduled tasks yet",
+    "description": "매일 작업 빈 상태 제목"
+  },
+  "sidepanel_daily_empty_hint": {
+    "message": "Start from the schedule button on a flow card",
+    "description": "매일 작업 빈 상태 안내"
+  },
+  "sidepanel_daily_empty_action": {
+    "message": "Go to flows",
+    "description": "흐름 탭으로 가는 버튼"
+  },
+  "sidepanel_daily_kind_flow": {
+    "message": "Flow",
+    "description": "예약 대상 종류: 흐름"
+  },
+  "sidepanel_daily_kind_shortcut": {
+    "message": "Shortcut",
+    "description": "예약 대상 종류: 단축"
+  },
+  "sidepanel_daily_next_run": {
+    "message": "Next run $TIME$",
+    "description": "다음 실행 시각",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_paused": {
+    "message": "Off",
+    "description": "예약이 꺼져 있음"
+  },
+  "sidepanel_daily_enable_label": {
+    "message": "On",
+    "description": "예약 켜기 스위치"
+  },
+  "sidepanel_daily_last_none": {
+    "message": "No runs yet",
+    "description": "실행 기록 없음"
+  },
+  "sidepanel_daily_expand": {
+    "message": "Expand",
+    "description": "이력 펼치기"
+  },
+  "sidepanel_daily_collapse": {
+    "message": "Collapse",
+    "description": "이력 접기"
+  },
+  "sidepanel_daily_run_now": {
+    "message": "Run now",
+    "description": "지금 실행 버튼"
+  },
+  "sidepanel_daily_edit": {
+    "message": "Edit schedule",
+    "description": "예약 수정 버튼"
+  },
+  "sidepanel_daily_remove": {
+    "message": "Delete schedule",
+    "description": "예약 삭제 버튼"
+  },
+  "sidepanel_daily_remove_confirm": {
+    "message": "Delete this schedule? Run history is kept",
+    "description": "예약 삭제 확인"
+  },
+  "sidepanel_daily_removed": {
+    "message": "Schedule deleted",
+    "description": "예약 삭제 결과"
+  },
+  "sidepanel_daily_saved": {
+    "message": "Schedule saved",
+    "description": "예약 저장 결과"
+  },
+  "sidepanel_daily_save_failed": {
+    "message": "Could not save the schedule: $REASON$",
+    "description": "예약 저장 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no response from background"
+      }
+    }
+  },
+  "sidepanel_daily_toggle_failed": {
+    "message": "Could not switch the schedule: $REASON$",
+    "description": "예약 토글 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no response from background"
+      }
+    }
+  },
+  "sidepanel_daily_run_started": {
+    "message": "Queued the run",
+    "description": "지금 실행 시작"
+  },
+  "sidepanel_daily_run_failed": {
+    "message": "Could not start the run: $REASON$",
+    "description": "지금 실행 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no response from background"
+      }
+    }
+  },
+  "sidepanel_daily_summary_daily": {
+    "message": "Daily at $TIMES$",
+    "description": "매일 예약 요약",
+    "placeholders": {
+      "times": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_summary_days": {
+    "message": "$DAYS$ at $TIMES$",
+    "description": "요일 예약 요약",
+    "placeholders": {
+      "days": {
+        "content": "$1",
+        "example": "월 수 금"
+      },
+      "times": {
+        "content": "$2",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_summary_unknown": {
+    "message": "No schedule details",
+    "description": "예약 표현을 읽지 못함"
+  },
+  "sidepanel_daily_every_15m": {
+    "message": "Every 15 minutes",
+    "description": "간격 15분"
+  },
+  "sidepanel_daily_every_1h": {
+    "message": "Every hour",
+    "description": "간격 1시간"
+  },
+  "sidepanel_daily_every_6h": {
+    "message": "Every 6 hours",
+    "description": "간격 6시간"
+  },
+  "sidepanel_daily_every_24h": {
+    "message": "Every 24 hours",
+    "description": "간격 24시간"
+  },
+  "sidepanel_daily_day_sun": {
+    "message": "Sun",
+    "description": "요일: 일"
+  },
+  "sidepanel_daily_day_mon": {
+    "message": "Mon",
+    "description": "요일: 월"
+  },
+  "sidepanel_daily_day_tue": {
+    "message": "Tue",
+    "description": "요일: 화"
+  },
+  "sidepanel_daily_day_wed": {
+    "message": "Wed",
+    "description": "요일: 수"
+  },
+  "sidepanel_daily_day_thu": {
+    "message": "Thu",
+    "description": "요일: 목"
+  },
+  "sidepanel_daily_day_fri": {
+    "message": "Fri",
+    "description": "요일: 금"
+  },
+  "sidepanel_daily_day_sat": {
+    "message": "Sat",
+    "description": "요일: 토"
+  },
+  "sidepanel_daily_next_none": {
+    "message": "Not scheduled",
+    "description": "다음 실행 없음"
+  },
+  "sidepanel_daily_next_soon": {
+    "message": "Soon",
+    "description": "다음 실행이 곧"
+  },
+  "sidepanel_daily_next_in_minutes": {
+    "message": "in $MIN$ min",
+    "description": "다음 실행까지 분",
+    "placeholders": {
+      "min": {
+        "content": "$1",
+        "example": "12"
+      }
+    }
+  },
+  "sidepanel_daily_next_today": {
+    "message": "today $TIME$",
+    "description": "오늘 실행",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_next_tomorrow": {
+    "message": "tomorrow $TIME$",
+    "description": "내일 실행",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_status_success": {
+    "message": "Success",
+    "description": "실행 상태: 성공"
+  },
+  "sidepanel_daily_status_failed": {
+    "message": "Failed",
+    "description": "실행 상태: 실패"
+  },
+  "sidepanel_daily_status_stopped": {
+    "message": "Stopped",
+    "description": "실행 상태: 중단"
+  },
+  "sidepanel_daily_status_timeout": {
+    "message": "Timed out",
+    "description": "실행 상태: 시간 초과"
+  },
+  "sidepanel_daily_status_interrupted": {
+    "message": "Interrupted",
+    "description": "실행 상태: 끊김"
+  },
+  "sidepanel_daily_status_skipped_queue": {
+    "message": "Skipped in queue",
+    "description": "실행 상태: 대기 중 건너뜀"
+  },
+  "sidepanel_daily_status_login_required": {
+    "message": "Login required",
+    "description": "실행 상태: 로그인 필요"
+  },
+  "sidepanel_daily_status_user_took_over_tab": {
+    "message": "You used the tab",
+    "description": "실행 상태: 사용자가 탭 사용"
+  },
+  "sidepanel_daily_status_running": {
+    "message": "Running",
+    "description": "실행 상태: 실행 중"
+  },
+  "sidepanel_daily_history_filter": {
+    "message": "Status",
+    "description": "이력 상태 필터 이름"
+  },
+  "sidepanel_daily_history_all": {
+    "message": "All",
+    "description": "이력 상태 필터: 전체"
+  },
+  "sidepanel_daily_history_empty": {
+    "message": "No run history",
+    "description": "이력 없음"
+  },
+  "sidepanel_daily_history_loading": {
+    "message": "Loading",
+    "description": "이력 읽는 중"
+  },
+  "sidepanel_daily_history_failed": {
+    "message": "Could not read history: $REASON$",
+    "description": "이력 읽기 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no response from background"
+      }
+    }
+  },
+  "sidepanel_daily_history_more": {
+    "message": "Show $COUNT$ more",
+    "description": "이력 더 보기",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_daily_history_step": {
+    "message": "Failed at step $INDEX$ ($TOOL$)",
+    "description": "실패 단계",
+    "placeholders": {
+      "index": {
+        "content": "$1",
+        "example": "2"
+      },
+      "tool": {
+        "content": "$2",
+        "example": "chrome_click_element"
+      }
+    }
+  },
+  "sidepanel_daily_history_error": {
+    "message": "Error: $MESSAGE$",
+    "description": "실행 오류",
+    "placeholders": {
+      "message": {
+        "content": "$1",
+        "example": "element not found"
+      }
+    }
+  },
+  "sidepanel_daily_history_duration": {
+    "message": "took $SEC$s",
+    "description": "걸린 시간",
+    "placeholders": {
+      "sec": {
+        "content": "$1",
+        "example": "4.2"
+      }
+    }
+  },
+  "sidepanel_daily_history_trigger_manual": {
+    "message": "Manual",
+    "description": "수동 실행"
+  },
+  "sidepanel_daily_history_trigger_scheduled": {
+    "message": "Scheduled",
+    "description": "예약 실행"
+  },
+  "sidepanel_daily_rerun": {
+    "message": "Run again",
+    "description": "다시 실행 버튼"
+  },
+  "sidepanel_daily_open_screenshot": {
+    "message": "Open screenshot",
+    "description": "스크린샷 열기 버튼"
+  },
+  "sidepanel_daily_screenshot_missing": {
+    "message": "Screenshot file not found",
+    "description": "스크린샷 없음"
+  },
+  "sidepanel_daily_screenshot_alt": {
+    "message": "Failure screenshot",
+    "description": "실패 화면 대체 문구"
+  },
+  "sidepanel_daily_form_title": {
+    "message": "Schedule $NAME$",
+    "description": "예약 폼 제목",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "주문 확인"
+      }
+    }
+  },
+  "sidepanel_daily_form_mode": {
+    "message": "Repeat",
+    "description": "반복 방식"
+  },
+  "sidepanel_daily_form_mode_daily": {
+    "message": "Every day",
+    "description": "반복 방식: 매일"
+  },
+  "sidepanel_daily_form_mode_weekdays": {
+    "message": "Pick days",
+    "description": "반복 방식: 요일 선택"
+  },
+  "sidepanel_daily_form_mode_every": {
+    "message": "Interval",
+    "description": "반복 방식: 간격"
+  },
+  "sidepanel_daily_form_times": {
+    "message": "Times",
+    "description": "시각 목록"
+  },
+  "sidepanel_daily_form_add_time": {
+    "message": "Add time",
+    "description": "시각 추가 버튼"
+  },
+  "sidepanel_daily_form_remove_time": {
+    "message": "Remove",
+    "description": "시각 삭제 버튼"
+  },
+  "sidepanel_daily_form_days": {
+    "message": "Days",
+    "description": "요일 선택"
+  },
+  "sidepanel_daily_form_every": {
+    "message": "Interval",
+    "description": "간격 선택"
+  },
+  "sidepanel_daily_form_notify": {
+    "message": "Notify me when a run fails",
+    "description": "알림 옵션"
+  },
+  "sidepanel_daily_form_report": {
+    "message": "Save results to a file",
+    "description": "결과 파일 옵션"
+  },
+  "sidepanel_daily_form_enabled": {
+    "message": "Turn the schedule on",
+    "description": "예약 켜기 옵션"
+  },
+  "sidepanel_daily_form_variables": {
+    "message": "Variable values",
+    "description": "변수 값 입력"
+  },
+  "sidepanel_daily_form_save": {
+    "message": "Save schedule",
+    "description": "예약 저장 버튼"
+  },
+  "sidepanel_daily_form_cancel": {
+    "message": "Cancel",
+    "description": "예약 폼 취소"
+  },
+  "sidepanel_daily_error_no_times": {
+    "message": "Add at least one time",
+    "description": "시각 없음"
+  },
+  "sidepanel_daily_error_invalid_time": {
+    "message": "That time is not valid ($VALUE$)",
+    "description": "시각 형식 오류",
+    "placeholders": {
+      "value": {
+        "content": "$1",
+        "example": "09:00"
+      }
+    }
+  },
+  "sidepanel_daily_error_duplicate_time": {
+    "message": "That time is listed twice ($VALUE$)",
+    "description": "시각 중복",
+    "placeholders": {
+      "value": {
+        "content": "$1",
+        "example": "09:00"
+      }
+    }
+  },
+  "sidepanel_daily_error_too_many_times": {
+    "message": "You can set up to $MAX$ times",
+    "description": "시각 개수 초과",
+    "placeholders": {
+      "max": {
+        "content": "$1",
+        "example": "4"
+      }
+    }
+  },
+  "sidepanel_daily_error_gap_too_small": {
+    "message": "Times must be at least $MIN$ minutes apart",
+    "description": "시각 간격 부족",
+    "placeholders": {
+      "min": {
+        "content": "$1",
+        "example": "12"
+      }
+    }
+  },
+  "sidepanel_daily_error_no_days": {
+    "message": "Pick at least one day",
+    "description": "요일 없음"
+  },
+  "sidepanel_daily_error_invalid_every": {
+    "message": "Pick an interval",
+    "description": "간격 없음"
+  },
+  "sidepanel_daily_block_start_url": {
+    "message": "This flow has no start URL, so it cannot be scheduled. Set a start URL in the save screen",
+    "description": "시작 주소 없음"
+  },
+  "sidepanel_daily_block_not_published": {
+    "message": "Only published flows can be scheduled",
+    "description": "발행되지 않음"
+  },
+  "sidepanel_daily_block_sensitive": {
+    "message": "Flows with sensitive variables cannot be scheduled (their values are never stored)",
+    "description": "민감 변수 있음"
+  },
+  "sidepanel_daily_block_open_wizard": {
+    "message": "Open save screen",
+    "description": "저장 화면 열기 버튼"
+  },
+  "sidepanel_daily_schedule_button": {
+    "message": "Schedule",
+    "description": "흐름 카드 예약 버튼"
+  },
+  "sidepanel_daily_badge_next": {
+    "message": "Next $TIME$",
+    "description": "카드 예약 배지",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_last_success": {
+    "message": "Last success $TIME$",
+    "description": "마지막 성공 시각",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "08:00"
+      }
+    }
+  },
+  "sidepanel_daily_filter_site_all": {
+    "message": "All sites",
+    "description": "사이트 필터: 전체"
+  },
+  "sidepanel_daily_filter_published": {
+    "message": "Published",
+    "description": "필터: 발행됨"
+  },
+  "sidepanel_daily_filter_scheduled": {
+    "message": "Scheduled",
+    "description": "필터: 예약 있음"
+  },
+  "sidepanel_daily_filter_recent_failed": {
+    "message": "Recent failure",
+    "description": "필터: 최근 실패"
+  },
+  "sidepanel_daily_filter_clear": {
+    "message": "Clear filters",
+    "description": "필터 지우기"
+  },
+  "sidepanel_daily_import_button": {
+    "message": "Import",
+    "description": "가져오기 버튼"
+  },
+  "sidepanel_daily_import_title": {
+    "message": "Import flows",
+    "description": "가져오기 제목"
+  },
+  "sidepanel_daily_import_pick": {
+    "message": "Choose a JSON file",
+    "description": "파일 고르기"
+  },
+  "sidepanel_daily_import_preview_count": {
+    "message": "$COUNT$ flows",
+    "description": "미리보기 개수",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_daily_import_steps": {
+    "message": "$COUNT$ steps",
+    "description": "미리보기 단계 수",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_daily_import_conflict": {
+    "message": "A flow with this id already exists",
+    "description": "id 충돌"
+  },
+  "sidepanel_daily_import_mode_copy": {
+    "message": "Copy as new flows",
+    "description": "가져오기 모드: 복사"
+  },
+  "sidepanel_daily_import_mode_overwrite": {
+    "message": "Overwrite existing flows",
+    "description": "가져오기 모드: 덮어쓰기"
+  },
+  "sidepanel_daily_import_confirm": {
+    "message": "Import",
+    "description": "가져오기 확인"
+  },
+  "sidepanel_daily_import_cancel": {
+    "message": "Cancel",
+    "description": "가져오기 취소"
+  },
+  "sidepanel_daily_import_done": {
+    "message": "Imported $COUNT$ flows",
+    "description": "가져오기 완료",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanel_daily_import_failed": {
+    "message": "Import failed: $REASON$",
+    "description": "가져오기 실패",
+    "placeholders": {
+      "reason": {
+        "content": "$1",
+        "example": "no response from background"
+      }
+    }
+  },
+  "sidepanel_daily_import_empty": {
+    "message": "The file has no flows",
+    "description": "가져올 흐름 없음"
+  },
+  "sidepanel_daily_import_read_failed": {
+    "message": "Could not read the file",
+    "description": "파일 읽기 실패"
+  },
+  "sidepanel_daily_var_required": {
+    "message": "Required",
+    "description": "필수 변수 표시"
+  },
+  "sidepanel_daily_var_default": {
+    "message": "Default $VALUE$",
+    "description": "변수 기본값",
+    "placeholders": {
+      "value": {
+        "content": "$1",
+        "example": "09:00"
+      }
+    }
+  },
+  "sidepanel_daily_run_already_queued": {
+    "message": "Already waiting in the queue",
+    "description": "지금 실행: 이미 큐에 있음"
+  },
+  "sidepanel_daily_error_var_required": {
+    "message": "Enter a value for $NAME$. A scheduled run cannot ask for it",
+    "description": "예약 변수 값 없음",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "keyword"
+      }
+    }
+  },
+  "sidepanel_daily_error_var_pattern": {
+    "message": "$NAME$ does not match the format this flow requires",
+    "description": "예약 변수 형식 오류",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "keyword"
+      }
+    }
+  },
+  "sidepanel_daily_error_var_enum": {
+    "message": "$NAME$ must be one of $VALUES$",
+    "description": "예약 변수 선택지 오류",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "keyword"
+      },
+      "values": {
+        "content": "$2",
+        "example": "주문, 배송"
+      }
+    }
+  },
+  "sidepanel_daily_import_too_large": {
+    "message": "That file is too large (max $MAX$MB)",
+    "description": "가져오기 파일 크기 초과",
+    "placeholders": {
+      "max": {
+        "content": "$1",
+        "example": "5"
+      }
+    }
   }
 }

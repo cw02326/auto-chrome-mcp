@@ -9,7 +9,6 @@ import {
   unpublishFlow,
   exportFlow,
   exportAllFlows,
-  importFlowFromJson,
   listSchedules,
   saveSchedule,
   removeSchedule,
@@ -20,6 +19,8 @@ import { listRuns } from './flow-store';
 // 2026-09-05 사이드패널 1단계 A: 발행 목록 조회. 위 import 블록을 고치지 않으려고 줄을
 // 따로 추가했다 (같은 모듈을 두 번 import 해도 문제 없다).
 import { listPublished } from './flow-store';
+// 2026-09-05 사이드패널 2단계 D: 가져오기 미리보기와 충돌 처리(copy/overwrite).
+import { importFlowsFromJson, previewImportFlows } from './flow-store';
 import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
@@ -355,8 +356,19 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_IMPORT_FLOW: {
-          importFlowFromJson(message.json)
-            .then((flows) => sendResponse({ success: true, imported: flows.length, flows }))
+          // 2026-09-05 사이드패널 2단계 D: `mode` 로 id 충돌 처리를 고른다. 값을 주지
+          // 않으면 예전 그대로 덮어쓴다.
+          const mode = message.mode === 'copy' ? 'copy' : 'overwrite';
+          importFlowsFromJson(message.json, mode)
+            .then((imported) =>
+              sendResponse({ success: true, imported, count: imported.length, mode }),
+            )
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_IMPORT_FLOW_PREVIEW: {
+          previewImportFlows(message.json)
+            .then((flows) => sendResponse({ success: true, flows }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }

@@ -11,6 +11,10 @@
             <span v-if="v.sensitive" class="rv-tag" :style="tagStyle">{{
               getMessage('sidepanel_wizard_variable_sensitive')
             }}</span>
+            <!-- 값을 넣지 않으면 실행이 그 단계에서 멈춘다. 그래서 필수라고 적는다. -->
+            <span class="rv-tag" :style="requiredStyle">{{
+              getMessage('sidepanel_daily_var_required')
+            }}</span>
           </span>
           <input
             v-model="values[v.key]"
@@ -18,7 +22,11 @@
             :style="inputStyle"
             :type="v.sensitive ? 'password' : 'text'"
             :autocomplete="v.sensitive ? 'new-password' : 'off'"
+            :placeholder="defaultHint(v)"
           />
+          <span v-if="defaultHint(v)" class="rv-default" :style="hintStyle">{{
+            getMessage('sidepanel_daily_var_default', [defaultHint(v)])
+          }}</span>
         </label>
       </div>
 
@@ -62,6 +70,13 @@ function submit() {
   emit('submit', { ...values });
 }
 
+/** 흐름에 적힌 기본값. 민감 변수는 값을 저장하지 않으므로 늘 비어 있다. */
+function defaultHint(variable: WizardVariableDef): string {
+  if (variable.sensitive) return '';
+  const fallback = variable.default;
+  return fallback === undefined || fallback === null ? '' : String(fallback);
+}
+
 const dialogStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface, #ffffff)',
   borderRadius: 'var(--ac-radius-card, 12px)',
@@ -73,6 +88,10 @@ const labelStyle = computed(() => ({ color: 'var(--ac-text-muted)' }));
 const tagStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface-muted)',
   color: 'var(--ac-text-muted)',
+}));
+const requiredStyle = computed(() => ({
+  backgroundColor: 'var(--ac-accent-subtle, rgba(217, 119, 87, 0.12))',
+  color: 'var(--ac-accent, #d97757)',
 }));
 const inputStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface-muted)',
@@ -146,6 +165,11 @@ const primaryStyle = computed(() => ({
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 999px;
+}
+
+.rv-default {
+  font-size: 11px;
+  word-break: break-all;
 }
 
 .rv-input {

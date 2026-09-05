@@ -557,8 +557,7 @@ export async function exportAllFlows(): Promise<string> {
  *
  * Flows are normalized on save (steps → nodes if needed).
  */
-export async function importFlowFromJson(json: string): Promise<Flow[]> {
-  await ensureMigratedFromLocal();
+export function parseImportCandidates(json: string): Flow[] {
   const parsed = JSON.parse(json);
 
   // Detect candidates from various formats
@@ -619,6 +618,13 @@ export async function importFlowFromJson(json: string): Promise<Flow[]> {
     flowsToImport.push(flow);
   }
 
+  return flowsToImport;
+}
+
+export async function importFlowFromJson(json: string): Promise<Flow[]> {
+  await ensureMigratedFromLocal();
+  const flowsToImport = parseImportCandidates(json);
+
   // Save all flows (normalize on save)
   // Disable individual notifications to avoid flooding UI during batch import
   for (const f of flowsToImport) {
@@ -629,6 +635,109 @@ export async function importFlowFromJson(json: string): Promise<Flow[]> {
   notifyFlowsChanged();
 
   return flowsToImport;
+}
+
+/** 흐름 하나의 단계 수 (DAG 가 먼저, 없으면 옛 steps). */
+function stepCountOf(flow: Flow): number {
+  if (Array.isArray(flow.nodes) && flow.nodes.length > 0) return flow.nodes.length;
+  return Array.isArray(flow.steps) ? flow.steps.length : 0;
+}
+
+export interface ImportPreviewEntry {
+  id: string;
+  name: string;
+  stepCount: number;
+  /** 같은 id 의 흐름이 이미 있다. 덮어쓸지 새 id 로 복사할지 사용자가 고른다. */
+  conflict: boolean;
+}
+
+/**
+ * 가져오기 미리보기 (2026-09-05 사이드패널 2단계 D).
+ *
+ * 저장은 하지 않는다. JSON 이 무엇을 담고 있는지, 기존 흐름을 덮어쓰게 되는지를 먼저
+ * 보여 주기 위한 조회다. 예전 `importFlowFromJson` 은 id 가 겹치면 아무 말 없이 덮어썼다.
+ */
+export async function previewImportFlows(json: string): Promise<ImportPreviewEntry[]> {
+  await ensureMigratedFromLocal();
+  const candidates = parseImportCandidates(json);
+  const existing = new Set((await IndexedDbStorage.flows.list()).map((f) => f.id));
+  return candidates.map((flow) => ({
+    id: flow.id,
+    name: flow.name,
+    stepCount: stepCountOf(flow),
+    conflict: existing.has(flow.id),
+  }));
+}
+
+export type ImportMode = 'copy' | 'overwrite';
+
+export interface ImportedFlowInfo {
+  oldId: string;
+  newId: string;
+  name: string;
+}
+
+/**
+ * 가져오기 실행. `copy` 는 **겹치는 것만** 새 id 로 복사하고 이름 뒤에 " (복사)" 를 붙인다.
+ * 겹치지 않는 흐름은 두 모드에서 똑같이 그대로 들어온다.
+ */
+export async function importFlowsFromJson(
+  json: string,
+  mode: ImportMode = 'overwrite',
+): Promise<ImportedFlowInfo[]> {
+  await ensureMigratedFromLocal();
+  const candidates = parseImportCandidates(json);
+  const taken = new Set((await IndexedDbStorage.flows.list()).map((f) => f.id));
+
+  const imported: ImportedFlowInfo[] = [];
+  for (const flow of candidates) {
+    let target = flow;
+    if (mode === 'copy' && taken.has(flow.id)) {
+      const newId = uniqueFlowId(flow.id, taken);
+      target = { ...flow, id: newId, name: `${flow.name} (복사)` };
+    }
+    taken.add(target.id);
+    await saveFlow(target, { notify: false });
+    imported.push({ oldId: flow.id, newId: target.id, name: target.name });
+  }
+
+  notifyFlowsChanged();
+  return imported;
+}
+
+/**
+ * 겹치지 않는 새 흐름 id. 원본 id 를 알아볼 수 있게 뒤에만 붙인다.
+ *
+ * 2026-09-05 Codex 코드 리뷰 4: 예전에는 후보 1000개가 차면 `Date.now()` 로 만든 id 를
+ * **충돌 검사 없이** 돌려줬다. 같은 밀리초에 두 개를 만들면 두 번째가 첫 번째를 덮어쓴다.
+ * 이제 어떤 경로로 만들든 `taken` 에 없는 값이 나올 때까지 확인한다.
+ */
+export function uniqueFlowId(baseId: string, taken: ReadonlySet<string>): string {
+  for (let n = 2; n <= 1000; n += 1) {
+    const candidate = `${baseId}-copy${n === 2 ? '' : n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // 순번이 다 찼다. 무작위 꼬리를 붙이되 겹치지 않는 것을 확인하고 돌려준다.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const candidate = `${baseId}-copy-${randomIdTail()}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // 여기까지 오는 것은 사실상 불가능하다(무작위 100회가 전부 겹쳤다). 마지막으로 시각을
+  // 덧붙여 한 번 더 확인한다.
+  let last = `${baseId}-copy-${randomIdTail()}-${Date.now().toString(36)}`;
+  while (taken.has(last)) last = `${last}x`;
+  return last;
+}
+
+/** 짧은 무작위 꼬리. `crypto.randomUUID` 가 없는 환경도 지난다. */
+function randomIdTail(): string {
+  try {
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (uuid) return uuid.replace(/-/g, '').slice(0, 8);
+  } catch {
+    // 아래 폴백으로 간다.
+  }
+  return Math.random().toString(36).slice(2, 10);
 }
 
 // Scheduling support

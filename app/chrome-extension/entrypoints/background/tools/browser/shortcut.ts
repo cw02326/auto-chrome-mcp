@@ -30,14 +30,17 @@ import {
   clearScheduleAlarm,
   computeNextAt,
   currentTimeZoneSignature,
+  parseScheduleId,
   putSchedule,
   readSchedules,
   removeSchedule,
+  scheduleIdForShortcut,
   summarizeSchedule,
   validateLoginCheck,
   validateScheduleExpression,
   validateScheduleFirstStep,
   type ScheduleRecord,
+  type ScheduleTarget,
 } from '@/utils/shortcut-schedule';
 
 /**
@@ -472,6 +475,20 @@ function summarizeParams(
   });
 }
 
+/**
+ * 이력 항목에 `target` 을 붙인다 (2026-09-05 사이드패널 2단계 D).
+ *
+ * 이력 키는 예약 실행이면 scheduleId 다. 그 값에서 대상을 되찾아 실으면, `history` 응답
+ * 하나로 "이 실행이 단축인지 흐름인지" 를 알 수 있다. 수동 실행(키가 단축 이름)은 대상이
+ * 언제나 그 단축이다.
+ */
+function withTarget<T extends { name: string; label?: string }>(
+  record: T,
+): T & { target: ScheduleTarget } {
+  const parsed = parseScheduleId(record.name);
+  return { ...record, target: parsed ?? { kind: 'shortcut', name: record.name } };
+}
+
 function notFoundError(name: string, available: string[]): ToolResult {
   return createErrorResponse(
     available.length > 0
@@ -599,7 +616,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     // 정의가 바뀌었으니 이 이름의 예약도 새 정의를 가리킨다. 실행 중이던 run 은 종료 시
     // revision 이 다른 것을 보고 재무장을 포기한다(superseded).
-    if (replaced) await bumpScheduleRevision(name);
+    if (replaced) await bumpScheduleRevision(scheduleIdForShortcut(name));
 
     return {
       content: [
@@ -780,19 +797,36 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     const runId = typeof args?.runId === 'string' ? args.runId.trim() : '';
     if (runId.length > 0) {
-      const record = findRecordById(map, runId, name);
+      // 이름으로 좁히지 않는다: 예약 실행은 scheduleId 키에, 수동 실행은 이름 키에 있다.
+      const record = findRecordById(map, runId);
       if (!record) {
         return createErrorResponse(`run_not_found: no history record with runId "${runId}"`);
       }
       return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, run: record }) }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: true, run: withTarget(record) }),
+          },
+        ],
         isError: false,
       };
     }
 
     const limit = normalizeLimit(args?.limit);
-    const { summaries, matched } = selectHistory(map, {
-      name,
+    // 2026-09-05 사이드패널 2단계 D: 예약 실행의 이력 키는 `shortcut:<enc(name)>` 이고
+    // 수동 `run` 은 예전 그대로 이름이다. 이름으로 물으면 둘 다 보여 준다 - 사용자에게는
+    // 같은 단축의 실행 기록이다.
+    const scoped =
+      name === undefined
+        ? map
+        : {
+            [name]: Array.isArray(map[name]) ? map[name] : [],
+            [scheduleIdForShortcut(name)]: Array.isArray(map[scheduleIdForShortcut(name)])
+              ? map[scheduleIdForShortcut(name)]
+              : [],
+          };
+    const { summaries, matched } = selectHistory(scoped, {
       limit,
       since: args?.since,
       status: args?.status,
@@ -802,7 +836,12 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({ success: true, runs: summaries, matched, limit }),
+          text: JSON.stringify({
+            success: true,
+            runs: summaries.map((summary) => withTarget(summary)),
+            matched,
+            limit,
+          }),
         },
       ],
       isError: false,
@@ -888,8 +927,14 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     const now = Date.now();
     const signature = currentTimeZoneSignature(now);
+    const scheduleId = scheduleIdForShortcut(name);
     const draft: ScheduleRecord = {
+      scheduleId,
       name,
+      // 2026-09-05 사이드패널 2단계 D: 대상을 레코드에 명시한다. 없으면 단축으로 읽히므로
+      // 옛 레코드와도 뜻이 같다.
+      target: { kind: 'shortcut', name },
+      enabled: true,
       schedule: expression.parsed.schedule,
       ...(isPlainObject(args?.params) ? { params: args.params } : {}),
       notify: args?.notify !== false,
@@ -919,7 +964,7 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     if (!saved.ok) {
       return createErrorResponse(saved.error);
     }
-    await armScheduleAlarm(name, saved.record.nextAt);
+    await armScheduleAlarm(scheduleId, saved.record.nextAt);
 
     return {
       content: [
@@ -928,6 +973,8 @@ class ShortcutTool extends BaseBrowserToolExecutor {
           text: JSON.stringify({
             success: true,
             name,
+            scheduleId,
+            target: saved.record.target,
             replaced: saved.replaced,
             schedule: saved.record.schedule,
             nextAt: saved.record.nextAt,
@@ -952,9 +999,10 @@ class ShortcutTool extends BaseBrowserToolExecutor {
       );
     }
     // 실행 중이던 run 이 종료 시 재무장하지 않도록 revision 을 먼저 올린 뒤 지운다.
-    await bumpScheduleRevision(name);
-    const unscheduled = await removeSchedule(name);
-    await clearScheduleAlarm(name);
+    const scheduleId = scheduleIdForShortcut(name);
+    await bumpScheduleRevision(scheduleId);
+    const unscheduled = await removeSchedule(scheduleId);
+    await clearScheduleAlarm(scheduleId);
 
     return {
       content: [{ type: 'text', text: JSON.stringify({ success: true, name, unscheduled }) }],
@@ -962,11 +1010,17 @@ class ShortcutTool extends BaseBrowserToolExecutor {
     };
   }
 
-  /** action="schedules": 예약 목록. 아침에 상태를 훑는 첫 화면이다. */
+  /**
+   * action="schedules": 예약 목록. 아침에 상태를 훑는 첫 화면이다.
+   *
+   * 2026-09-05 사이드패널 2단계: 흐름 예약도 같은 목록에 나온다. 항목마다 `target` 이
+   * 붙어 있어 무엇을 돌리는 예약인지 응답만 보고 알 수 있다 (스키마 파라미터는 그대로다 -
+   * 흐름 예약을 **만드는** 길은 사이드패널뿐이다).
+   */
   private async handleSchedules(): Promise<ToolResult> {
     const map = await readSchedules();
     const schedules = Object.keys(map)
-      .map((name) => summarizeSchedule(map[name]))
+      .map((scheduleId) => summarizeSchedule(map[scheduleId]))
       .sort((a, b) => a.nextAt - b.nextAt);
 
     return {
@@ -998,8 +1052,9 @@ class ShortcutTool extends BaseBrowserToolExecutor {
 
     // shortcut 을 지우면 예약과 알람도 함께 사라져야 한다 - 없는 정의를 가리키는 알람이
     // 밤에 울려 봐야 실패 기록만 쌓인다.
-    const unscheduled = await removeSchedule(name);
-    if (unscheduled) await clearScheduleAlarm(name);
+    const scheduleId = scheduleIdForShortcut(name);
+    const unscheduled = await removeSchedule(scheduleId);
+    if (unscheduled) await clearScheduleAlarm(scheduleId);
 
     return {
       content: [

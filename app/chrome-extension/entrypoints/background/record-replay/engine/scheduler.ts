@@ -45,6 +45,16 @@ export interface RunOptions {
   plugins?: RunPlugin[];
 
   /**
+   * Keep this run in the flow store's own history (`rr_storage.runs`).
+   *
+   * Default true. Scheduled runs pass false: their outcome already lands in the
+   * one combined history (`mcpShortcutHistory`) that the daily view reads, and
+   * writing it twice means two records that can disagree about the same run
+   * (2026-09-05 side panel stage 2, Codex design review 5).
+   */
+  persistRun?: boolean;
+
+  /**
    * Cancellation signal.
    *
    * The caller (or its own deadline) can stop a run in flight: step boundaries
@@ -1036,7 +1046,9 @@ class ExecutionOrchestrator {
           message: e?.message || String(e),
         });
       }
-      if (!this.paused) await this.logger.persist(this.flow, this.startAt, this.failed === 0);
+      if (!this.paused && this.options.persistRun !== false) {
+        await this.logger.persist(this.flow, this.startAt, this.failed === 0);
+      }
       try {
         await runState.update(this.runId, {
           status: this.paused ? 'stopped' : this.failed === 0 ? 'completed' : 'failed',
