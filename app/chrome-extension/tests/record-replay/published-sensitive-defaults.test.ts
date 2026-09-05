@@ -15,6 +15,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ensurePublishedSensitiveDefaultsMigrated,
   migratePublishedSensitiveDefaults,
+  publishFlow,
+  unpublishFlow,
 } from '@/entrypoints/background/record-replay/flow-store';
 import { IndexedDbStorage } from '@/entrypoints/background/record-replay/storage/indexeddb-manager';
 import type { Flow } from '@/entrypoints/background/record-replay/types';
@@ -108,5 +110,61 @@ describe('저장된 발행 스냅샷의 sensitive 기본값을 한 번 걷어 �
     // 두 번째 호출은 같은 promise 를 돌려주므로 저장소를 다시 훑지 않는다.
     expect(await ensurePublishedSensitiveDefaultsMigrated()).toBe(first);
     expect((await storedSnapshot()).variables[0].default).toBeUndefined();
+  });
+});
+
+describe('마이그레이션 중 발행 목록이 바뀌어도 되돌리거나 부활시키지 않는다 (발행 차단 지적 대응)', () => {
+  beforeEach(async () => {
+    installLocalStorage();
+    await seedLegacyRecord();
+  });
+
+  it('마이그레이션 중 unpublish 가 끼어들어도 부활하지 않음', async () => {
+    // 재현: 마이그레이션이 발행 목록을 훑은 "직후"(아직 레코드별 처리 전) 사용자가 발행을
+    // 해제한다. 예전 구현은 훑을 때 본 stale 레코드를 그대로 다시 저장해 되살렸다.
+    const originalList = IndexedDbStorage.published.list;
+    vi.spyOn(IndexedDbStorage.published, 'list').mockImplementationOnce(async () => {
+      const records = await originalList();
+      await unpublishFlow(FLOW_ID);
+      return records;
+    });
+
+    const fixed = await migratePublishedSensitiveDefaults();
+
+    const records = (await IndexedDbStorage.published.list()) as any[];
+    expect(records.find((r) => r.id === FLOW_ID)).toBeUndefined();
+    // 발행 해제된 레코드는 손대지 않았으니 "고쳤다" 고 세면 안 된다.
+    expect(fixed).toBe(0);
+  });
+
+  it('마이그레이션 중 재발행이 되돌려지지 않음', async () => {
+    // 재현: 마이그레이션이 발행 목록을 훑은 "직후" 사용자가 같은 흐름을 새 내용으로
+    // 다시 발행한다. 예전 구현은 훑을 때 본 낡은(구) 스냅샷을 다시 저장해 재발행을
+    // 무효화했다.
+    const republished: Flow = {
+      id: FLOW_ID,
+      name: 'legacy v4',
+      version: 4,
+      variables: [{ key: 'boardUrl', default: 'https://board.example.com/v2' }],
+      nodes: [{ id: 'n1', type: 'navigate', config: { url: '{boardUrl}' } }],
+      edges: [],
+      meta: { createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z' },
+    } as unknown as Flow;
+
+    const originalList = IndexedDbStorage.published.list;
+    vi.spyOn(IndexedDbStorage.published, 'list').mockImplementationOnce(async () => {
+      const records = await originalList();
+      await publishFlow(republished, 'legacy');
+      return records;
+    });
+
+    await migratePublishedSensitiveDefaults();
+
+    const records = (await IndexedDbStorage.published.list()) as any[];
+    const record = records.find((r) => r.id === FLOW_ID);
+    expect(record?.version).toBe(4);
+    expect(record?.snapshot?.variables).toEqual([
+      { key: 'boardUrl', default: 'https://board.example.com/v2' },
+    ]);
   });
 });

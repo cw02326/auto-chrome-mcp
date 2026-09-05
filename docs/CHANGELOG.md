@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v1.12.0] 데일리 자동화(예약 실행·이력)·흐름 실행 도구·작업명 탭 그룹 (2026-09-05)
+
+확장과 브리지를 함께 1.12.0 으로 올린다. chrome_shortcut 의 schedule·history 와 record_replay 도구는
+브리지 갱신 뒤 Claude Code 를 재시작해야 보인다. 예약 실행은 크롬이 떠 있어야 돈다.
 
 ### Added
 
@@ -344,7 +347,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   변수의 `default` 까지 함께 저장돼, 비밀번호·토큰이 IndexedDB 에 평문으로 남고 흐름을
   내보내는 경로로 그대로 나갔다. 이제 발행 시 그 값을 빼고 저장하며, 실행 시에는 호출자가
   `args` 로 준 값만 쓴다. `sensitive` 가 아닌 변수의 기본값은 흐름 설정이므로 그대로 둔다.
-  편집 중인 원본 흐름은 건드리지 않는다.
+  편집 중인 원본 흐름은 건드리지 않는다. 이 수정 이전에 이미 저장된 발행 레코드는 그 값을
+  그대로 들고 있어, 워커가 뜰 때 한 번 걷어낸다. 이 정리가 발행 목록을 통째로 다시 저장하는
+  방식이어서, 정리가 목록을 읽은 뒤 쓰기 전 사이에 사용자가 발행을 해제하거나 다시
+  발행하면 그 결과를 되돌리거나(재발행 무효화) 지운 레코드를 되살릴(발행 해제 무효화) 수
+  있었다. 이제 발행·발행 해제·이 정리는 모두 같은 락으로 순서대로 실행되고, 정리는
+  레코드마다 자기 차례에 그 순간의 값을 다시 읽어 필요할 때만 그 레코드 하나만 갱신한다.
 
 - **파일 URL 접근 권한 검사를 우회할 수 있던 세 경로를 막았다.** ① 검사가 새 탭을 만들 때만
   걸려 있어, 권한을 끈 뒤 이미 열려 있던 세션 소유 `file:` 탭을 재사용하면 그냥 지나갔다.

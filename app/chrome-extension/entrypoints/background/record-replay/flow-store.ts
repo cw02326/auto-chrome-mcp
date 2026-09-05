@@ -154,6 +154,32 @@ export interface PublishedFlowInfo {
 }
 
 /**
+ * 발행 목록에 대한 모든 쓰기(발행/발행 해제/마이그레이션)를 직렬화하는 모듈 단일 락
+ * (2026-09-05 Codex 발행 차단 지적 대응).
+ *
+ * 예전에는 시작 시 마이그레이션이 `list()` 로 발행 목록을 통째로 읽은 뒤, 그 스냅샷을
+ * 기준으로 레코드 전체를 다시 저장했다. 그 사이(읽기~쓰기) 사용자가 재발행하거나 발행을
+ * 해제하면, 마이그레이션의 뒤늦은 쓰기가 그 변경을 덮어써 되돌리거나(재발행 무효화) 삭제된
+ * 레코드를 되살렸다(발행 해제 무효화).
+ *
+ * 이제 발행/발행 해제/마이그레이션의 각 쓰기 연산은 이 락을 통해 **완전히 순서대로**
+ * 실행된다 - 앞선 연산의 async 본문이 끝나야 다음 연산이 시작된다. 또한 마이그레이션은
+ * 레코드별로 락 안에서 "현재 값을 다시 읽고 → sensitive 기본값이 남아 있을 때만 그 레코드만
+ * 갱신" 하므로, 자기 차례가 왔을 때 이미 발행 해제됐거나 재발행된 레코드는 건드리지 않는다.
+ */
+let publishedLock: Promise<void> = Promise.resolve();
+
+function withPublishedLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = publishedLock.then(task, task);
+  // 실패해도 체인이 막히지 않도록, 다음 연산은 항상 이어서 돈다.
+  publishedLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+/**
  * 발행 저장소에 실제로 들어가는 레코드 (2026-09-05 Codex 재확인 항목 4).
  *
  * 발행은 "이 흐름을 도구 표면에 연다" 는 승인이다. 그런데 예전에는 메타데이터만 저장하고
@@ -338,16 +364,26 @@ export function stripSensitiveDefaults(flow: Flow): Flow {
  */
 export async function migratePublishedSensitiveDefaults(): Promise<number> {
   await ensureMigratedFromLocal();
-  const records = (await IndexedDbStorage.published.list()) as PublishedRecord[];
+  // 대상 후보만 고르기 위한 훑기 - 이 목록은 곧바로 낡을 수 있으므로 쓰기에는 쓰지 않는다.
+  const candidates = (await IndexedDbStorage.published.list()) as PublishedRecord[];
   let fixed = 0;
-  for (const record of records) {
-    const snapshot = record.snapshot;
-    if (!snapshot) continue;
-    const cleaned = stripSensitiveDefaults(snapshot);
-    // 참조가 같으면 지울 것이 없었다는 뜻이다 (stripSensitiveDefaults 가 원본을 돌려준다).
-    if (cleaned === snapshot) continue;
-    await IndexedDbStorage.published.save({ ...record, snapshot: cleaned } as PublishedFlowInfo);
-    fixed += 1;
+  for (const candidate of candidates) {
+    if (!candidate.snapshot) continue;
+    // 레코드 하나당 락 한 차례. 다른 발행/발행 해제와 순서대로 줄을 서므로, 내 차례가
+    // 왔을 때 "현재" 값을 다시 읽어 판단한다 - 훑을 때 본 stale 값으로 쓰지 않는다.
+    const didFix = await withPublishedLock(async () => {
+      const latest = ((await IndexedDbStorage.published.list()) as PublishedRecord[]).find(
+        (r) => r.id === candidate.id,
+      );
+      // 그 사이 발행 해제됐거나(레코드 없음) 스냅샷이 없어졌으면 손댈 것이 없다.
+      if (!latest?.snapshot) return false;
+      const cleaned = stripSensitiveDefaults(latest.snapshot);
+      // 참조가 같으면 지울 것이 없었다는 뜻이다 (재발행으로 이미 깨끗해졌을 수도 있다).
+      if (cleaned === latest.snapshot) return false;
+      await IndexedDbStorage.published.save({ ...latest, snapshot: cleaned } as PublishedFlowInfo);
+      return true;
+    });
+    if (didFix) fixed += 1;
   }
   return fixed;
 }
@@ -383,7 +419,12 @@ export async function publishFlow(flow: Flow, slug?: string): Promise<PublishedF
   // (steps → nodes 정규화 후 deprecated steps 제거), 여기에 sensitive 변수의 기본값을
   // 뺀다 (2026-09-05 발행 전 검토 6).
   const snapshot = stripSensitiveDefaults(stripStepsForSave(normalizeFlowForSave(flow)));
-  await IndexedDbStorage.published.save({ ...info, snapshot } as PublishedFlowInfo);
+  // 마이그레이션과 같은 락을 거친다 - 마이그레이션이 이 레코드를 처리 중이면 그 뒤에
+  // 줄을 서고, 이 발행이 끝난 뒤에는 마이그레이션이 "현재" 값(이 발행 결과)을 다시 읽어
+  // 이미 깨끗함을 확인하므로 되돌려지지 않는다.
+  await withPublishedLock(async () => {
+    await IndexedDbStorage.published.save({ ...info, snapshot } as PublishedFlowInfo);
+  });
   return info;
 }
 
@@ -430,7 +471,11 @@ export async function resolvePublishedFlow(flowId: string): Promise<PublishedRes
 
 export async function unpublishFlow(flowId: string): Promise<void> {
   await ensureMigratedFromLocal();
-  await IndexedDbStorage.published.delete(flowId);
+  // 같은 락을 거친다 - 마이그레이션이 이 레코드를 막 정리해 저장하려던 참이어도, 삭제는
+  // 그 뒤(또는 앞)에 순서대로 실행되고 마이그레이션이 죽은 레코드를 되살리지 않는다.
+  await withPublishedLock(async () => {
+    await IndexedDbStorage.published.delete(flowId);
+  });
 }
 
 export function toSlug(name: string): string {

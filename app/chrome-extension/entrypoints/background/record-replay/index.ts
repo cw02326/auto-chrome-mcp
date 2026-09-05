@@ -204,6 +204,19 @@ export function initRecordReplayListeners() {
   // 발행 스냅샷에 남아 있는 sensitive 변수 기본값을 한 번 걷어 낸다. 새 발행은
   // publishFlow 가 이미 막지만, 그 전에 저장된 레코드는 워커가 뜰 때 정리해야 한다
   // (2026-09-05 Codex 최종 확인 5).
+  //
+  // 이 호출은 일부러 await 하지 않고 메시지 리스너를 곧바로 연다(2026-09-05 발행 차단
+  // 지적 대응, 택한 방식: 리스너 선(先) 오픈 + 락으로 순서 보장). initRecordReplayListeners
+  // 는 동기 함수이고 다른 호출부·테스트가 "호출 즉시 리스너가 등록돼 있다" 는 전제로
+  // 짜여 있어, await 을 끼워 넣으면 리스너 등록 자체가 (실제 IndexedDB 왕복만큼) 밀린다.
+  // 대신 flow-store.ts 의 publishFlow/unpublishFlow/migratePublishedSensitiveDefaults 는
+  // 모두 같은 모듈 단일 락(withPublishedLock)을 거치도록 고쳤다 - 마이그레이션이 끝나기
+  // 전에 들어온 RR_PUBLISH_FLOW/RR_UNPUBLISH_FLOW 메시지도 그 락 뒤에 순서대로 줄을 서고,
+  // 마이그레이션은 자기 차례에 항상 "현재" 레코드를 다시 읽어 판단하므로 이미 발행
+  // 해제됐거나 재발행된 레코드를 되돌리지 않는다. 즉 리스너가 마이그레이션보다 먼저 열려도
+  // 데이터 레이스는 나지 않는다. 마이그레이션 자체의 실패는 내부에서 이미 잡아
+  // (ensurePublishedSensitiveDefaultsMigrated 가 catch 후 0 을 돌려준다) 여기서 별도
+  // try/catch 가 필요 없다.
   void ensurePublishedSensitiveDefaultsMigrated();
   // On startup, re-schedule alarms
   rescheduleAlarms().catch(() => {});
