@@ -307,23 +307,6 @@
     />
 
     <!-- 侧边栏承担工作流管理；编辑器在独立窗口中打开 -->
-
-    <!-- Coming Soon Toast -->
-    <Transition name="toast">
-      <div v-if="comingSoonToast.show" class="coming-soon-toast">
-        <svg
-          class="toast-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v6l4 2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span>{{ comingSoonToast.feature }} 기능 개발 중, 출시 예정</span>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -402,16 +385,6 @@ const { theme: agentTheme, initTheme } = useAgentTheme();
 // 当前视图状态：首页 or 本地模型页
 const currentView = ref<'home' | 'local-model'>('home');
 
-// Coming Soon Toast
-const comingSoonToast = ref<{ show: boolean; feature: string }>({ show: false, feature: '' });
-
-function showComingSoonToast(feature: string) {
-  comingSoonToast.value = { show: true, feature };
-  setTimeout(() => {
-    comingSoonToast.value = { show: false, feature: '' };
-  }, 2000);
-}
-
 // Record & Replay state
 const rrRecording = ref(false);
 const rrFlows = ref<
@@ -461,17 +434,36 @@ function isFlowBoundToCurrent(flow: any) {
 }
 
 // 运行记录与覆盖项在侧边栏页面查看
+/**
+ * 녹화 시작 (2026-09-05 사이드패널 1단계 A).
+ *
+ * 팝업은 버튼을 누르는 순간 닫힐 수 있어 녹화 중 표시를 유지할 자리가 아니다. 사이드패널을
+ * 열면서 무엇을 할지를 ?record 로 넘기고, 실제 시작·중지와 녹화 중 표시는 거기서 한다.
+ *
+ * **지금 보고 있는 탭의 id 를 함께 넘긴다.** 팝업이 닫히고 패널이 뜨는 사이에 활성 탭이
+ * 바뀌면(다른 창이 앞으로 오는 등) 패널이 다시 "활성 탭" 을 물었을 때 엉뚱한 탭이 잡힌다.
+ */
 const startRecording = async () => {
-  // TODO: 录制回放功能开发中，暂时拦截
-  showComingSoonToast('录制回放');
-  return;
+  const tabId = await activeTabIdForRecording();
+  await openSidepanelAndClose('workflows', {
+    record: 'start',
+    ...(tabId !== undefined ? { tabId: String(tabId) } : {}),
+  });
 };
 
 const stopRecording = async () => {
-  // TODO: 录制回放功能开发中，暂时拦截
-  showComingSoonToast('录制回放');
-  return;
+  await openSidepanelAndClose('workflows', { record: 'stop' });
 };
+
+/** 팝업이 눌린 순간의 활성 탭 id. 못 얻으면 패널이 알아서 활성 탭을 찾는다. */
+async function activeTabIdForRecording(): Promise<number | undefined> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return typeof tab?.id === 'number' ? tab.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const runFlow = async (flowId: string) => {
   try {
@@ -704,12 +696,13 @@ const getStatusClass = () => {
 };
 
 // Open sidepanel and close popup
-async function openSidepanelAndClose(tab: string) {
+async function openSidepanelAndClose(tab: string, extra?: Record<string, string>) {
   try {
     const current = await chrome.windows.getCurrent();
+    const params = new URLSearchParams({ tab, ...(extra || {}) });
     if ((chrome.sidePanel as any)?.setOptions) {
       await (chrome.sidePanel as any).setOptions({
-        path: `sidepanel.html?tab=${tab}`,
+        path: `sidepanel.html?${params.toString()}`,
         enabled: true,
       });
     }
@@ -725,9 +718,7 @@ async function openSidepanelAndClose(tab: string) {
 
 // Open sidepanel from popup for workflow management
 function openWorkflowSidepanel() {
-  // TODO: 工作流功能开发中，暂时拦截
-  showComingSoonToast('工作流管理');
-  // openSidepanelAndClose('workflows');
+  void openSidepanelAndClose('workflows');
 }
 
 // Open sidepanel for element marker management

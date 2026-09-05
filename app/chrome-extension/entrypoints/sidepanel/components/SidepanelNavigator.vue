@@ -5,14 +5,14 @@
     :style="wrapperStyle"
     :class="{ 'navigator-dragging': isDragging }"
   >
-    <!-- 触发按钮（同时作为拖拽手柄） -->
+    <!-- 트리거 버튼 (드래그 핸들 역할도 겸함) -->
     <button
       ref="triggerRef"
       class="navigator-trigger"
       :class="{ 'navigator-trigger-active': isOpen }"
       @click="handleTriggerClick"
       @dblclick="resetToDefault"
-      title="切换页面（可拖拽移动，双击重置位置）"
+      :title="getMessage('sidepanel_nav_trigger_title')"
     >
       <svg
         class="navigator-icon"
@@ -27,12 +27,12 @@
       </svg>
     </button>
 
-    <!-- 浮层菜单 -->
+    <!-- 플로팅 메뉴 -->
     <Transition name="navigator-menu">
       <div v-if="isOpen" class="navigator-overlay" @click="closeMenu">
         <div class="navigator-menu" :style="menuStyle" @click.stop>
           <div class="navigator-header">
-            <span class="navigator-title">切换页面</span>
+            <span class="navigator-title">{{ getMessage('sidepanel_nav_switch_page') }}</span>
             <button class="navigator-close" @click="closeMenu">
               <svg
                 viewBox="0 0 24 24"
@@ -69,8 +69,12 @@
                 </svg>
               </div>
               <div class="navigator-item-content">
-                <span class="navigator-item-title">工作流管理</span>
-                <span class="navigator-item-desc">录制与回放自动化流程</span>
+                <span class="navigator-item-title">{{
+                  getMessage('sidepanel_nav_workflows_title')
+                }}</span>
+                <span class="navigator-item-desc">{{
+                  getMessage('sidepanel_nav_workflows_desc')
+                }}</span>
               </div>
               <div v-if="activeTab === 'workflows'" class="navigator-item-check">
                 <svg
@@ -107,8 +111,12 @@
                 </svg>
               </div>
               <div class="navigator-item-content">
-                <span class="navigator-item-title">元素标注管理</span>
-                <span class="navigator-item-desc">管理页面元素标注</span>
+                <span class="navigator-item-title">{{
+                  getMessage('sidepanel_nav_markers_title')
+                }}</span>
+                <span class="navigator-item-desc">{{
+                  getMessage('sidepanel_nav_markers_desc')
+                }}</span>
               </div>
               <div v-if="activeTab === 'element-markers'" class="navigator-item-check">
                 <svg
@@ -132,6 +140,7 @@
 
 <script lang="ts" setup>
 import { ref, computed } from 'vue';
+import { getMessage } from '@/utils/i18n';
 import { useFloatingDrag } from '../composables/useFloatingDrag';
 
 type TabType = 'workflows' | 'element-markers';

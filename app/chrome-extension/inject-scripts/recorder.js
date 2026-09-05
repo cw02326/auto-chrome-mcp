@@ -1243,6 +1243,11 @@
         if (gref) target.ref = gref;
       } catch {}
 
+      // 2026-09-05 사이드패널 1단계 B: 이 클릭이 페이지 이동을 부를 것 같으면 단계에 표시해 둔다.
+      // 실제 이동 기록·중복 제거는 배경(webNavigation)이 하지만, 클릭과 이동 사이의 시간이
+      // 벌어져 합치기 창을 놓쳐도 이 표시는 남는다.
+      const expectsNavigation = this._clickExpectsNavigation(el);
+
       // Double-click detection: if e.detail >= 2 means this is the second click of a dblclick
       if (e.detail >= 2) {
         // Cancel pending single click and record dblclick instead
@@ -1255,6 +1260,7 @@
           type: 'dblclick',
           target,
           screenshotOnFail: true,
+          ...(expectsNavigation ? { expectsNavigation: true } : {}),
         });
         return;
       }
@@ -1273,6 +1279,7 @@
         type: 'click',
         target,
         screenshotOnFail: true,
+        ...(expectsNavigation ? { expectsNavigation: true } : {}),
       };
 
       this._pendingClickTimer = setTimeout(() => {
@@ -1282,6 +1289,40 @@
         }
         this._pendingClickTimer = null;
       }, this._DBLCLICK_THRESHOLD_MS);
+    }
+
+    /**
+     * 이 클릭이 페이지 이동을 부를 것으로 보이는가 (2026-09-05 사이드패널 1단계 B).
+     *
+     * 확실한 경우만 참으로 본다: 실제 문서로 가는 링크, 그리고 폼 안의 제출 컨트롤.
+     * 추측을 넓히면 재생 때 오지 않을 이동을 기다리다 단계가 실패한다.
+     *
+     * 이 값은 힌트일 뿐이고, 재생 엔진이 실제로 기다리게 만드는 `after.waitForNavigation`
+     * 은 배경이 **이동을 실제로 관측했을 때만** 붙인다(session-manager.recordNavigation).
+     *
+     * @param {Element} el 클릭된 요소
+     * @returns {boolean}
+     */
+    _clickExpectsNavigation(el) {
+      try {
+        const a = el.closest && el.closest('a[href]');
+        if (a) {
+          const href = String((a.getAttribute && a.getAttribute('href')) || '').trim();
+          if (!href) return false;
+          const lowered = href.toLowerCase();
+          // 같은 문서 안의 앵커·스크립트 링크는 문서 이동이 아니다.
+          if (lowered.startsWith('#')) return false;
+          if (lowered.startsWith('javascript:')) return false;
+          return true;
+        }
+        const submit =
+          el.closest &&
+          el.closest(
+            'button[type="submit"], input[type="submit"], input[type="image"], form button:not([type])',
+          );
+        if (submit && submit.closest && submit.closest('form')) return true;
+      } catch (_) {}
+      return false;
     }
 
     // Per-element input handler (attached on focusin for native inputs/textarea/contenteditable)

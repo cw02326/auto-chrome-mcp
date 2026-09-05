@@ -41,6 +41,11 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_EXPORT_ALL: 'rr_export_all',
   RR_IMPORT_FLOW: 'rr_import_flow',
   RR_LIST_RUNS: 'rr_list_runs',
+  // 2026-09-05 사이드패널 1단계 A 에서 추가한 조회 두 개 (기존 줄은 건드리지 않았다).
+  // 발행 목록: 카드의 "발행됨" 배지와 "수정 후 재발행 필요" 판정에 쓴다.
+  RR_LIST_PUBLISHED: 'rr_list_published',
+  // 녹화 상태 + 흐름 id·단계 수·시작 시각. 패널을 닫았다 열어도 녹화 표시를 복원한다.
+  RR_GET_RECORDING_SNAPSHOT: 'rr_get_recording_snapshot',
   // Triggers
   RR_LIST_TRIGGERS: 'rr_list_triggers',
   RR_SAVE_TRIGGER: 'rr_save_trigger',

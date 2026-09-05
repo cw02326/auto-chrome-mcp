@@ -10,12 +10,18 @@
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'auto-chrome-mcp-shared';
+import { ENGINE_CONSTANTS } from '../../engine/constants';
+import { waitForNavigationDone } from '../../engine/policies/wait';
+import { waitForNetworkIdle } from '../../rr-utils';
+import { runTabFromId } from '../../engine/tab-context';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler, ElementTarget } from '../types';
 import {
   actionToolArgs,
+  clampInt,
   ensureElementVisible,
   logSelectorFallback,
+  readTabUrl,
   resolveString,
   selectorLocator,
   sendMessageToTab,
@@ -76,6 +82,15 @@ export const keyHandler: ActionHandler<'key'> = {
     if (typeof tabId !== 'number') {
       return failed('TAB_NOT_FOUND', 'No active tab found for key action');
     }
+
+    // 2026-09-05 Codex 교차 리뷰 5: 엔터로 폼을 제출한 녹화는 이동을 일으킨다. 녹화기가
+    // 그 사실을 관측했을 때만 `after.waitForNavigation` 이 붙으므로, 붙어 있으면 이동이
+    // 끝날 때까지 기다린다. StepRunner 가 대기를 맡는 모드에서는 여기서 하지 않는다.
+    const skipNavWait = ctx.execution?.skipNavWait === true;
+    const after = action.params.after ?? {};
+    const wantsAfterWait =
+      !skipNavWait && (after.waitForNavigation === true || after.waitForNetworkIdle === true);
+    const beforeUrl = wantsAfterWait ? await readTabUrl(tabId) : '';
 
     // Resolve keys string
     const keysResolved = resolveString(action.params.keys, vars);
@@ -190,6 +205,23 @@ export const keyHandler: ActionHandler<'key'> = {
       resolvedBy && firstCandidateType && resolvedBy !== 'ref' && resolvedBy !== firstCandidateType;
     if (fallbackUsed) {
       logSelectorFallback(ctx, action.id, String(firstCandidateType), String(resolvedBy));
+    }
+
+    if (wantsAfterWait) {
+      const waitMs = clampInt(
+        action.policy?.timeout?.ms ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS,
+        0,
+        ENGINE_CONSTANTS.MAX_WAIT_MS,
+      );
+      // 대기는 이 액션이 돈 탭에만 건다 (사용자가 보고 있는 탭이 아니다).
+      const runTab = runTabFromId(tabId, 'explicit', undefined, ctx);
+      if (after.waitForNavigation) {
+        await waitForNavigationDone(runTab, beforeUrl, waitMs);
+      } else {
+        const totalMs = clampInt(waitMs, 1000, ENGINE_CONSTANTS.MAX_WAIT_MS);
+        const idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
+        await waitForNetworkIdle(runTab, totalMs, idleMs);
+      }
     }
 
     return { status: 'success' };

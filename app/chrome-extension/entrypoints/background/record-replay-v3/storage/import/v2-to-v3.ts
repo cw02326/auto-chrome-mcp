@@ -52,6 +52,8 @@ interface V2Flow {
   name: string;
   description?: string;
   version: number;
+  /** 녹화를 시작한 페이지 주소 (2026-09-05 사이드패널 1단계 B). */
+  startUrl?: string;
   meta?: {
     createdAt?: string;
     updatedAt?: string;
@@ -175,6 +177,10 @@ export function convertFlowV2ToV3(v2Flow: V2Flow): ConversionResult<FlowV3> {
   // 可选字段
   if (v2Flow.description) {
     v3Flow.description = v2Flow.description;
+  }
+  // 시작 URL 은 변환에서 잃어버리면 안 된다 - 도구가 작업 탭을 여는 근거가 이 값뿐이다.
+  if (typeof v2Flow.startUrl === 'string' && v2Flow.startUrl.trim()) {
+    v3Flow.startUrl = v2Flow.startUrl;
   }
   if (variables.length > 0) {
     v3Flow.variables = variables;
@@ -466,6 +472,9 @@ export function convertFlowV3ToV2(v3Flow: FlowV3): ConversionResult<V2Flow> {
     name: v3Flow.name,
     description: v3Flow.description,
     version: 2, // V2 版本
+    // 시작 URL 은 양방향 모두 보존한다 (2026-09-05 사이드패널 1단계 B).
+    startUrl:
+      typeof v3Flow.startUrl === 'string' && v3Flow.startUrl.trim() ? v3Flow.startUrl : undefined,
     meta,
     variables: variables.length > 0 ? variables : undefined,
     nodes,
@@ -554,7 +563,8 @@ export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<Tri
       };
       break;
 
-    case 'schedule': { // 将 V2 schedule 转换为 cron 表达式
+    case 'schedule': {
+      // 将 V2 schedule 转换为 cron 表达式
       const cron = convertScheduleToCron(v2Trigger.schedule);
       if (!cron) {
         errors.push('Could not convert V2 schedule to cron expression');
@@ -595,7 +605,8 @@ function convertScheduleToCron(schedule: V2Trigger['schedule']): string | null {
   if (!schedule) return null;
 
   switch (schedule.type) {
-    case 'interval': { // 将间隔转换为近似 cron（每 N 分钟）
+    case 'interval': {
+      // 将间隔转换为近似 cron（每 N 分钟）
       const intervalMinutes = Math.max(1, Math.round((schedule.intervalMs || 60000) / 60000));
       if (intervalMinutes < 60) {
         return `*/${intervalMinutes} * * * *`;
@@ -613,7 +624,8 @@ function convertScheduleToCron(schedule: V2Trigger['schedule']): string | null {
       }
       return '0 0 * * *'; // 默认每天 0:00
 
-    case 'weekly': { // 每周指定天数和时间
+    case 'weekly': {
+      // 每周指定天数和时间
       const days = (schedule.days || [0]).join(',');
       if (schedule.time) {
         const [hour, minute] = schedule.time.split(':').map(Number);

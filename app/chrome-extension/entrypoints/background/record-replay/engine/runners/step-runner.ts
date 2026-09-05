@@ -127,7 +127,19 @@ export class StepRunner {
           });
           const result = execResult.result;
           const remainingBudget = this.env.getRemainingBudgetMs();
-          if (step.type === STEP_TYPES.CLICK || step.type === STEP_TYPES.DBLCLICK) {
+          // 클릭류와 key 단계의 이동 대기.
+          //
+          // key 를 넣은 이유 (2026-09-05 Codex 교차 리뷰 5): 엔터로 폼을 제출한 녹화는
+          // 이동을 일으키고, 녹화기가 그 사실을 `after.waitForNavigation` 으로 남긴다.
+          // 예전에는 click/dblclick 만 이 값을 읽어서 그 표시가 아무 일도 하지 않았고,
+          // 다음 단계가 이전 문서에서 대상을 찾다 실패했다.
+          //
+          // 다만 **표시가 없는 key 는 예전 그대로** 아무 대기도 하지 않는다. 짧은 정찰 대기
+          // (maybeQuickWaitForNav)는 클릭 전용이다 - 모든 키 입력마다 350ms 를 더 쓰는 것은
+          // 이 수정의 목적이 아니다.
+          const isClickLike = step.type === STEP_TYPES.CLICK || step.type === STEP_TYPES.DBLCLICK;
+          const isKeyStep = step.type === STEP_TYPES.KEY;
+          if (isClickLike || isKeyStep) {
             const after = step.after ?? ({} as NonNullable<StepClick['after']>);
             if (after.waitForNavigation)
               await waitForNavigationDone(
@@ -142,7 +154,7 @@ export class StepRunner {
               );
               const idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
               await waitForNetworkIdle(ctx, totalMs, idleMs);
-            } else
+            } else if (isClickLike)
               await maybeQuickWaitForNav(
                 ctx,
                 beforeInfo.url,

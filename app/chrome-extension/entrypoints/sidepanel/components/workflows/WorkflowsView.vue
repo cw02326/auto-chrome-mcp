@@ -20,11 +20,12 @@
             />
           </svg>
           <input
-            v-model="searchQuery"
+            :value="search"
             type="text"
-            placeholder="Search workflows..."
+            :placeholder="getMessage('sidepanel_search_flows_placeholder')"
             class="w-full pl-9 pr-3 py-2 text-sm"
             :style="inputStyle"
+            @input="$emit('update:search', ($event.target as HTMLInputElement).value)"
           />
         </div>
 
@@ -33,7 +34,7 @@
           class="flex-shrink-0 p-2"
           :style="refreshButtonStyle"
           @click="$emit('refresh')"
-          title="Refresh"
+          :title="getMessage('sidepanel_refresh_button')"
         >
           <svg
             class="w-4 h-4"
@@ -50,24 +51,10 @@
           </svg>
         </button>
 
-        <!-- New Workflow Button -->
-        <button
-          class="flex-shrink-0 px-3 py-2 text-sm font-medium"
-          :style="newButtonStyle"
-          @click="$emit('create')"
-        >
-          <span class="flex items-center gap-1">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            New
-          </span>
-        </button>
+        <!--
+          예전 "새로 만들기" 버튼은 여기 있었다. 흐름은 녹화로만 만들고, 녹화 버튼은 이
+          목록 바로 위 녹화 표시줄에 있으므로 같은 자리에 버튼을 둘로 두지 않는다.
+        -->
       </div>
 
       <!-- Filter Bar -->
@@ -82,10 +69,10 @@
             @change="$emit('update:onlyBound', ($event.target as HTMLInputElement).checked)"
             class="workflow-checkbox"
           />
-          <span>Current page only</span>
+          <span>{{ getMessage('sidepanel_current_page_only') }}</span>
         </label>
         <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">
-          {{ filteredFlows.length }} workflow{{ filteredFlows.length !== 1 ? 's' : '' }}
+          {{ getMessage('sidepanel_flow_count', [String(flows.length)]) }}
         </span>
       </div>
     </div>
@@ -93,10 +80,7 @@
     <!-- Scrollable Content -->
     <div class="flex-1 overflow-y-auto ac-scroll">
       <!-- Empty State -->
-      <div
-        v-if="filteredFlows.length === 0"
-        class="flex flex-col items-center justify-center py-12 px-4"
-      >
+      <div v-if="flows.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
         <div
           class="w-16 h-16 rounded-full flex items-center justify-center mb-4"
           :style="{ backgroundColor: 'var(--ac-surface-muted)' }"
@@ -117,33 +101,55 @@
           </svg>
         </div>
         <div class="text-sm font-medium mb-1" :style="{ color: 'var(--ac-text)' }">
-          {{ searchQuery ? 'No matching workflows' : 'No workflows yet' }}
+          {{
+            search
+              ? getMessage('sidepanel_no_matching_flows')
+              : getMessage('sidepanel_no_flows_yet')
+          }}
         </div>
         <div class="text-xs text-center mb-4" :style="{ color: 'var(--ac-text-muted)' }">
           {{
-            searchQuery ? 'Try a different search term' : 'Record your first automation workflow'
+            search
+              ? getMessage('sidepanel_search_hides_flows', [String(totalCount)])
+              : getMessage('sidepanel_record_first_flow')
           }}
         </div>
+        <!--
+          검색어 때문에 목록이 비면 "흐름이 하나도 없다" 로 보인다. 실제 시연에서 발행 직후
+          목록이 비어 보인 원인이 이것이었다 (2026-09-05 시연 지적 4항). 전체 개수를 함께
+          알리고 한 번에 되돌릴 버튼을 둔다.
+        -->
         <button
-          v-if="!searchQuery"
+          v-if="search"
+          class="px-4 py-2 text-sm font-medium"
+          :style="newButtonStyle"
+          @click="$emit('update:search', '')"
+        >
+          {{ getMessage('sidepanel_clear_search_button') }}
+        </button>
+        <button
+          v-else
           class="px-4 py-2 text-sm font-medium"
           :style="newButtonStyle"
           @click="$emit('create')"
         >
-          Create Workflow
+          {{ getMessage('sidepanel_create_flow_button') }}
         </button>
       </div>
 
       <!-- Workflow List -->
       <div v-else class="px-4 py-3 space-y-3">
         <WorkflowListItem
-          v-for="flow in filteredFlows"
+          v-for="flow in flows"
           :key="flow.id"
           :flow="flow"
+          :status="statuses?.[flow.id] || null"
           @run="$emit('run', $event)"
           @edit="$emit('edit', $event)"
           @delete="$emit('delete', $event)"
           @export="$emit('export', $event)"
+          @publish="$emit('publish', $event)"
+          @unpublish="$emit('unpublish', $event)"
         />
       </div>
 
@@ -157,7 +163,7 @@
               color: 'var(--ac-text-subtle)',
             }"
           >
-            Advanced
+            {{ getMessage('sidepanel_advanced_section') }}
           </span>
         </div>
 
@@ -179,7 +185,7 @@
               >
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
               </svg>
-              <span>Run History</span>
+              <span>{{ getMessage('sidepanel_run_history_title') }}</span>
             </div>
             <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">{{
               runs.length
@@ -193,7 +199,7 @@
                 class="text-sm py-3"
                 :style="{ color: 'var(--ac-text-muted)' }"
               >
-                No run history yet
+                {{ getMessage('sidepanel_no_run_history') }}
               </div>
               <div v-else class="space-y-2 py-2">
                 <div
@@ -245,9 +251,12 @@
                       :style="{ color: 'var(--ac-text-muted)' }"
                     >
                       <div class="flex items-center gap-2">
-                        <span>状态: {{ getRunStatusText(run) }}</span>
+                        <span
+                          >{{ getMessage('sidepanel_status_label') }}:
+                          {{ getRunStatusText(run) }}</span
+                        >
                         <span v-if="run.finishedAt"
-                          >• 耗时:
+                          >• {{ getMessage('sidepanel_elapsed_time_label') }}:
                           {{
                             Math.round(
                               (new Date(run.finishedAt).getTime() -
@@ -268,7 +277,8 @@
                           entry.status === 'failed' ? 'var(--ac-danger)' : 'var(--ac-text-muted)',
                       }"
                     >
-                      #{{ idx + 1 }} {{ entry.status }} - step={{ entry.stepId }}
+                      #{{ idx + 1 }} {{ entry.status }} -
+                      {{ getMessage('sidepanel_step_label') }}={{ entry.stepId }}
                       <span v-if="entry.tookMs" class="ml-2">{{ entry.tookMs }}ms</span>
                     </div>
                   </div>
@@ -278,131 +288,12 @@
           </Transition>
         </div>
 
-        <!-- Triggers Section -->
-        <div class="advanced-section" :style="sectionStyle">
-          <button
-            class="advanced-section-header"
-            :style="sectionHeaderStyle"
-            @click="toggleSection('triggers')"
-          >
-            <div class="flex items-center gap-2">
-              <svg
-                class="w-4 h-4 transition-transform"
-                :class="{ 'rotate-90': expandedSections.has('triggers') }"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-              <span>Triggers</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-xs" :style="{ color: 'var(--ac-text-subtle)' }">{{
-                triggers.length
-              }}</span>
-              <button
-                class="trigger-add-btn"
-                :style="triggerAddStyle"
-                @click.stop="$emit('createTrigger')"
-                title="Add trigger"
-              >
-                <svg
-                  class="w-3 h-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-            </div>
-          </button>
-
-          <Transition name="section-expand">
-            <div v-if="expandedSections.has('triggers')" class="advanced-section-content">
-              <div
-                v-if="triggers.length === 0"
-                class="text-sm py-3"
-                :style="{ color: 'var(--ac-text-muted)' }"
-              >
-                No triggers configured
-              </div>
-              <div v-else class="space-y-2 py-2">
-                <div
-                  v-for="trigger in triggers"
-                  :key="trigger.id"
-                  class="trigger-item"
-                  :style="triggerItemStyle"
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class="w-2 h-2 rounded-full"
-                        :style="{
-                          backgroundColor:
-                            trigger.enabled !== false
-                              ? 'var(--ac-success)'
-                              : 'var(--ac-text-subtle)',
-                        }"
-                      ></span>
-                      <span class="text-sm font-medium" :style="{ color: 'var(--ac-text)' }">{{
-                        trigger.type
-                      }}</span>
-                      <span class="text-xs" :style="{ color: 'var(--ac-text-muted)' }">
-                        {{ getFlowName(trigger.flowId) }}
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <button
-                        class="trigger-action"
-                        :style="triggerActionStyle"
-                        @click="$emit('editTrigger', trigger.id)"
-                        title="Edit"
-                      >
-                        <svg
-                          class="w-3.5 h-3.5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          stroke-width="2"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                          />
-                        </svg>
-                      </button>
-                      <button
-                        class="trigger-action trigger-action-danger"
-                        :style="triggerActionDangerStyle"
-                        @click="$emit('removeTrigger', trigger.id)"
-                        title="Delete"
-                      >
-                        <svg
-                          class="w-3.5 h-3.5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          stroke-width="2"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Transition>
-        </div>
+        <!--
+          트리거 섹션은 1단계에서 걷어 냈다 (2026-09-05 Codex 교차 리뷰 4항). 화면은 V3
+          RPC 로 트리거를 읽었는데 실제로 트리거를 켜고 끄는 엔진은 V2 trigger-store 라,
+          목록에 보이는 것과 실제로 도는 것이 서로 다른 저장소였다. 예약은 2단계에서
+          예약 레코드가 흐름 id 를 직접 가리키는 방식으로 다시 만든다.
+        -->
       </div>
     </div>
   </div>
@@ -410,12 +301,15 @@
 
 <script lang="ts" setup>
 import { ref, computed } from 'vue';
+import { getMessage } from '@/utils/i18n';
 import WorkflowListItem from './WorkflowListItem.vue';
 
 interface FlowLite {
   id: string;
   name: string;
   description?: string;
+  published?: { slug: string; version: number };
+  needsRepublish?: boolean;
   meta?: {
     domain?: string;
     tags?: string[];
@@ -436,20 +330,21 @@ interface RunLite {
   entries: any[];
 }
 
-interface Trigger {
-  id: string;
-  type: string;
-  flowId: string;
-  enabled?: boolean;
-  [key: string]: any;
-}
-
 const props = defineProps<{
+  /** 이미 검색·필터가 적용된 목록. 거르는 일은 상위(App.vue)가 한 곳에서 한다. */
   flows: FlowLite[];
   runs: RunLite[];
-  triggers: Trigger[];
   onlyBound: boolean;
   openRunId: string | null;
+  /**
+   * 검색어. 이 컴포넌트가 따로 들고 있지 않고 상위 상태를 그대로 비춘다
+   * (2026-09-05 시연 지적 4항). 저장·발행 뒤 상위가 검색을 지워 새 카드가 곧바로 보인다.
+   */
+  search: string;
+  /** 검색·필터 이전의 전체 흐름 수. 검색 때문에 비었을 때 안내에 쓴다. */
+  totalCount: number;
+  /** 흐름별 마지막 실행 결과. 카드에 그대로 보여 준다. */
+  statuses?: Record<string, { kind: 'running' | 'ok' | 'error'; text: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -459,33 +354,15 @@ const emit = defineEmits<{
   (e: 'edit', id: string): void;
   (e: 'delete', id: string): void;
   (e: 'export', id: string): void;
+  (e: 'publish', id: string): void;
+  (e: 'unpublish', id: string): void;
   (e: 'update:onlyBound', value: boolean): void;
+  (e: 'update:search', value: string): void;
   (e: 'toggleRun', id: string): void;
-  (e: 'createTrigger'): void;
-  (e: 'editTrigger', id: string): void;
-  (e: 'removeTrigger', id: string): void;
 }>();
 
 // Local state
-const searchQuery = ref('');
 const expandedSections = ref<Set<string>>(new Set());
-
-// Filtered flows based on search
-const filteredFlows = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase();
-  if (!query) return props.flows;
-
-  return props.flows.filter((flow) => {
-    const name = (flow.name || '').toLowerCase();
-    const desc = (flow.description || '').toLowerCase();
-    const domain = (flow.meta?.domain || '').toLowerCase();
-    const tags = (flow.meta?.tags || []).join(' ').toLowerCase();
-
-    return (
-      name.includes(query) || desc.includes(query) || domain.includes(query) || tags.includes(query)
-    );
-  });
-});
 
 // Helper functions
 function getFlowName(flowId: string): string {
@@ -521,17 +398,19 @@ function getRunStatusColor(run: RunLite): string {
 function getRunStatusText(run: RunLite): string {
   if (run.status) {
     const statusMap: Record<string, string> = {
-      queued: '排队中',
-      running: '运行中',
-      paused: '已暂停',
-      succeeded: '成功',
-      failed: '失败',
-      canceled: '已取消',
+      queued: getMessage('sidepanel_run_status_queued'),
+      running: getMessage('sidepanel_run_status_running'),
+      paused: getMessage('sidepanel_run_status_paused'),
+      succeeded: getMessage('sidepanel_run_status_succeeded'),
+      failed: getMessage('sidepanel_run_status_failed'),
+      canceled: getMessage('sidepanel_run_status_canceled'),
     };
     return statusMap[run.status] || run.status;
   }
   // V2 fallback
-  return run.success ? '成功' : '失败';
+  return run.success
+    ? getMessage('sidepanel_run_status_succeeded')
+    : getMessage('sidepanel_run_status_failed');
 }
 
 function formatTime(dateStr: string): string {
@@ -597,25 +476,6 @@ const runItemStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface-muted)',
   borderRadius: 'var(--ac-radius-button)',
 }));
-
-const triggerItemStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-
-const triggerAddStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent-subtle)',
-  color: 'var(--ac-accent)',
-  borderRadius: '50%',
-}));
-
-const triggerActionStyle = computed(() => ({
-  color: 'var(--ac-text-muted)',
-}));
-
-const triggerActionDangerStyle = computed(() => ({
-  color: 'var(--ac-danger)',
-}));
 </script>
 
 <style scoped>
@@ -678,52 +538,14 @@ const triggerActionDangerStyle = computed(() => ({
   padding: 0 12px 12px;
 }
 
-.run-item,
-.trigger-item {
+.run-item {
   padding: 10px 12px;
   cursor: pointer;
   transition: background-color var(--ac-motion-fast, 120ms) ease;
 }
 
-.run-item:hover,
-.trigger-item:hover {
+.run-item:hover {
   background-color: var(--ac-hover-bg, #f5f5f4) !important;
-}
-
-.trigger-add-btn {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.trigger-add-btn:hover {
-  transform: scale(1.1);
-}
-
-.trigger-action {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.trigger-action:hover {
-  background-color: var(--ac-hover-bg, #f5f5f4);
-}
-
-.trigger-action-danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
 }
 
 /* Section expand transition */

@@ -17,6 +17,9 @@ import {
   type FlowSchedule,
 } from './flow-store';
 import { listRuns } from './flow-store';
+// 2026-09-05 사이드패널 1단계 A: 발행 목록 조회. 위 import 블록을 고치지 않으려고 줄을
+// 따로 추가했다 (같은 모듈을 두 번 import 해도 문제 없다).
+import { listPublished } from './flow-store';
 import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
@@ -191,8 +194,11 @@ async function runFlowFromTrigger(
   }
 }
 
-async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
-  return await RecorderManager.start(meta);
+async function startRecording(
+  meta?: Partial<Flow>,
+  options?: { tabId?: number },
+): Promise<{ success: boolean; error?: string }> {
+  return await RecorderManager.start(meta, options);
 }
 
 async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?: string }> {
@@ -230,7 +236,12 @@ export function initRecordReplayListeners() {
       // rr_recorder_event 交由 ContentMessageHandler 处理
       switch (message?.type) {
         case BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING: {
-          startRecording(message.meta)
+          // tabId 가 오면 그 탭에서 녹화한다 (팝업이 눌린 순간의 탭). 없으면 예전처럼
+          // 진입점 헬퍼가 활성 탭을 찾는다.
+          startRecording(
+            message.meta,
+            typeof message.tabId === 'number' ? { tabId: message.tabId } : undefined,
+          )
             .then(sendResponse)
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
@@ -283,11 +294,16 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_PUBLISH_FLOW: {
-          getFlow(message.flowId)
+          // 호출자가 흐름 본문을 함께 보냈고 그 id 가 요청 id 와 같으면 저장소를 다시 읽지
+          // 않고 그 내용을 발행한다 (2026-09-05 시연 지적 3항). 사이드패널은 방금 저장한
+          // 객체를 그대로 실어 보내므로, 저장과 발행 사이의 읽기 한 번이 통째로 사라진다.
+          const suppliedFlow =
+            message.flow && message.flow.id === message.flowId ? (message.flow as Flow) : null;
+          (suppliedFlow ? Promise.resolve(suppliedFlow) : getFlow(message.flowId))
             .then(async (flow) => {
               if (!flow) return sendResponse({ success: false, error: 'flow not found' });
-              await publishFlow(flow, message.slug);
-              sendResponse({ success: true });
+              const info = await publishFlow(flow, message.slug);
+              sendResponse({ success: true, published: info });
             })
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
@@ -348,6 +364,33 @@ export function initRecordReplayListeners() {
           listRuns()
             .then((runs) => sendResponse({ success: true, runs }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        // 2026-09-05 사이드패널 1단계 A 에서 추가한 조회 두 개.
+        case BACKGROUND_MESSAGE_TYPES.RR_LIST_PUBLISHED: {
+          listPublished()
+            .then((published) => sendResponse({ success: true, published }))
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_SNAPSHOT: {
+          // 녹화 중 표시(빨간 점·경과 시간·단계 수)의 진실은 백그라운드다. 사이드패널을
+          // 닫았다 열어도 이 응답 하나로 화면이 복원된다. 상태만 주는
+          // RR_GET_RECORDING_STATUS 는 그대로 두고 별도 메시지로 붙였다.
+          const snapshotSession = recordingSession.getSession();
+          const snapshotFlow = recordingSession.getFlow();
+          sendResponse({
+            success: true,
+            status: recordingSession.getStatus(),
+            sessionId: snapshotSession.sessionId,
+            originTabId: snapshotSession.originTabId,
+            startUrl: snapshotSession.startUrl ?? snapshotFlow?.startUrl,
+            flowId: snapshotFlow?.id,
+            flowName: snapshotFlow?.name,
+            startTitle: snapshotFlow?.meta?.startTitle,
+            stepCount: Array.isArray(snapshotFlow?.nodes) ? snapshotFlow.nodes.length : 0,
+            startedAt: snapshotFlow?.meta?.createdAt,
+          });
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_TRIGGERS: {

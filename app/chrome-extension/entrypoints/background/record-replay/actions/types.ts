@@ -354,6 +354,8 @@ export interface FillParams {
 export interface KeyParams {
   keys: Resolvable<string>; // e.g. "Backspace Enter" or "cmd+a"
   target?: ElementTarget;
+  /** Post-key waits. Same shape as ClickParams.after (2026-09-05 Codex cross review, item 5). */
+  after?: { waitForNavigation?: boolean; waitForNetworkIdle?: boolean };
 }
 
 export type ScrollMode = 'element' | 'offset' | 'container';

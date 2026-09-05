@@ -4,26 +4,59 @@
     <SidepanelNavigator :activeTab="activeTab" @change="handleTabChange" />
 
     <!-- Workflows Tab -->
-    <div v-show="activeTab === 'workflows'" class="h-full">
+    <div v-show="activeTab === 'workflows'" class="h-full flex flex-col">
+      <!-- 녹화 표시줄: 시작·중지 버튼과 녹화 중 표시가 여기 있다 -->
+      <RecordingBar
+        :recording="recorder.isRecording.value"
+        :status="recorder.status.value"
+        :step-count="recorder.stepCount.value"
+        :elapsed-ms="recorder.elapsedMs.value"
+        :busy="recorder.busy.value"
+        @start="startRecording"
+        @stop="stopRecording"
+      />
       <WorkflowsView
+        class="flex-1 min-h-0"
         :flows="filtered"
         :runs="runs"
-        :triggers="triggers"
         :only-bound="onlyBound"
         :open-run-id="openRunId"
+        :search="search"
+        :total-count="flows.length"
+        :statuses="flowStatuses"
         @refresh="handleWorkflowRefresh"
         @create="createFlow"
         @run="run"
         @edit="edit"
         @delete="remove"
         @export="exportFlow"
+        @publish="publish"
+        @unpublish="unpublish"
         @update:only-bound="onlyBound = $event"
+        @update:search="search = $event"
         @toggle-run="toggleRun"
-        @create-trigger="createTrigger"
-        @edit-trigger="editTrigger"
-        @remove-trigger="removeTrigger"
       />
     </div>
+
+    <!-- 저장 화면(마법사): 녹화 중지 직후와 카드의 편집 버튼이 같은 화면을 연다 -->
+    <SaveFlowWizard
+      v-if="wizardFlowId"
+      :flow-id="wizardFlowId"
+      @close="wizardFlowId = null"
+      @saved="handleWizardSaved"
+      @toast="showToast($event.text, $event.kind)"
+    />
+
+    <!-- 카드에서 실행할 때 필요한 값 입력 -->
+    <RunVariablesDialog
+      v-if="runAskVariables"
+      :variables="runAskVariables"
+      @cancel="cancelRunVariables"
+      @submit="submitRunVariables"
+    />
+
+    <!-- 토스트: 실행·발행 실패를 콘솔에만 남기지 않는다 -->
+    <div v-if="toast" class="sp-toast" :style="toastStyle">{{ toast.text }}</div>
 
     <!-- Element Markers Tab -->
     <div v-show="activeTab === 'element-markers'" class="element-markers-content">
@@ -40,7 +73,7 @@
             <input
               v-model="markerSearch"
               class="em-search-input"
-              placeholder="搜索标注名称、选择器..."
+              :placeholder="getMessage('sidepanel_marker_search_placeholder')"
               type="text"
             />
             <button
@@ -57,7 +90,11 @@
               </svg>
             </button>
           </div>
-          <button class="em-add-btn" @click="openMarkerEditor()" title="新增标注">
+          <button
+            class="em-add-btn"
+            @click="openMarkerEditor()"
+            :title="getMessage('sidepanel_marker_add')"
+          >
             <svg viewBox="0 0 20 20" width="18" height="18">
               <path
                 fill="currentColor"
@@ -71,7 +108,13 @@
         <div v-if="markerEditorOpen" class="em-modal-overlay" @click.self="closeMarkerEditor">
           <div class="em-modal">
             <div class="em-modal-header">
-              <h3 class="em-modal-title">{{ editingMarkerId ? '编辑标注' : '新增标注' }}</h3>
+              <h3 class="em-modal-title">
+                {{
+                  editingMarkerId
+                    ? getMessage('sidepanel_marker_edit')
+                    : getMessage('sidepanel_marker_add')
+                }}
+              </h3>
               <button class="em-modal-close" @click="closeMarkerEditor">
                 <svg viewBox="0 0 20 20" width="18" height="18">
                   <path
@@ -84,11 +127,11 @@
             <form @submit.prevent="saveMarker" class="em-form">
               <div class="em-form-row">
                 <div class="em-field">
-                  <label class="em-field-label">名称</label>
+                  <label class="em-field-label">{{ getMessage('nameLabel') }}</label>
                   <input
                     v-model="markerForm.name"
                     class="em-input"
-                    placeholder="例如: 登录按钮"
+                    :placeholder="getMessage('sidepanel_marker_name_placeholder')"
                     required
                   />
                 </div>
@@ -96,21 +139,27 @@
 
               <div class="em-form-row em-form-row-multi">
                 <div class="em-field">
-                  <label class="em-field-label">选择器类型</label>
+                  <label class="em-field-label">{{
+                    getMessage('sidepanel_marker_selector_type_label')
+                  }}</label>
                   <div class="em-select-wrapper">
                     <select v-model="markerForm.selectorType" class="em-select">
-                      <option value="css">CSS Selector</option>
+                      <option value="css">{{ getMessage('sidepanel_selector_type_css') }}</option>
                       <option value="xpath">XPath</option>
                     </select>
                   </div>
                 </div>
                 <div class="em-field">
-                  <label class="em-field-label">匹配类型</label>
+                  <label class="em-field-label">{{
+                    getMessage('sidepanel_marker_match_type_label')
+                  }}</label>
                   <div class="em-select-wrapper">
                     <select v-model="markerForm.matchType" class="em-select">
-                      <option value="prefix">路径前缀</option>
-                      <option value="exact">精确匹配</option>
-                      <option value="host">域名</option>
+                      <option value="prefix">{{
+                        getMessage('sidepanel_match_type_prefix')
+                      }}</option>
+                      <option value="exact">{{ getMessage('sidepanel_match_type_exact') }}</option>
+                      <option value="host">{{ getMessage('domainLabel') }}</option>
                     </select>
                   </div>
                 </div>
@@ -118,11 +167,13 @@
 
               <div class="em-form-row">
                 <div class="em-field">
-                  <label class="em-field-label">选择器</label>
+                  <label class="em-field-label">{{
+                    getMessage('sidepanel_marker_selector_label')
+                  }}</label>
                   <textarea
                     v-model="markerForm.selector"
                     class="em-textarea"
-                    placeholder="CSS 选择器或 XPath"
+                    :placeholder="getMessage('sidepanel_marker_selector_placeholder')"
                     rows="3"
                     required
                   ></textarea>
@@ -131,10 +182,14 @@
 
               <div class="em-modal-actions">
                 <button type="button" class="em-btn em-btn-ghost" @click="closeMarkerEditor">
-                  取消
+                  {{ getMessage('cancelButton') }}
                 </button>
                 <button type="submit" class="em-btn em-btn-primary">
-                  {{ editingMarkerId ? '更新' : '保存' }}
+                  {{
+                    editingMarkerId
+                      ? getMessage('sidepanel_update_button')
+                      : getMessage('saveButton')
+                  }}
                 </button>
               </div>
             </form>
@@ -146,14 +201,19 @@
           <!-- Statistics (compact) -->
           <div class="em-stats-bar">
             <span class="em-stats-text">
-              <template v-if="markerSearch">
-                筛选出 <strong>{{ filteredMarkers.length }}</strong> 个标注 （共
-                {{ markers.length }} 个，{{ groupedMarkers.length }} 个域名）
-              </template>
-              <template v-else>
-                共 <strong>{{ markers.length }}</strong> 个标注，
-                <strong>{{ groupedMarkers.length }}</strong> 个域名
-              </template>
+              <template v-if="markerSearch">{{
+                getMessage('sidepanel_marker_stats_filtered', [
+                  String(filteredMarkers.length),
+                  String(markers.length),
+                  String(groupedMarkers.length),
+                ])
+              }}</template>
+              <template v-else>{{
+                getMessage('sidepanel_marker_stats_all', [
+                  String(markers.length),
+                  String(groupedMarkers.length),
+                ])
+              }}</template>
             </span>
           </div>
 
@@ -176,7 +236,9 @@
                   <path fill="currentColor" d="M6 8l4 4 4-4" />
                 </svg>
                 <h3 class="em-domain-name">{{ domainGroup.domain }}</h3>
-                <span class="em-domain-count">{{ domainGroup.count }} 个标注</span>
+                <span class="em-domain-count">{{
+                  getMessage('sidepanel_marker_domain_count', [String(domainGroup.count)])
+                }}</span>
               </div>
             </div>
 
@@ -202,7 +264,7 @@
                           <button
                             class="em-action-btn em-action-verify"
                             @click="validateMarker(marker)"
-                            title="验证"
+                            :title="getMessage('sidepanel_marker_verify')"
                           >
                             <svg viewBox="0 0 24 24" width="14" height="14">
                               <path
@@ -215,7 +277,7 @@
                           <button
                             class="em-action-btn em-action-edit"
                             @click="editMarker(marker)"
-                            title="编辑"
+                            :title="getMessage('sidepanel_edit_button')"
                           >
                             <svg viewBox="0 0 24 24" width="14" height="14">
                               <path
@@ -228,7 +290,7 @@
                           <button
                             class="em-action-btn em-action-delete"
                             @click="deleteMarker(marker)"
-                            title="删除"
+                            :title="getMessage('deleteButton')"
                           >
                             <svg viewBox="0 0 24 24" width="14" height="14">
                               <path
@@ -259,17 +321,17 @@
 
         <!-- No search results -->
         <div v-else-if="markers.length > 0 && filteredMarkers.length === 0" class="em-empty">
-          <p>未找到匹配的标注</p>
+          <p>{{ getMessage('sidepanel_marker_no_match') }}</p>
           <button class="em-btn em-btn-ghost em-empty-btn" @click="markerSearch = ''">
-            清除搜索
+            {{ getMessage('sidepanel_clear_search_button') }}
           </button>
         </div>
 
         <!-- Empty state -->
         <div v-else class="em-empty">
-          <p>暂无标注元素</p>
+          <p>{{ getMessage('sidepanel_marker_empty') }}</p>
           <button class="em-btn em-btn-primary em-empty-btn" @click="openMarkerEditor()">
-            新增标注
+            {{ getMessage('sidepanel_marker_add') }}
           </button>
         </div>
       </div>
@@ -281,10 +343,19 @@
 import { computed, onMounted, ref, onUnmounted, watch } from 'vue';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
+import { getMessage } from '@/utils/i18n';
 import SidepanelNavigator from './components/SidepanelNavigator.vue';
-import { WorkflowsView } from './components/workflows';
+import {
+  WorkflowsView,
+  RecordingBar,
+  SaveFlowWizard,
+  RunVariablesDialog,
+} from './components/workflows';
 import { useAgentTheme } from './composables/useAgentTheme';
 import { useWorkflowsV3, type FlowLite } from './composables/useWorkflowsV3';
+import { useRecorder } from './composables/useRecorder';
+import { requiredRunVariables, type WizardVariableDef } from './utils/flow-wizard';
+import { isRecordableUrl, parsePanelDeepLink, sidepanelPath } from './utils/panel-deeplink';
 
 // Agent theme for consistent styling
 const { theme: currentTheme, initTheme } = useAgentTheme();
@@ -303,12 +374,48 @@ function handleTabChange(tab: 'workflows' | 'element-markers') {
 }
 
 // Workflows state - using V3 data layer
-const workflowsV3 = useWorkflowsV3({ autoConnect: true });
-const { flows, runs, triggers } = workflowsV3;
+const workflowsV3 = useWorkflowsV3();
+const { flows, runs } = workflowsV3;
 const onlyBound = ref(false);
 const search = ref('');
 const currentUrl = ref('');
+const currentTitle = ref('');
 const openRunId = ref<string | null>(null);
+
+// 녹화 상태. 진실은 백그라운드에 있고 이 컴포저블이 주기적으로 읽어 온다.
+const recorder = useRecorder();
+
+// 저장 화면(마법사)에서 열고 있는 흐름
+const wizardFlowId = ref<string | null>(null);
+
+// 카드에서 실행할 때 값을 받아야 하는 변수와, 그 값을 기다리는 흐름 id
+const runAskVariables = ref<WizardVariableDef[] | null>(null);
+const runAskFlowId = ref<string | null>(null);
+
+// 흐름별 마지막 실행 결과. 카드에 그대로 표시한다.
+const flowStatuses = ref<Record<string, { kind: 'running' | 'ok' | 'error'; text: string }>>({});
+
+// 토스트 한 개
+const toast = ref<{ text: string; kind: 'ok' | 'error' } | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showToast(text: string, kind: 'ok' | 'error' = 'ok') {
+  toast.value = { text, kind };
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.value = null;
+  }, 4000);
+}
+
+const toastStyle = computed(() => ({
+  backgroundColor:
+    toast.value?.kind === 'error' ? 'var(--ac-danger, #ef4444)' : 'var(--ac-text, #262626)',
+  color: 'var(--ac-surface, #ffffff)',
+}));
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 // Element markers state
 const currentPageUrl = ref('');
@@ -343,8 +450,8 @@ const groupedMarkers = computed(() => {
 
   for (const marker of filteredMarkers.value) {
     // Use pre-normalized fields from storage instead of reparsing URLs
-    const domain = marker.host || '(本地文件)';
-    const fullUrl = marker.url || '(未知URL)';
+    const domain = marker.host || getMessage('sidepanel_marker_local_file');
+    const fullUrl = marker.url || getMessage('sidepanel_marker_unknown_url');
 
     if (!groups.has(domain)) {
       groups.set(domain, new Map());
@@ -408,6 +515,18 @@ async function handleWorkflowRefresh() {
   await workflowsV3.refresh();
 }
 
+/**
+ * 저장 화면이 저장·발행을 마쳤다.
+ *
+ * 검색어를 먼저 비운다 (2026-09-05 시연 지적 4항). 시연에서 발행 직후 목록이 "흐름 0개" 로
+ * 보였는데, 목록이 비어서가 아니라 검색어가 걸려 있어 새 카드가 걸러진 것이었다. 방금 만든
+ * 흐름은 무조건 보여야 한다.
+ */
+async function handleWizardSaved() {
+  search.value = '';
+  await handleWorkflowRefresh();
+}
+
 async function exportFlow(id: string) {
   try {
     const flowData = await workflowsV3.exportFlow(id);
@@ -421,61 +540,199 @@ async function exportFlow(id: string) {
       URL.revokeObjectURL(url);
     }
   } catch (e) {
-    console.warn('Export failed:', e);
+    showToast(getMessage('sidepanel_flow_export_failed', [errorText(e)]), 'error');
   }
-}
-
-function createTrigger() {
-  // V3 Trigger management not yet implemented
-  alert('V3 Trigger 管理尚未实现，暂时无法创建触发器');
-}
-
-function editTrigger(_id: string) {
-  // V3 Trigger management not yet implemented
-  alert('V3 Trigger 管理尚未实现，暂时无法编辑触发器');
-}
-
-async function removeTrigger(id: string) {
-  await workflowsV3.deleteTrigger(id);
 }
 
 function toggleRun(id: string) {
   openRunId.value = openRunId.value === id ? null : id;
 }
 
+/**
+ * 카드의 실행 버튼.
+ *
+ * 필요한 값(민감 변수, 기본값이 빈 변수)이 있으면 작은 폼을 먼저 띄운다. 값은 그 폼에서만
+ * 살고 흐름에 저장되지 않는다.
+ */
 async function run(id: string) {
   try {
-    const result = await workflowsV3.runFlow(id);
-    if (!result) console.warn('回放失败');
-  } catch {}
+    const flow = await workflowsV3.getFlowById(id);
+    const needed = flow ? requiredRunVariables(flow) : [];
+    if (needed.length > 0) {
+      runAskFlowId.value = id;
+      runAskVariables.value = needed;
+      return;
+    }
+    await executeFlow(id, {});
+  } catch (e) {
+    flowStatuses.value = {
+      ...flowStatuses.value,
+      [id]: { kind: 'error', text: getMessage('sidepanel_run_failed', [errorText(e)]) },
+    };
+    showToast(getMessage('sidepanel_run_failed', [errorText(e)]), 'error');
+  }
 }
 
+function cancelRunVariables() {
+  runAskVariables.value = null;
+  runAskFlowId.value = null;
+}
+
+function submitRunVariables(values: Record<string, string>) {
+  const id = runAskFlowId.value;
+  runAskVariables.value = null;
+  runAskFlowId.value = null;
+  if (id) void executeFlow(id, values);
+}
+
+/** 실행 한 건. 성패를 카드 상태와 토스트로 남긴다 (조용한 실패 금지). */
+async function executeFlow(id: string, args: Record<string, string>) {
+  flowStatuses.value = {
+    ...flowStatuses.value,
+    [id]: { kind: 'running', text: getMessage('sidepanel_run_running') },
+  };
+  try {
+    const result = await workflowsV3.runFlow(id, { args });
+    const summary = result.summary || { total: 0, success: 0, failed: 0, tookMs: 0 };
+    if (result.success) {
+      const text = getMessage('sidepanel_run_succeeded', [
+        String(summary.success),
+        (summary.tookMs / 1000).toFixed(1),
+      ]);
+      flowStatuses.value = { ...flowStatuses.value, [id]: { kind: 'ok', text } };
+      showToast(text, 'ok');
+    } else {
+      const failed = (result.logs || []).find((entry) => entry.status === 'failed');
+      const detail = failed ? `${failed.stepId}: ${failed.message || ''}`.trim() : '';
+      const text = getMessage('sidepanel_run_failed', [
+        detail || String(summary.failed) + '/' + String(summary.total),
+      ]);
+      flowStatuses.value = { ...flowStatuses.value, [id]: { kind: 'error', text } };
+      showToast(text, 'error');
+    }
+  } catch (e) {
+    const text = getMessage('sidepanel_run_failed', [errorText(e)]);
+    flowStatuses.value = { ...flowStatuses.value, [id]: { kind: 'error', text } };
+    showToast(text, 'error');
+  }
+}
+
+/** 카드의 편집 버튼. 저장 화면(마법사)을 그 흐름으로 연다. */
 function edit(id: string) {
-  // V3 Builder not yet implemented - show message
-  alert('V3 Builder 尚未实现，暂时无法编辑工作流');
-  // TODO: openBuilder({ flowId: id });
+  wizardFlowId.value = id;
 }
 
+/** 흐름은 녹화로 만든다. 빈 목록의 버튼도 녹화를 시작한다. */
 function createFlow() {
-  // V3 Builder not yet implemented - show message
-  alert('V3 Builder 尚未实现，暂时无法创建工作流');
-  // TODO: openBuilder({ newFlow: true });
+  void startRecording();
+}
+
+async function publish(id: string) {
+  try {
+    await workflowsV3.publishFlow(id);
+    showToast(getMessage('sidepanel_wizard_published'), 'ok');
+  } catch (e) {
+    showToast(getMessage('sidepanel_publish_failed', [errorText(e)]), 'error');
+  }
+}
+
+async function unpublish(id: string) {
+  try {
+    await workflowsV3.unpublishFlow(id);
+    showToast(getMessage('sidepanel_unpublished'), 'ok');
+  } catch (e) {
+    showToast(getMessage('sidepanel_unpublish_failed', [errorText(e)]), 'error');
+  }
 }
 
 async function remove(id: string) {
+  const ok = confirm(getMessage('sidepanel_flow_delete_confirm'));
+  if (!ok) return;
   try {
-    const ok = confirm('确认删除该工作流？此操作不可恢复');
-    if (!ok) return;
     await workflowsV3.deleteFlow(id);
-  } catch {}
+  } catch (e) {
+    showToast(getMessage('sidepanel_flow_delete_failed', [errorText(e)]), 'error');
+  }
 }
 
-function openBuilder(opts: { flowId?: string; newFlow?: boolean }) {
-  // Open dedicated builder window for better UX
-  const url = new URL(chrome.runtime.getURL('builder.html'));
-  if (opts.flowId) url.searchParams.set('flowId', opts.flowId);
-  if (opts.newFlow) url.searchParams.set('new', '1');
-  chrome.windows.create({ url: url.toString(), type: 'popup', width: 1280, height: 800 });
+// ==================== 녹화 ====================
+
+/**
+ * 녹화 시작.
+ *
+ * `tabId` 는 팝업에서 넘어온 "그때 보고 있던 탭" 이다. 없으면 백그라운드가 활성 탭을 잡는다.
+ * 어느 쪽이든 시작 전에 그 탭의 주소를 확인한다 - chrome:// 나 확장 페이지에는 녹화기를
+ * 넣을 수 없어 시작해 봐야 단계가 하나도 잡히지 않는다.
+ */
+async function startRecording(tabId?: number) {
+  try {
+    const target = await resolveRecordingTab(tabId);
+    if (!target) {
+      showToast(getMessage('sidepanel_record_no_tab'), 'error');
+      return;
+    }
+    if (!isRecordableUrl(target.url)) {
+      showToast(getMessage('sidepanel_record_restricted_url'), 'error');
+      return;
+    }
+    await recorder.start(target.id);
+    currentUrl.value = target.url ?? currentUrl.value;
+    currentTitle.value = target.title ?? currentTitle.value;
+  } catch (e) {
+    showToast(getMessage('sidepanel_record_start_failed', [errorText(e)]), 'error');
+  }
+}
+
+/**
+ * 녹화할 탭을 정한다.
+ *
+ * **id 가 주어졌으면 그 탭만 쓴다.** 예전에는 그 탭이 이미 닫혔을 때 활성 탭으로 되돌아갔는데,
+ * 실제 시연에서 그 폴백이 사용자가 보고 있던 전혀 다른 탭을 녹화해 버렸다(2026-09-05 시연
+ * 지적 1항). 지목된 탭이 없으면 아무것도 녹화하지 않고 그대로 거절한다.
+ *
+ * id 가 없을 때(패널의 녹화 시작 버튼)만 활성 탭을 찾는다. 사용자가 그 순간 보고 있는
+ * 화면을 녹화하겠다는 뜻이라 이 경로에서는 활성 탭이 정답이다.
+ */
+async function resolveRecordingTab(
+  tabId?: number,
+): Promise<{ id: number; url?: string; title?: string } | null> {
+  if (typeof tabId === 'number') {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (typeof tab?.id === 'number') return { id: tab.id, url: tab.url, title: tab.title };
+    } catch {
+      // 지목된 탭이 사라졌다. 다른 탭으로 대신하지 않는다.
+    }
+    return null;
+  }
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (typeof tab?.id === 'number') return { id: tab.id, url: tab.url, title: tab.title };
+  } catch {
+    // 아래에서 null 을 돌려준다.
+  }
+  return null;
+}
+
+/**
+ * 녹화 중지.
+ *
+ * 흐름은 백그라운드가 이미 저장했다(`recording/recorder-manager.ts`). 여기서는 그 id 를
+ * 받아 저장 화면을 열기만 한다. 새로 저장하지 않으니 저장 실패 경로가 하나 줄어든다.
+ */
+async function stopRecording() {
+  try {
+    const result = await recorder.stop();
+    await handleWorkflowRefresh();
+    if (result.warning) showToast(result.warning, 'error');
+    if (result.flowId) {
+      wizardFlowId.value = result.flowId;
+    } else {
+      showToast(getMessage('sidepanel_record_nothing_captured'), 'error');
+    }
+  } catch (e) {
+    showToast(getMessage('sidepanel_record_stop_failed', [errorText(e)]), 'error');
+  }
 }
 
 // Element markers functions
@@ -598,7 +855,7 @@ function cancelEdit() {
 
 async function deleteMarker(marker: ElementMarker) {
   try {
-    const confirmed = confirm(`确定要删除标注 "${marker.name}" 吗?`);
+    const confirmed = confirm(getMessage('sidepanel_marker_delete_confirm', [marker.name]));
     if (!confirmed) return;
 
     const res: any = await chrome.runtime.sendMessage({
@@ -719,32 +976,72 @@ onMounted(async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentUrl.value = String(tab?.url || '');
+    currentTitle.value = String(tab?.title || '');
   } catch {}
 
-  // Check URL params for initial tab
-  const params = new URLSearchParams(window.location.search);
-  const tabParam = params.get('tab');
-  if (tabParam === 'element-markers') {
+  // 주소의 지시를 읽는다. 팝업이 넘긴 ?record 와 ?tabId 는 한 번짜리다.
+  const deepLink = parsePanelDeepLink(window.location.search);
+  if (deepLink.tab === 'element-markers') {
     activeTab.value = 'element-markers';
     await loadMarkers();
-  } else if (tabParam === 'workflows') {
+  } else if (deepLink.tab === 'workflows') {
     activeTab.value = 'workflows';
   }
-  // v1.0.36: agent-chat 진입 차단 — workflows 로 fallback
+  // v1.0.36: agent-chat 진입 차단, workflows 로 fallback
 
-  // V3 workflows data is auto-refreshed by useWorkflowsV3 composable
-  // No need to manually call refresh here
+  // 흐름 목록·실행 이력은 useWorkflowsV3 가 마운트될 때 한 번 읽는다.
 
-  // V2 push-based refresh is no longer needed - V3 uses event subscription
+  // 지시를 **읽는 즉시** 소비한다. 두 곳을 모두 지워야 한 번만 실행된다.
+  //   1) 이 문서의 주소 - 새로고침으로 다시 실행되는 것을 막는다.
+  //   2) 패널의 영구 path - setOptions 로 저장된 주소라, 지우지 않으면 패널을 다시 열
+  //      때마다 녹화가 또 시작된다.
+  if (deepLink.record) {
+    try {
+      history.replaceState(null, '', `${window.location.pathname}${deepLink.cleanedSearch}`);
+    } catch {
+      // 주소를 못 고쳐도 아래 setOptions 가 다음 열기를 막는다.
+    }
+    try {
+      const sidePanel = (
+        chrome as unknown as { sidePanel?: { setOptions?: (o: unknown) => Promise<void> } }
+      ).sidePanel;
+      if (sidePanel?.setOptions) {
+        await sidePanel.setOptions({ path: sidepanelPath(deepLink.tab), enabled: true });
+      }
+    } catch {
+      // 패널 옵션을 못 되돌려도 위 replaceState 가 이 세션을 지킨다.
+    }
+  }
+
+  if (deepLink.record === 'start') {
+    await startRecording(deepLink.recordTabId);
+  } else if (deepLink.record === 'stop') {
+    await stopRecording();
+  }
 });
 
 onUnmounted(() => {
-  // V3 workflows cleanup is handled by useWorkflowsV3 composable
-  // No additional cleanup needed
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = null;
 });
 </script>
 
 <style scoped>
+/* 토스트: 실행·발행 결과를 사용자에게 보여 준다 */
+.sp-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--ac-radius-inner, 8px);
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 70;
+  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.2));
+  word-break: break-word;
+}
+
 /* reuse popup styles; only tune list item spacing for sidepanel width */
 .rr-item {
   margin-bottom: 8px;
@@ -1172,12 +1469,13 @@ onUnmounted(() => {
   }
 }
 
-/* Content wrapper with left border for visual hierarchy */
+/* Content wrapper with subtle background for visual hierarchy */
 .em-content-wrapper {
   margin-left: 8px;
   margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--ac-border, #e5e5e5);
+  padding: 4px 0 4px 12px;
+  border-radius: var(--ac-radius-inner, 8px);
+  background: var(--ac-surface-muted, #f5f5f5);
 }
 
 /* URL Group */

@@ -8,10 +8,23 @@
     <div class="workflow-content">
       <!-- Title and description -->
       <div class="workflow-info">
-        <div class="workflow-name" :style="nameStyle">{{ flow.name || 'Untitled' }}</div>
-        <div class="workflow-desc" :style="descStyle">{{
-          flow.description || 'No description'
+        <div class="workflow-name" :style="nameStyle">{{
+          flow.name || getMessage('sidepanel_untitled_flow')
         }}</div>
+        <!-- 발행 상태 배지 -->
+        <div v-if="flow.published || flow.needsRepublish" class="workflow-badges">
+          <span v-if="flow.published" class="workflow-badge" :style="publishedBadgeStyle">
+            {{ getMessage('sidepanel_published_badge') }}
+          </span>
+          <span v-if="flow.needsRepublish" class="workflow-badge" :style="staleBadgeStyle">
+            {{ getMessage('sidepanel_republish_badge') }}
+          </span>
+        </div>
+        <div class="workflow-desc" :style="descStyle">{{
+          flow.description || getMessage('sidepanel_no_description')
+        }}</div>
+        <!-- 실행 결과. 실패를 콘솔에만 남기지 않고 카드에 남긴다. -->
+        <div v-if="status" class="workflow-status" :style="statusStyle">{{ status.text }}</div>
         <!-- Tags -->
         <div v-if="hasTags" class="workflow-tags">
           <span v-if="flow.meta?.domain" class="workflow-tag" :style="tagDomainStyle">
@@ -34,7 +47,7 @@
           class="workflow-action workflow-action-primary"
           :style="actionPrimaryStyle"
           @click.stop="$emit('run', flow.id)"
-          title="Run workflow"
+          :title="getMessage('sidepanel_run_flow_button')"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M8 5v14l11-7z" />
@@ -44,7 +57,7 @@
           class="workflow-action"
           :style="actionStyle"
           @click.stop="$emit('edit', flow.id)"
-          title="Edit workflow"
+          :title="getMessage('sidepanel_edit_flow_button')"
         >
           <svg
             viewBox="0 0 24 24"
@@ -65,7 +78,7 @@
           class="workflow-action workflow-action-more"
           :style="actionStyle"
           @click.stop="toggleMoreMenu"
-          title="More actions"
+          :title="getMessage('sidepanel_more_actions_button')"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <circle cx="12" cy="5" r="2" />
@@ -77,6 +90,27 @@
         <!-- More menu dropdown -->
         <Transition name="menu-fade">
           <div v-if="showMoreMenu" class="workflow-more-menu" :style="menuStyle" @click.stop>
+            <button class="workflow-menu-item" :style="menuItemStyle" @click="handlePublishToggle">
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 20V8m0 0L8 12m4-4l4 4M4 4h16"
+                />
+              </svg>
+              <span>{{
+                flow.published
+                  ? getMessage('sidepanel_unpublish_action')
+                  : getMessage('sidepanel_publish_action')
+              }}</span>
+            </button>
             <button class="workflow-menu-item" :style="menuItemStyle" @click="handleExport">
               <svg
                 viewBox="0 0 24 24"
@@ -92,7 +126,7 @@
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
                 />
               </svg>
-              <span>Export</span>
+              <span>{{ getMessage('sidepanel_export_button') }}</span>
             </button>
             <button
               class="workflow-menu-item workflow-menu-item-danger"
@@ -113,7 +147,7 @@
                   d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                 />
               </svg>
-              <span>Delete</span>
+              <span>{{ getMessage('deleteButton') }}</span>
             </button>
           </div>
         </Transition>
@@ -124,11 +158,16 @@
 
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { getMessage } from '@/utils/i18n';
 
 interface FlowLite {
   id: string;
   name: string;
   description?: string;
+  /** 발행돼 있으면 그 레코드 (slug·version). 없으면 초안이다. */
+  published?: { slug: string; version: number };
+  /** 발행 뒤 흐름이 바뀌어 다시 발행해야 하는가. */
+  needsRepublish?: boolean;
   meta?: {
     domain?: string;
     tags?: string[];
@@ -138,6 +177,8 @@ interface FlowLite {
 
 const props = defineProps<{
   flow: FlowLite;
+  /** 마지막 실행 결과. 실패를 조용히 넘기지 않으려고 카드에 남긴다. */
+  status?: { kind: 'running' | 'ok' | 'error'; text: string } | null;
 }>();
 
 const emit = defineEmits<{
@@ -145,6 +186,8 @@ const emit = defineEmits<{
   (e: 'edit', id: string): void;
   (e: 'delete', id: string): void;
   (e: 'export', id: string): void;
+  (e: 'publish', id: string): void;
+  (e: 'unpublish', id: string): void;
 }>();
 
 const showActions = ref(false);
@@ -183,6 +226,13 @@ function handleExport() {
   emit('export', props.flow.id);
 }
 
+function handlePublishToggle() {
+  showMoreMenu.value = false;
+  // 이벤트 이름을 삼항으로 넘기면 오버로드가 좁혀지지 않는다. 갈래로 나눠 부른다.
+  if (props.flow.published) emit('unpublish', props.flow.id);
+  else emit('publish', props.flow.id);
+}
+
 // Computed styles using CSS variables
 const itemStyle = computed(() => ({
   backgroundColor: 'var(--ac-surface)',
@@ -197,6 +247,25 @@ const nameStyle = computed(() => ({
 
 const descStyle = computed(() => ({
   color: 'var(--ac-text-muted, #6e6e6e)',
+}));
+
+const publishedBadgeStyle = computed(() => ({
+  backgroundColor: 'var(--ac-success-light, #dcfce7)',
+  color: 'var(--ac-success, #16a34a)',
+}));
+
+const staleBadgeStyle = computed(() => ({
+  backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
+  color: 'var(--ac-text-muted, #6e6e6e)',
+}));
+
+const statusStyle = computed(() => ({
+  color:
+    props.status?.kind === 'error'
+      ? 'var(--ac-danger, #ef4444)'
+      : props.status?.kind === 'ok'
+        ? 'var(--ac-success, #16a34a)'
+        : 'var(--ac-text-muted, #6e6e6e)',
 }));
 
 const tagDomainStyle = computed(() => ({
@@ -271,6 +340,27 @@ const menuItemDangerStyle = computed(() => ({
 .workflow-desc {
   font-size: 13px;
   line-height: 1.4;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.workflow-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.workflow-badge {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.workflow-status {
+  font-size: 12px;
   margin-bottom: 8px;
   word-break: break-word;
 }
