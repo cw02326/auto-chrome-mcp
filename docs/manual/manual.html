@@ -441,6 +441,118 @@
         object-fit: cover;
         object-position: top;
       }
+
+      /* ===== 2026-09-06 개정: 흰 바탕·큰 글자·쪽 번호 (사용자 요청) ===== */
+      :root {
+        --bg: #ffffff;
+        --tint: #f6f7f9;
+      }
+      body {
+        background: #ffffff;
+        font-size: 15px;
+        line-height: 1.65;
+      }
+      .page {
+        position: relative;
+        min-height: 262mm;
+        padding-bottom: 12mm;
+      }
+      h2 {
+        font-size: 24px;
+        margin-bottom: 6px;
+      }
+      h3 {
+        font-size: 16px;
+        margin: 16px 0 8px;
+      }
+      .lead {
+        font-size: 15px;
+        line-height: 1.6;
+        margin-bottom: 14px;
+      }
+      .chapter-no {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent-text);
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .card {
+        margin: 10px 0;
+        box-shadow: 0 0 0 0.75px var(--divider);
+      }
+      .card-title {
+        font-size: 16px;
+      }
+      .caption {
+        font-size: 12.5px;
+      }
+      .sub {
+        font-size: 14px;
+      }
+      .callout {
+        padding: 12px 14px;
+        margin: 10px 0;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      table {
+        font-size: 14px;
+        box-shadow: 0 0 0 0.75px var(--divider);
+      }
+      th {
+        font-size: 13px;
+        background: var(--tint);
+      }
+      .legend li {
+        margin-bottom: 10px;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .steps li {
+        margin-bottom: 10px;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .shot figcaption {
+        font-size: 12.5px;
+        margin-top: 6px;
+      }
+      .dl {
+        font-size: 14px;
+      }
+      .toc li {
+        padding: 9px 0;
+        font-size: 15px;
+      }
+      .crop {
+        background: var(--tint);
+      }
+      .flow3 .card {
+        background: var(--tint);
+        box-shadow: none;
+      }
+      .cover {
+        min-height: 262mm;
+      }
+      .foot {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        justify-content: space-between;
+        font-size: 11.5px;
+        color: var(--caption);
+        box-shadow: inset 0 0.75px 0 0 var(--divider);
+        padding-top: 6px;
+      }
+      .foot .pn {
+        font-variant-numeric: tabular-nums;
+      }
     </style>
   </head>
   <body>
@@ -527,7 +639,10 @@
         ><span class="label">읽는 법</span>그림 위의 파란 번호와 옆 설명의 번호가 같습니다. 파란
         상자는 팁, 주황 상자는 주의, 빨간 상자는 꼭 알아야 할 제한입니다.</div
       >
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 차례</span><span class="pn">2</span></div
+      ></section
+    >
 
     <!-- 1 -->
     <section class="page">
@@ -579,7 +694,11 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 이 프로그램은 무엇을 하나요</span
+        ><span class="pn">3</span></div
+      ></section
+    >
 
     <!-- 2 -->
     <section class="page">
@@ -635,7 +754,11 @@
           >
         </ol>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 팝업에서 연결 확인하기</span
+        ><span class="pn">4</span></div
+      ></section
+    >
 
     <!-- 3 -->
     <section class="page">
@@ -689,7 +812,11 @@
         ><span class="label">팁</span>맨 위 탭은 키보드 화살표 왼쪽 오른쪽으로도 옮길 수
         있습니다.</div
       >
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 사이드패널 여는 방법과 화면 구성</span
+        ><span class="pn">5</span></div
+      ></section
+    >
 
     <!-- 4 -->
     <section class="page">
@@ -741,7 +868,10 @@
         ><span class="label">주의</span>녹화 중에는 다른 탭으로 옮기지 마세요. 시작한 탭에서 일어난
         일만 기록합니다.</div
       >
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 첫 흐름 녹화하기</span><span class="pn">6</span></div
+      ></section
+    >
 
     <!-- 5 -->
     <section class="page">
@@ -804,7 +934,10 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 저장 화면 읽는 법</span><span class="pn">7</span></div
+      ></section
+    >
 
     <!-- 6 -->
     <section class="page">
@@ -852,7 +985,10 @@
           </ol>
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 흐름 카드 읽는 법</span><span class="pn">8</span></div
+      ></section
+    >
 
     <!-- 7 -->
     <section class="page">
@@ -903,7 +1039,11 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 실행하기와 결과 보기</span
+        ><span class="pn">9</span></div
+      ></section
+    >
 
     <!-- 8 -->
     <section class="page">
@@ -951,7 +1091,11 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 매일 자동으로 실행하기</span
+        ><span class="pn">10</span></div
+      ></section
+    >
 
     <!-- 9 -->
     <section class="page">
@@ -1000,7 +1144,11 @@
           </ol>
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 매일 작업 탭에서 관리하기</span
+        ><span class="pn">11</span></div
+      ></section
+    >
 
     <!-- 10 -->
     <section class="page">
@@ -1055,7 +1203,10 @@
           >
         </ol>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 필터와 더보기 메뉴</span><span class="pn">12</span></div
+      ></section
+    >
 
     <!-- 11 -->
     <section class="page">
@@ -1102,7 +1253,11 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 흐름 내보내기와 가져오기</span
+        ><span class="pn">13</span></div
+      ></section
+    >
 
     <!-- 12 -->
     <section class="page">
@@ -1188,7 +1343,10 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 문제가 생겼을 때</span><span class="pn">14</span></div
+      ></section
+    >
 
     <!-- 13 -->
     <section class="page">
@@ -1244,7 +1402,11 @@
         ><span class="label">팁</span>Claude 는 발행된 흐름만 볼 수 있습니다. 목록에 안 보이면 카드
         상태가 발행됨인지 확인하세요.</div
       >
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · Claude Code 에서 말로 시키기</span
+        ><span class="pn">15</span></div
+      ></section
+    >
 
     <!-- 14 -->
     <section class="page">
@@ -1322,7 +1484,11 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 우클릭 메뉴와 단축키</span
+        ><span class="pn">16</span></div
+      ></section
+    >
 
     <!-- 15 -->
     <section class="page">
@@ -1407,6 +1573,10 @@
           >
         </div>
       </div>
-    </section>
+      <div class="foot"
+        ><span>Auto Chrome MCP 사용설명서 · 자주 묻는 질문과 용어</span
+        ><span class="pn">17</span></div
+      ></section
+    >
   </body>
 </html>
