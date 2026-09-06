@@ -105,11 +105,13 @@
         </button>
         <button
           v-if="filterActive"
-          class="ac-chip"
+          class="ac-chip wf-filter-clear"
           type="button"
+          :title="getMessage('sidepanel_daily_filter_clear')"
+          :aria-label="getMessage('sidepanel_daily_filter_clear')"
           @click="$emit('update:filter', { ...EMPTY_FLOW_FILTER })"
         >
-          {{ getMessage('sidepanel_daily_filter_clear') }}
+          &times;
         </button>
       </div>
 
@@ -175,6 +177,8 @@
           :status="statuses?.[flow.id] || null"
           :schedule="schedules?.[flow.id] || null"
           :last-success-at="lastSuccessAt?.[flow.id] || null"
+          :last-run-at="lastRunAt?.[flow.id] || null"
+          :last-run-outcome="lastRunOutcome?.[flow.id] || null"
           @run="$emit('run', $event)"
           @schedule="$emit('schedule', $event)"
           @edit="$emit('edit', $event)"
@@ -359,6 +363,10 @@ const props = defineProps<{
   schedules?: Record<string, ScheduleView>;
   /** 흐름 id → 마지막으로 성공한 시각(epoch ms). */
   lastSuccessAt?: Record<string, number>;
+  /** 흐름 id → 마지막으로 끝난 실행의 시각(성공·실패 통틀어 가장 최근 것). */
+  lastRunAt?: Record<string, number>;
+  /** 흐름 id → 마지막으로 끝난 실행의 결과. */
+  lastRunOutcome?: Record<string, 'success' | 'failure'>;
   /** 필터 바 상태. 실제로 거르는 일은 상위가 한다. */
   filter: FlowFilterState;
   /** 필터 바의 사이트 선택지. */
@@ -513,24 +521,46 @@ function toggleSection(section: string) {
   flex-shrink: 0;
 }
 
+/*
+  필터 줄은 한 줄에 전부 보여야 한다(사용자 요구, 2026-09-06). 가로 스크롤도 줄바꿈도 없다.
+  좁은 패널(360px)에서도 들어가도록 사이트 선택은 줄어들고(말줄임), 칩은 여백을 줄이며
+  줄어들지 않는다. 필터 지우기는 아이콘 하나로 자리를 아낀다.
+*/
 .wf-filter-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wf-filter-bar > .ac-chip {
+  flex-shrink: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.wf-filter-clear {
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .wf-filter-select {
   width: auto;
   height: 32px;
-  flex-shrink: 0;
-  max-width: 42%;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
   font-size: 13px;
   font-weight: 600;
   padding-left: 10px;
-  padding-right: 28px;
-  background-position: right 8px center;
+  padding-right: 24px;
+  background-position: right 6px center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wf-scope {
@@ -605,10 +635,6 @@ function toggleSection(section: string) {
   transition: background-color var(--ac-motion-fast) ease;
 }
 
-.wf-section-header:hover {
-  background-color: var(--ac-surface-hover);
-}
-
 .wf-section-title {
   display: flex;
   align-items: center;
@@ -646,10 +672,6 @@ function toggleSection(section: string) {
   background-color: var(--ac-surface-row);
   cursor: pointer;
   transition: background-color var(--ac-motion-fast) ease;
-}
-
-.wf-run:hover {
-  background-color: var(--ac-surface-hover);
 }
 
 .wf-run-head {
@@ -720,5 +742,15 @@ function toggleSection(section: string) {
 .section-expand-leave-from {
   opacity: 1;
   max-height: 500px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wf-section-header:hover {
+    background-color: var(--ac-surface-hover);
+  }
+
+  .wf-run:hover {
+    background-color: var(--ac-surface-hover);
+  }
 }
 </style>

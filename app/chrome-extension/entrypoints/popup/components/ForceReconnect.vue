@@ -118,7 +118,7 @@ const stageToneClass = (s?: StageResult): string => {
     case 'running':
       return 'ac-text-accent';
     default:
-      return 'ac-text-tertiary';
+      return 'ac-text-caption';
   }
 };
 

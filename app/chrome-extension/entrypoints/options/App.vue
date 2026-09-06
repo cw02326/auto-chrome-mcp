@@ -328,7 +328,7 @@ async function apply(mode: 'auto' | 'once') {
     lastResult.value = (result?.content?.[0]?.text as string) || '';
     await reload();
   } catch (e: any) {
-    lastResult.value = 'Error: ' + (e?.message || String(e));
+    lastResult.value = m('options_userscript_apply_failed', String(e?.message || String(e)));
   } finally {
     submitting.value = false;
   }

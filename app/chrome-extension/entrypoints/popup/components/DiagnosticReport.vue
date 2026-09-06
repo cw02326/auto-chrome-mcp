@@ -220,7 +220,7 @@ const testToneClass = (status: string): string => {
     case 'fail':
       return 'ac-text-danger';
     case 'skip':
-      return 'ac-text-tertiary';
+      return 'ac-text-caption';
     default:
       return 'ac-text-secondary';
   }

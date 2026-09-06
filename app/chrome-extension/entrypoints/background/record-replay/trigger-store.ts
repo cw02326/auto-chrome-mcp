@@ -1,6 +1,6 @@
 import { IndexedDbStorage, ensureMigratedFromLocal } from './storage/indexeddb-manager';
 
-export type TriggerType = 'url' | 'contextMenu' | 'command' | 'dom';
+export type TriggerType = 'url' | 'command' | 'dom';
 
 export interface BaseTrigger {
   id: string;
@@ -13,12 +13,6 @@ export interface BaseTrigger {
 export interface UrlTrigger extends BaseTrigger {
   type: 'url';
   match: Array<{ kind: 'url' | 'domain' | 'path'; value: string }>;
-}
-
-export interface ContextMenuTrigger extends BaseTrigger {
-  type: 'contextMenu';
-  title: string;
-  contexts?: chrome.contextMenus.ContextType[];
 }
 
 export interface CommandTrigger extends BaseTrigger {
@@ -34,7 +28,7 @@ export interface DomTrigger extends BaseTrigger {
   debounceMs?: number; // default 800
 }
 
-export type FlowTrigger = UrlTrigger | ContextMenuTrigger | CommandTrigger | DomTrigger;
+export type FlowTrigger = UrlTrigger | CommandTrigger | DomTrigger;
 
 export async function listTriggers(): Promise<FlowTrigger[]> {
   await ensureMigratedFromLocal();

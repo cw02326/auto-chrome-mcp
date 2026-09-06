@@ -58,8 +58,10 @@ function isValidTabUrl(url?: string): boolean {
 
 /**
  * Toggle Quick Panel in the active tab
+ *
+ * 단축키(Ctrl+Shift+U)와 아이콘 우클릭 메뉴가 같은 함수를 쓴다.
  */
-async function toggleQuickPanelInActiveTab(): Promise<void> {
+export async function toggleQuickPanelInActiveTab(): Promise<void> {
   const tabId = await getActiveTabId();
   if (tabId === null) {
     console.warn(`${LOG_PREFIX} No active tab found`);

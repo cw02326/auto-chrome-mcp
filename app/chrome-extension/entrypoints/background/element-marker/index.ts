@@ -16,8 +16,6 @@ import { computerTool } from '@/entrypoints/background/tools/browser/computer';
 import { clickTool } from '@/entrypoints/background/tools/browser/interaction';
 import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 
-const CONTEXT_MENU_ID = 'element_marker_mark';
-
 /**
  * Extract error message from MCP tool result
  */
@@ -44,24 +42,6 @@ function extractToolError(result: any): string | undefined {
   return result.error || (result.isError ? 'unknown tool error' : undefined);
 }
 
-async function ensureContextMenu() {
-  try {
-    // Guard: contextMenus permission may be missing
-    if (!(chrome as any).contextMenus?.create) return;
-    // Remove and re-create our single menu to avoid duplication
-    try {
-      await chrome.contextMenus.remove(CONTEXT_MENU_ID);
-    } catch {}
-    await chrome.contextMenus.create({
-      id: CONTEXT_MENU_ID,
-      title: '标注元素',
-      contexts: ['all'],
-    });
-  } catch (e) {
-    console.warn('ElementMarker: ensureContextMenu failed:', e);
-  }
-}
-
 /**
  * Check if element-marker.js is already injected in the tab
  * Uses a short timeout to avoid hanging on unresponsive tabs
@@ -81,7 +61,7 @@ async function isMarkerInjected(tabId: number): Promise<boolean> {
 /**
  * Inject element-marker.js into the tab if not already injected
  */
-async function injectMarkerHelper(tabId: number) {
+export async function injectMarkerHelper(tabId: number) {
   // Check if already injected via ping
   const alreadyInjected = await isMarkerInjected(tabId);
 
@@ -106,10 +86,8 @@ async function injectMarkerHelper(tabId: number) {
 }
 
 export function initElementMarkerListeners() {
-  // Ensure context menu on startup
-  ensureContextMenu().catch(() => {});
-
-  // Respond to RR triggers refresh by re-ensuring our menu a bit later
+  // 컨텍스트 메뉴는 background/context-menus.ts 한 곳이 만들고 클릭도 거기서 받는다.
+  // 이 모듈은 마킹 도우미 주입과 마커 CRUD 메시지만 맡는다.
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message?.type) {
@@ -380,30 +358,10 @@ export function initElementMarkerListeners() {
           })();
           return true;
         }
-        // When RR refresh (or similar) happens, re-add our menu
-        case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS:
-        case BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER:
-        case BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER: {
-          setTimeout(() => ensureContextMenu().catch(() => {}), 300);
-          break;
-        }
       }
     } catch (e) {
       sendResponse({ success: false, error: (e as any)?.message || String(e) });
     }
     return false;
   });
-
-  // Context menu click routing
-  if ((chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-      try {
-        if (info.menuItemId === CONTEXT_MENU_ID && tab?.id) {
-          await injectMarkerHelper(tab.id);
-        }
-      } catch (e) {
-        console.warn('ElementMarker: context menu click failed:', e);
-      }
-    });
-  }
 }

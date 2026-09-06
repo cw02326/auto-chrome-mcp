@@ -20,6 +20,9 @@ import { initShortcutScheduleRunner } from './schedule-runner';
 import { initDailyMessages } from './daily-messages';
 // auto-chrome-mcp fork(2026-09-05 사이드패널 2단계): 사이드패널 여는 단축키.
 import { initSidepanelShortcut } from './sidepanel-shortcut';
+// auto-chrome-mcp fork(2026-09-06): 컨텍스트 메뉴는 이 모듈 하나가 소유한다.
+// 기동할 때마다 removeAll 로 비우고 다시 만들며, 클릭도 여기서만 받는다.
+import { initContextMenus } from './context-menus';
 
 /**
  * v1.0.32+: 비민감 4종 site-level contentSettings 를 모든 사이트 (`<all_urls>`) 에 대해
@@ -131,6 +134,8 @@ export default defineBackground(() => {
   initQuickPanelCommands();
   // 사이드패널 여는 단축키 (Ctrl+Shift+Y)
   initSidepanelShortcut();
+  // 아이콘·페이지 우클릭 메뉴. 다른 모듈이 만들던 메뉴를 전부 흡수했다.
+  initContextMenus();
 
   // Conditionally initialize semantic similarity engine if model cache exists
   initializeSemanticEngineIfCached()

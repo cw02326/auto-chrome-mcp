@@ -7,7 +7,7 @@ import { runToolArgs } from '../engine/tab-context';
 export const navigateNode: NodeRuntime<any> = {
   validate: (step) => {
     const ok = !!(step as any).url;
-    return ok ? { ok } : { ok, errors: ['缺少 URL'] };
+    return ok ? { ok } : { ok, errors: ['URL 이 없습니다'] };
   },
   run: async (ctx: ExecCtx, step: Step) => {
     const url = (step as any).url;

@@ -1,11 +1,11 @@
 /**
- * Action System - 导出模块
+ * Action System - 내보내기 모음
  */
 
-// 类型导出
+// 타입 내보내기
 export * from './types';
 
-// 注册表导出
+// 레지스트리 내보내기
 export {
   ActionRegistry,
   createActionRegistry,
@@ -23,7 +23,7 @@ export {
   type ActionRegistryHooks,
 } from './registry';
 
-// 适配器导出
+// 어댑터 내보내기
 export {
   execCtxToActionCtx,
   stepToAction,
@@ -34,7 +34,7 @@ export {
   type StepExecutionAttempt,
 } from './adapter';
 
-// Handler 工厂导出
+// Handler 팩토리 내보내기
 export {
   createReplayActionRegistry,
   registerReplayHandlers,

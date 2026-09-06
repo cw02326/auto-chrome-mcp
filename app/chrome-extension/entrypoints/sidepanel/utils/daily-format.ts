@@ -162,6 +162,47 @@ export function formatRunTime(at: number | null | undefined, now: number = Date.
   return startOfDay(at) === startOfDay(now) ? formatClock(at) : formatDateTime(at);
 }
 
+/**
+ * 흐름 카드의 "마지막 실행" 시각. 오늘·어제는 그렇게 말하고, 그보다 멀면 날짜까지 적는다.
+ *
+ * `formatRunTime` 과 값이 다르다 - 저건 오늘이 아니면 바로 날짜로 건너뛴다. 카드는 어제를
+ * "어제" 로 짚어 줘야 초보자가 "언제 돈 건지" 를 계산하지 않는다(2026-09-06 사용자 피드백).
+ */
+export function formatCardRunClock(
+  at: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) return '';
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(at)) / 86400000);
+  if (dayDiff === 0) return t('sidepanel_card_day_today', [formatClock(at)]);
+  if (dayDiff === 1) return t('sidepanel_card_day_yesterday', [formatClock(at)]);
+  return formatDateTime(at);
+}
+
+/** 흐름 카드의 "마지막 실행" 결과. `lastRunOutcome`/`lastRunAt` (utils/flow-outcomes.ts) 이 재료다. */
+export type CardRunOutcome = 'success' | 'failure';
+
+/**
+ * "마지막 실행" 줄 전체. 실행 기록이 없으면 안내 문구, 있으면 "성공 · 오늘 00:12" 형태.
+ *
+ * 성공·실패는 색으로만 구분하지 않는다 - 글자에 "성공"/"실패" 가 그대로 들어간다.
+ */
+export function formatCardLastRunLine(
+  outcome: CardRunOutcome | null | undefined,
+  at: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (!outcome || typeof at !== 'number' || !Number.isFinite(at) || at <= 0) {
+    return t('sidepanel_card_last_run_none');
+  }
+  const clock = formatCardRunClock(at, now, t);
+  const key =
+    outcome === 'success' ? 'sidepanel_card_last_run_success' : 'sidepanel_card_last_run_failed';
+  return t(key, [clock]);
+}
+
 /** 상태 문구. 모르는 값은 그대로 보여준다(감추면 원인을 못 찾는다). */
 export function formatRunStatus(status: string | undefined, t: Translate = getMessage): string {
   if (!status) return '';

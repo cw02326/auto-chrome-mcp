@@ -606,6 +606,89 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
 }
 
 /**
+ * ⚡ 연결 버튼과 똑같은 처리 (2026-09-06 컨텍스트 메뉴 통합).
+ *
+ * 팝업은 `CONNECT_NATIVE` 메시지로 이 처리를 부르고, 배경 자신(컨텍스트 메뉴의 강제
+ * 재연결)은 이 함수를 직접 부른다. 배경이 자기 자신에게 보낸 `chrome.runtime.sendMessage`
+ * 는 자기 리스너에 도달하지 않아 메시지 경로를 쓸 수 없기 때문이다.
+ */
+export async function connectNativeFromUi(
+  portOverride?: unknown,
+): Promise<{ success: boolean; connected: boolean; error?: string }> {
+  const normalized = normalizePort(portOverride);
+  try {
+    // 사용자가 명시적으로 누른 연결이다. 자동 연결을 다시 켠다.
+    await setNativeAutoConnectEnabled(true);
+    // v1.0.19: PORT_CONFLICT 로 인한 manualDisconnect 도 같이 해제 - 사용자가
+    // ⚡ 연결 명시적으로 누른 시점부터 자동 reconnect 다시 활성.
+    manualDisconnect = false;
+
+    if (normalized) {
+      // Best-effort: 선호 포트를 저장한다.
+      try {
+        await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_SERVER_PORT]: normalized });
+      } catch {
+        // 저장 실패는 연결과 무관하다.
+      }
+    }
+
+    const connected = await ensureNativeConnected('ui_connect', normalized ?? undefined);
+    return { success: true, connected };
+  } catch (e) {
+    return { success: false, connected: nativePort !== null, error: String(e) };
+  }
+}
+
+/**
+ * 강제 재연결 3단계(spawn)의 배경 처리 (2026-09-06 컨텍스트 메뉴 통합).
+ *
+ * 기존 연결을 끊고 `chrome.runtime.connectNative` 를 다시 불러 Chrome 이 브리지를
+ * 새로 띄우게 한다. 팝업은 `force-reconnect-respawn` 메시지로, 배경은 직접 부른다.
+ */
+export async function forceReconnectRespawn(): Promise<{
+  ok: boolean;
+  connected?: boolean;
+  error?: string;
+}> {
+  try {
+    // 대기 중인 reconnect 타이머부터 멈춘다.
+    clearReconnectTimer();
+    reconnectAttempts = 0;
+
+    // v1.0.19: PORT_CONFLICT 등으로 autoConnect OFF + manualDisconnect=true 였어도
+    // 강제 재연결은 명시적 사용자 의도이므로 둘 다 풀고 진행. (이전엔 ensureNativeConnected
+    // 가 autoConnect off 가드에 걸려 spawn 안 되고 handshake 무한 fail 했음.)
+    try {
+      await setNativeAutoConnectEnabled(true);
+    } catch {
+      autoConnectEnabled = true;
+    }
+    manualDisconnect = false;
+
+    // 명시적 강제: 기존 포트를 끊는다. 사용자가 즉시 재연결을 원하므로 수동 끊김
+    // 플래그는 남기지 않는다.
+    if (nativePort) {
+      try {
+        nativePort.disconnect();
+      } catch {
+        // 이미 끊긴 포트다.
+      }
+      nativePort = null;
+    }
+
+    // v1.0.17: wait 줄임 (1500 → 200ms). 다른 브라우저 background 가 onDisconnect
+    // 후 자동 reconnect 하기 전에 우리가 먼저 connectNative 호출 → 우리 process 가
+    // winner. 200ms 는 bridge drain 의 setImmediate exit + OS file desc close 시간.
+    await new Promise((r) => setTimeout(r, 200));
+
+    const connected = await ensureNativeConnected('force_reconnect');
+    return { ok: true, connected };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
  * Initialize native host listeners and load initial state
  */
 export const initNativeHostListener = () => {
@@ -660,29 +743,8 @@ export const initNativeHostListener = () => {
     // CONNECT_NATIVE: Explicit user connect, re-enables auto-connect
     if (msgType === NativeMessageType.CONNECT_NATIVE) {
       const portOverride = typeof message === 'object' ? message.port : undefined;
-      const normalized = normalizePort(portOverride);
-
-      (async () => {
-        // Explicit user connect: re-enable auto-connect
-        await setNativeAutoConnectEnabled(true);
-        // v1.0.19: PORT_CONFLICT 로 인한 manualDisconnect 도 같이 해제 — 사용자가
-        // ⚡ 연결 명시적으로 누른 시점부터 자동 reconnect 다시 활성.
-        manualDisconnect = false;
-
-        if (normalized) {
-          // Best-effort: persist preferred port
-          try {
-            await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_SERVER_PORT]: normalized });
-          } catch {
-            // Ignore
-          }
-        }
-
-        return ensureNativeConnected('ui_connect', normalized ?? undefined);
-      })()
-        .then((connected) => {
-          sendResponse({ success: true, connected });
-        })
+      connectNativeFromUi(portOverride)
+        .then((result) => sendResponse(result))
         .catch((e) => {
           sendResponse({ success: false, connected: nativePort !== null, error: String(e) });
         });
@@ -695,46 +757,12 @@ export const initNativeHostListener = () => {
       return true;
     }
 
-    // auto-chrome-mcp fork: Force Reconnect Stage A step ③ — supervisor 가 popup 에서
-    // 호출. background 가 chrome.runtime.connectNative 트리거해서 Chrome 의 자동
-    // respawn 을 발동. 기존 nativePort 가 있어도 force 모드로 끊고 다시 연결.
+    // auto-chrome-mcp fork: Force Reconnect Stage A step ③ - 팝업의 supervisor 가
+    // 부르는 메시지 경로. 실제 처리는 위 forceReconnectRespawn 하나이고, 컨텍스트
+    // 메뉴는 그 함수를 직접 부른다.
     if (msgType === 'force-reconnect-respawn') {
-      (async () => {
-        // Stop any pending reconnect timer first
-        clearReconnectTimer();
-        reconnectAttempts = 0;
-
-        // v1.0.19: PORT_CONFLICT 등으로 autoConnect OFF + manualDisconnect=true 였어도
-        // 강제 재연결은 명시적 사용자 의도이므로 둘 다 풀고 진행. (이전엔 ensureNativeConnected
-        // 가 autoConnect off 가드에 걸려 spawn 안 되고 handshake 무한 fail 했음.)
-        try {
-          await setNativeAutoConnectEnabled(true);
-        } catch {
-          autoConnectEnabled = true;
-        }
-        manualDisconnect = false;
-
-        // Explicit force: disconnect existing port (without persisting manual-disconnect flag,
-        // since the user wants to reconnect immediately).
-        if (nativePort) {
-          try {
-            nativePort.disconnect();
-          } catch {
-            // Ignore
-          }
-          nativePort = null;
-        }
-
-        // v1.0.17: wait 줄임 (1500 → 200ms). 다른 브라우저 background 가 onDisconnect
-        // 후 자동 reconnect 하기 전에 우리가 먼저 connectNative 호출 → 우리 process 가
-        // winner. 200ms 는 bridge drain 의 setImmediate exit + OS file desc close 시간.
-        await new Promise((r) => setTimeout(r, 200));
-
-        return ensureNativeConnected('force_reconnect');
-      })()
-        .then((connected) => {
-          sendResponse({ ok: true, connected });
-        })
+      forceReconnectRespawn()
+        .then((result) => sendResponse(result))
         .catch((e) => {
           sendResponse({ ok: false, error: String(e) });
         });

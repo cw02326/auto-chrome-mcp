@@ -28,11 +28,11 @@ interface ConsoleToolParams {
   windowId?: number;
   includeExceptions?: boolean;
   maxMessages?: number;
-  // 新增参数
+  // 추가 파라미터
   mode?: ConsoleMode;
-  buffer?: boolean; // mode="buffer" 的别名
-  clear?: boolean; // 读取前清空
-  clearAfterRead?: boolean; // 读取后清空（mcp-tools.js 风格）
+  buffer?: boolean; // mode="buffer" 의 별칭
+  clear?: boolean; // 읽기 전에 비운다
+  clearAfterRead?: boolean; // 읽은 뒤에 비운다(mcp-tools.js 방식)
   pattern?: string;
   onlyErrors?: boolean;
   limit?: number;
@@ -84,7 +84,7 @@ interface ConsoleResult {
   deepSerializationSkipped?: number;
 }
 
-// 辅助函数
+// 도우미 함수
 
 function normalizeLimit(value: unknown, fallback: number): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
@@ -95,7 +95,7 @@ function parseRegexPattern(pattern?: string): RegExp | undefined {
   if (typeof pattern !== 'string') return undefined;
   const trimmed = pattern.trim();
   if (!trimmed) return undefined;
-  // 支持 /pattern/flags 语法
+  // /pattern/flags 문법 지원
   const match = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
   try {
     return match ? new RegExp(match[1], match[2]) : new RegExp(trimmed);
@@ -212,7 +212,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     let targetTab: chrome.tabs.Tab;
     let targetTabId: number | undefined;
 
-    // 解析正则表达式
+    // 정규식 해석
     let compiledPattern: RegExp | undefined;
     try {
       compiledPattern = parseRegexPattern(pattern);
@@ -248,11 +248,11 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
       targetTabId = targetTab.id;
 
-      // 确定模式：buffer 参数是 mode="buffer" 的别名
+      // 모드 결정: buffer 파라미터는 mode="buffer" 의 별칭이다
       const resolvedMode: ConsoleMode =
         mode === 'buffer' || buffer === true ? 'buffer' : 'snapshot';
 
-      // 计算有效的消息限制
+      // 실제로 적용할 메시지 개수 제한 계산
       const normalizedMaxMessages = normalizeLimit(maxMessages, DEFAULT_MAX_MESSAGES);
       // auto-chrome-mcp fork: limit은 상한(normalizedMaxMessages)을 더 작게만 줄일 수 있다 — 늘리는 용도로는 쓰지 않는다
       const effectiveLimit =
@@ -263,7 +263,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       const normalizedOffset = normalizeLimit(offset, 0);
       const isCountOnly = countOnly === true;
 
-      // Buffer 模式
+      // Buffer 모드
       if (resolvedMode === 'buffer') {
         try {
           await consoleBuffer.ensureStarted(targetTabId);
@@ -275,13 +275,13 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           throw error;
         }
 
-        // 处理读取前清空请求
+        // 읽기 전 비우기 요청 처리
         let clearedBefore: { clearedMessages: number; clearedExceptions: number } | null = null;
         if (clear === true) {
           clearedBefore = consoleBuffer.clear(targetTabId, 'manual');
         }
 
-        // 读取缓冲区
+        // 버퍼 읽기
         const read = consoleBuffer.read(targetTabId, {
           pattern: compiledPattern,
           onlyErrors,
@@ -293,13 +293,13 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           return createErrorResponse('Console buffer is not available for this tab.');
         }
 
-        // 处理读取后清空请求（mcp-tools.js 风格，避免重复读取）
+        // 읽은 뒤 비우기 요청 처리(mcp-tools.js 방식, 중복 읽기 방지)
         let clearedAfter: { clearedMessages: number; clearedExceptions: number } | null = null;
         if (clearAfterRead === true) {
           clearedAfter = consoleBuffer.clear(targetTabId, 'manual');
         }
 
-        // 构建清空摘要
+        // 비우기 요약 만들기
         let clearedSummary = '';
         if (clearedBefore) {
           clearedSummary += ` Cleared ${clearedBefore.clearedMessages} messages and ${clearedBefore.clearedExceptions} exceptions before reading.`;
@@ -347,13 +347,13 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         };
       }
 
-      // Snapshot 模式（一次性捕获）
+      // Snapshot 모드(한 번만 수집)
       const result = await this.captureConsoleMessages(targetTabId, {
         includeExceptions,
         maxMessages: effectiveLimit,
       });
 
-      // 应用过滤器
+      // 필터 적용
       const filtered = applyResultFilters(result, {
         pattern: compiledPattern,
         onlyErrors,
@@ -597,7 +597,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         // Clean up
         chrome.debugger.onEvent.removeListener(eventListener);
 
-        // 如果 buffer 模式正在使用这个 tab，不要关闭 Runtime/Log 域
+        // 이 탭을 버퍼 모드가 쓰고 있으면 Runtime/Log 도메인을 닫지 않는다
         const keepDomainsEnabled = consoleBuffer.isCapturing(tabId);
         if (!keepDomainsEnabled) {
           try {

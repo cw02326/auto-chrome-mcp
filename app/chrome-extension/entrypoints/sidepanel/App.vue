@@ -34,6 +34,8 @@
         :statuses="flowStatuses"
         :schedules="schedulesByFlowId"
         :last-success-at="lastSuccessByFlowId"
+        :last-run-at="lastRunAtByFlowId"
+        :last-run-outcome="lastRunOutcomeByFlowId"
         :filter="flowFilter"
         :sites="filterSites"
         @refresh="handleWorkflowRefresh"
@@ -593,6 +595,10 @@ const lastSuccessByFlowId = computed(() => flowOutcomes.value.lastSuccessAt);
 
 /** 마지막 실행이 실패로 끝난 흐름. "최근 실패" 필터가 본다. */
 const failedFlowIds = computed(() => flowOutcomes.value.failedFlowIds);
+
+/** 흐름별 마지막으로 끝난 실행의 시각·결과. 카드의 "마지막 실행" 줄이 쓴다. */
+const lastRunAtByFlowId = computed(() => flowOutcomes.value.lastRunAt);
+const lastRunOutcomeByFlowId = computed(() => flowOutcomes.value.lastRunOutcome);
 
 const filterSites = computed(() => collectSites(flows.value));
 
@@ -1501,11 +1507,6 @@ onUnmounted(() => {
   transition: all var(--ac-motion-fast) ease;
 }
 
-.em-search-clear:hover {
-  background: var(--ac-hover-bg);
-  color: var(--ac-text);
-}
-
 .em-add-btn {
   width: 40px;
   height: 40px;
@@ -1519,10 +1520,6 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all var(--ac-motion-fast) ease;
   flex-shrink: 0;
-}
-
-.em-add-btn:hover {
-  background: var(--ac-accent-hover);
 }
 
 /* Modal. 딤 배경·중앙 정렬은 ac-dim 이 준다. 여기서는 진입 애니메이션과 z-index 만. */
@@ -1591,11 +1588,6 @@ onUnmounted(() => {
   transition: all var(--ac-motion-fast) ease;
 }
 
-.em-modal-close:hover {
-  background: var(--ac-hover-bg);
-  color: var(--ac-text);
-}
-
 .em-modal .em-form {
   padding: 20px;
 }
@@ -1649,10 +1641,6 @@ onUnmounted(() => {
 .em-domain-header:focus-visible {
   outline: 2px solid var(--ac-focus-ring);
   outline-offset: 2px;
-}
-
-.em-domain-header:hover {
-  background: var(--ac-surface-hover);
 }
 
 .em-domain-info {
@@ -1765,10 +1753,6 @@ onUnmounted(() => {
   margin-bottom: 0;
 }
 
-.em-marker-item:hover {
-  background: var(--ac-hover-bg);
-}
-
 /* Top row: name + actions */
 .em-marker-row-top {
   display: flex;
@@ -1817,27 +1801,14 @@ onUnmounted(() => {
   color: var(--ac-accent);
 }
 
-.em-action-btn.em-action-verify:hover {
-  background: var(--ac-accent-subtle);
-}
-
 .em-action-btn.em-action-edit {
   background: var(--ac-surface-muted);
   color: var(--ac-text-muted);
 }
 
-.em-action-btn.em-action-edit:hover {
-  background: var(--ac-hover-bg);
-  color: var(--ac-text);
-}
-
 .em-action-btn.em-action-delete {
   background: var(--ac-danger-subtle);
   color: var(--ac-danger);
-}
-
-.em-action-btn.em-action-delete:hover {
-  background: var(--ac-danger-subtle);
 }
 
 /* Bottom row: selector + tags */
@@ -1886,5 +1857,42 @@ onUnmounted(() => {
   margin-top: 16px;
   width: auto;
   padding: 0 24px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .em-search-clear:hover {
+    background: var(--ac-hover-bg);
+    color: var(--ac-text);
+  }
+
+  .em-add-btn:hover {
+    background: var(--ac-accent-hover);
+  }
+
+  .em-modal-close:hover {
+    background: var(--ac-hover-bg);
+    color: var(--ac-text);
+  }
+
+  .em-domain-header:hover {
+    background: var(--ac-surface-hover);
+  }
+
+  .em-marker-item:hover {
+    background: var(--ac-hover-bg);
+  }
+
+  .em-action-btn.em-action-verify:hover {
+    background: var(--ac-accent-subtle);
+  }
+
+  .em-action-btn.em-action-edit:hover {
+    background: var(--ac-hover-bg);
+    color: var(--ac-text);
+  }
+
+  .em-action-btn.em-action-delete:hover {
+    background: var(--ac-danger-subtle);
+  }
 }
 </style>

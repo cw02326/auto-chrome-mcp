@@ -11,6 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   RUN_STATUS_MESSAGE_KEYS,
+  formatCardLastRunLine,
+  formatCardRunClock,
   formatDays,
   formatNextRun,
   formatRunStatus,
@@ -171,6 +173,53 @@ describe('daily-format', () => {
       expect(runStatusColor('stopped')).toBe('var(--ac-warning)');
       expect(runStatusColor('failed')).toBe('var(--ac-danger)');
       expect(runStatusColor(undefined)).toBe('var(--ac-danger)');
+    });
+  });
+
+  describe('흐름 카드의 "마지막 실행" 문구 (2026-09-06 초보자 가독성 개편)', () => {
+    // 2026년 9월 6일 일요일 10:00 (로컬 시간)
+    const now = new Date(2026, 8, 6, 10, 0, 0).getTime();
+
+    it('오늘이면 "오늘 시각"이다', () => {
+      const at = new Date(2026, 8, 6, 0, 12, 0).getTime();
+      expect(formatCardRunClock(at, now, t)).toBe('sidepanel_card_day_today(00:12)');
+    });
+
+    it('어제면 "어제 시각"이다', () => {
+      const at = new Date(2026, 8, 5, 21, 10, 0).getTime();
+      expect(formatCardRunClock(at, now, t)).toBe('sidepanel_card_day_yesterday(21:10)');
+    });
+
+    it('그제 이전이면 날짜와 시각이다 (구분은 점)', () => {
+      const at = new Date(2026, 8, 3, 21, 10, 0).getTime();
+      expect(formatCardRunClock(at, now, t)).toBe('09.03 21:10');
+    });
+
+    it('시각이 없으면 빈 문자열이다', () => {
+      expect(formatCardRunClock(null, now, t)).toBe('');
+      expect(formatCardRunClock(undefined, now, t)).toBe('');
+    });
+
+    it('성공이면 "성공 · 시각" 문구다', () => {
+      const at = new Date(2026, 8, 6, 0, 12, 0).getTime();
+      expect(formatCardLastRunLine('success', at, now, t)).toBe(
+        'sidepanel_card_last_run_success(sidepanel_card_day_today(00:12))',
+      );
+    });
+
+    it('실패면 "실패 · 시각" 문구다', () => {
+      const at = new Date(2026, 8, 5, 21, 10, 0).getTime();
+      expect(formatCardLastRunLine('failure', at, now, t)).toBe(
+        'sidepanel_card_last_run_failed(sidepanel_card_day_yesterday(21:10))',
+      );
+    });
+
+    it('실행 기록이 없으면 안내 문구다', () => {
+      expect(formatCardLastRunLine(null, null, now, t)).toBe('sidepanel_card_last_run_none');
+      expect(formatCardLastRunLine('success', null, now, t)).toBe('sidepanel_card_last_run_none');
+      expect(formatCardLastRunLine(undefined, undefined, now, t)).toBe(
+        'sidepanel_card_last_run_none',
+      );
     });
   });
 });

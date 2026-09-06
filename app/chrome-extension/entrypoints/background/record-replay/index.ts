@@ -23,6 +23,8 @@ import { runFlow } from './flow-runner';
 import { queryEntryPointTab, runTabFromId, type RunTabContext } from './engine/tab-context';
 import { RecorderManager } from './recording/recorder-manager';
 import { recordingSession } from './recording/session-manager';
+// 녹화가 시작·중지되면 우클릭 메뉴 문구도 따라가야 한다 (2026-09-06).
+import { syncRecordingMenuTitles } from '../context-menus-spec';
 // Browser/content listeners are initialized via RecorderManager.init
 
 // design note: background listener for record & replay; delegates recording to dedicated modules
@@ -176,7 +178,7 @@ export function initRecordReplayListeners() {
   // (2026-09-05 Codex 최종 확인 5).
   //
   // 이 호출은 일부러 await 하지 않고 메시지 리스너를 곧바로 연다(2026-09-05 발행 차단
-  // 지적 대응, 택한 방식: 리스너 선(先) 오픈 + 락으로 순서 보장). initRecordReplayListeners
+  // 지적 대응, 택한 방식: 리스너를 먼저 열고 락으로 순서 보장). initRecordReplayListeners
   // 는 동기 함수이고 다른 호출부·테스트가 "호출 즉시 리스너가 등록돼 있다" 는 전제로
   // 짜여 있어, await 을 끼워 넣으면 리스너 등록 자체가 (실제 IndexedDB 왕복만큼) 밀린다.
   // 대신 flow-store.ts 의 publishFlow/unpublishFlow/migratePublishedSensitiveDefaults 는
@@ -188,14 +190,14 @@ export function initRecordReplayListeners() {
   // (ensurePublishedSensitiveDefaultsMigrated 가 catch 후 0 을 돌려준다) 여기서 별도
   // try/catch 가 필요 없다.
   void ensurePublishedSensitiveDefaultsMigrated();
-  // Initialize trigger engine (contextMenus/commands/url/dom)
+  // Initialize trigger engine (commands/url/dom)
   initTriggerEngine().catch(() => {});
   // Initialize recorder manager (wires browser and content listeners)
   RecorderManager.init().catch(() => {});
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
-      // rr_recorder_event 交由 ContentMessageHandler 处理
+      // rr_recorder_event 는 ContentMessageHandler 가 처리한다
       switch (message?.type) {
         case BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING: {
           // tabId 가 오면 그 탭에서 녹화한다 (팝업이 눌린 순간의 탭). 없으면 예전처럼
@@ -204,13 +206,20 @@ export function initRecordReplayListeners() {
             message.meta,
             typeof message.tabId === 'number' ? { tabId: message.tabId } : undefined,
           )
-            .then(sendResponse)
+            .then((result) => {
+              // 우클릭 메뉴의 "이 탭에서 녹화 시작" 문구를 "녹화 중지" 로 바꾼다.
+              syncRecordingMenuTitles();
+              sendResponse(result);
+            })
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING: {
           stopRecording()
-            .then(sendResponse)
+            .then((result) => {
+              syncRecordingMenuTitles();
+              sendResponse(result);
+            })
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
@@ -413,26 +422,7 @@ export function initRecordReplayListeners() {
     return false;
   });
 
-  // Trigger engine: contextMenus/commands/url/dom
-  if ((chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-      try {
-        const triggers = await listTriggers();
-        const t = triggers.find(
-          (x) => x.type === 'contextMenu' && (x as any).menuId === info.menuItemId,
-        );
-        if (!t || t.enabled === false) return;
-        const flow = await getFlow(t.flowId);
-        if (!flow) return;
-        // The click tells us which tab the user invoked the menu on.
-        const runTab =
-          typeof tab?.id === 'number'
-            ? runTabFromId(tab.id, 'explicit', tab.windowId)
-            : await queryEntryPointTab('sidepanel');
-        await runFlow(flow, runTab, { args: t.args || {}, returnLogs: false });
-      } catch {}
-    });
-  }
+  // Trigger engine: commands/url/dom
   chrome.commands.onCommand.addListener(async (command, tab) => {
     try {
       const triggers = await listTriggers();
@@ -551,52 +541,9 @@ function matchUrl(
   return false;
 }
 
-// Track context menu IDs created by record-replay to avoid removing other menus
-const rrContextMenuIds = new Set<string>();
-
-async function refreshContextMenus(triggers: FlowTrigger[]) {
-  if (!(chrome as any).contextMenus?.create) return;
-
-  // Remove only our own menu items
-  await removeRecordReplayMenus();
-
-  // Create menus for enabled context menu triggers
-  for (const t of triggers) {
-    if (t.type !== 'contextMenu' || t.enabled === false) continue;
-    const id = `rr_menu_${t.id}`;
-    (t as any).menuId = id;
-
-    try {
-      await chrome.contextMenus.create({
-        id,
-        title: (t as any).title || '运行工作流',
-        contexts: (t as any).contexts || ['all'],
-      });
-      rrContextMenuIds.add(id);
-    } catch (err) {
-      console.warn('[RecordReplay] Failed to create context menu:', err);
-    }
-  }
-}
-
-async function removeRecordReplayMenus() {
-  if (!(chrome as any).contextMenus?.remove) {
-    rrContextMenuIds.clear();
-    return;
-  }
-
-  const pending = Array.from(rrContextMenuIds.values()).map((id) =>
-    chrome.contextMenus.remove(id).catch(() => {}),
-  );
-
-  if (pending.length) await Promise.all(pending);
-  rrContextMenuIds.clear();
-}
-
 async function refreshTriggers() {
   try {
     const triggers = await listTriggers();
-    await refreshContextMenus(triggers);
     await chrome.storage.local.set({ [STORAGE_KEYS.RR_TRIGGERS]: triggers });
     const domTriggers = triggers
       .filter((x) => x.type === 'dom' && x.enabled !== false)

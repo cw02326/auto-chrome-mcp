@@ -427,14 +427,7 @@ const formatIndexSize = () => {
   outline-offset: 2px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .lm-model:hover:not(:disabled) {
-    background-color: var(--ac-surface-hover);
-  }
-}
-
-.lm-model--on,
-.lm-model--on:hover {
+.lm-model--on {
   background-color: var(--ac-accent-soft);
 }
 
@@ -483,5 +476,15 @@ const formatIndexSize = () => {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lm-model:hover:not(:disabled) {
+    background-color: var(--ac-surface-hover);
+  }
+
+  .lm-model--on:hover {
+    background-color: var(--ac-accent-soft);
+  }
 }
 </style>

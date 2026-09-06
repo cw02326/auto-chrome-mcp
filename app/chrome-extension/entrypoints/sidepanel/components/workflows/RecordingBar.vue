@@ -7,7 +7,7 @@
           <span class="rec-dot rec-dot-idle"></span>
           <span>{{ getMessage('sidepanel_record_start') }}</span>
         </button>
-        <span class="rec-hint ac-caption ac-clip">{{ getMessage('sidepanel_record_hint') }}</span>
+        <span class="rec-hint ac-caption">{{ getMessage('sidepanel_record_hint') }}</span>
       </template>
 
       <!-- 녹화 중: 빨간 점 + 경과 시간 + 잡힌 단계 수 + 중지 버튼 -->
@@ -71,9 +71,16 @@ const stateText = computed(() => {
   padding: 12px 16px;
 }
 
+/* 안내 문구는 잘리지 않고 최대 두 줄로 흐른다(사용자 요구, 2026-09-06). */
 .rec-hint {
   flex: 1;
   min-width: 0;
+  white-space: normal;
+  line-height: 18px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .rec-dot {

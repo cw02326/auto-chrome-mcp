@@ -240,6 +240,14 @@
             </button>
           </div>
 
+          <button
+            type="button"
+            class="ac-button ac-button--ghost pv-reset"
+            @click="currentView = 'local-model'"
+          >
+            {{ getMessage('popup_local_model_button') }}
+          </button>
+
           <ForceReconnect
             :port="Number(nativeServerPort) || 12320"
             :open="showReconnect"
@@ -361,88 +369,6 @@ const { theme: agentTheme, initTheme } = useAgentTheme();
 
 // 当前视图状态：首页 or 本地模型页
 const currentView = ref<'home' | 'local-model'>('home');
-
-// Record & Replay state
-const rrRecording = ref(false);
-const rrFlows = ref<
-  Array<{ id: string; name: string; description?: string; meta?: any; variables?: any[] }>
->([]);
-const rrOnlyBound = ref(false);
-const rrSearch = ref('');
-const currentTabUrl = ref<string>('');
-const filteredRrFlows = computed(() => {
-  const base = rrOnlyBound.value ? rrFlows.value.filter(isFlowBoundToCurrent) : rrFlows.value;
-  const q = rrSearch.value.trim().toLowerCase();
-  if (!q) return base;
-  return base.filter((f: any) => {
-    const name = String(f.name || '').toLowerCase();
-    const domain = String(f?.meta?.domain || '').toLowerCase();
-    const tags = ((f?.meta?.tags || []) as any[]).join(',').toLowerCase();
-    return name.includes(q) || domain.includes(q) || tags.includes(q);
-  });
-});
-
-// Flow editor在独立窗口中打开；在popup不再展示繁杂列表
-
-const loadFlows = async () => {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_LIST_FLOWS });
-    if (res && res.success) rrFlows.value = res.flows || [];
-  } catch (e) {
-    /* ignore */
-  }
-};
-
-function isFlowBoundToCurrent(flow: any) {
-  try {
-    const bindings = flow?.meta?.bindings || [];
-    if (!bindings.length) return false;
-    if (!currentTabUrl.value) return true;
-    const url = new URL(currentTabUrl.value);
-    return bindings.some((b: any) => {
-      if (b.type === 'domain') return url.hostname.includes(b.value);
-      if (b.type === 'path') return url.pathname.startsWith(b.value);
-      if (b.type === 'url') return (url.href || '').startsWith(b.value);
-      return false;
-    });
-  } catch {
-    return false;
-  }
-}
-
-// 运行记录与覆盖项在侧边栏页面查看
-/**
- * 녹화 시작 (2026-09-05 사이드패널 1단계 A).
- *
- * 팝업은 버튼을 누르는 순간 닫힐 수 있어 녹화 중 표시를 유지할 자리가 아니다. 사이드패널을
- * 열면서 무엇을 할지를 ?record 로 넘기고, 실제 시작·중지와 녹화 중 표시는 거기서 한다.
- *
- * **지금 보고 있는 탭의 id 를 함께 넘긴다.** 팝업이 닫히고 패널이 뜨는 사이에 활성 탭이
- * 바뀌면(다른 창이 앞으로 오는 등) 패널이 다시 "활성 탭" 을 물었을 때 엉뚱한 탭이 잡힌다.
- */
-const startRecording = async () => {
-  const tabId = await activeTabIdForRecording();
-  await openSidepanelAndClose('workflows', {
-    record: 'start',
-    ...(tabId !== undefined ? { tabId: String(tabId) } : {}),
-  });
-};
-
-const stopRecording = async () => {
-  await openSidepanelAndClose('workflows', { record: 'stop' });
-};
-
-/** 팝업이 눌린 순간의 활성 탭 id. 못 얻으면 패널이 알아서 활성 탭을 찾는다. */
-async function activeTabIdForRecording(): Promise<number | undefined> {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return typeof tab?.id === 'number' ? tab.id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-// 旧的“克隆/发布/定时/覆盖项”在侧边栏或编辑器中处理
 
 const nativeConnectionStatus = ref<'unknown' | 'connected' | 'disconnected'>('unknown');
 const isConnecting = ref(false);
@@ -654,54 +580,9 @@ async function openSidepanelAndClose(tab: string, extra?: Record<string, string>
   }
 }
 
-// Open sidepanel from popup for workflow management
-function openWorkflowSidepanel() {
-  void openSidepanelAndClose('workflows');
-}
-
-// Open sidepanel for element marker management
-function openElementMarkerSidepanel() {
-  openSidepanelAndClose('element-markers');
-}
-
 /** 사이드패널의 매일 작업 탭 (2026-09-05 사이드패널 2단계 E). */
 function openDailySidepanel() {
   void openSidepanelAndClose('daily');
-}
-
-async function toggleWebEditor() {
-  try {
-    await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE });
-  } catch (error) {
-    console.warn('切换网页编辑模式失败:', error);
-  }
-}
-
-async function toggleElementMarker() {
-  try {
-    // 获取当前活动tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      console.warn('无法获取当前tab');
-      return;
-    }
-
-    // 向background发送消息，启动元素标注
-    await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START,
-      tabId: tab.id,
-    });
-  } catch (error) {
-    console.warn('开启元素标注失败:', error);
-  }
-}
-
-async function openWelcomePage() {
-  try {
-    await chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
-  } catch {
-    // ignore
-  }
 }
 
 const getStatusText = () => {
@@ -904,7 +785,9 @@ const initializeSemanticEngine = async () => {
   } catch (error: any) {
     console.error('❌ Failed to send initialization request:', error);
     semanticEngineStatus.value = 'error';
-    semanticEngineInitProgress.value = `Failed to send initialization request: ${error?.message || 'Unknown error'}`;
+    semanticEngineInitProgress.value = getMessage('popup_semantic_engine_init_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     await saveSemanticEngineState();
 
@@ -1538,11 +1421,13 @@ const confirmClearAllData = async () => {
         hideClearDataConfirmation();
       }, 2000);
     } else {
-      throw new Error(response?.error || 'Failed to clear data');
+      throw new Error(response?.error || getMessage('popup_clear_data_generic_error'));
     }
   } catch (error: any) {
     console.error('❌ Failed to clear all data:', error);
-    clearDataProgress.value = `Failed to clear data: ${error?.message || 'Unknown error'}`;
+    clearDataProgress.value = getMessage('popup_clear_data_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     setTimeout(() => {
       clearDataProgress.value = '';
@@ -1632,11 +1517,13 @@ const switchModel = async (newModel: ModelPreset) => {
         modelSwitchProgress.value = '';
       }, 2000);
     } else {
-      throw new Error(response?.error || 'Model switch failed');
+      throw new Error(response?.error || getMessage('popup_model_switch_generic_error'));
     }
   } catch (error: any) {
     console.error('模型切换失败:', error);
-    modelSwitchProgress.value = `Model switch failed: ${error?.message || 'Unknown error'}`;
+    modelSwitchProgress.value = getMessage('popup_model_switch_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     modelInitializationStatus.value = 'error';
     isModelDownloading.value = false;
@@ -1687,10 +1574,6 @@ const setupServerStatusListener = () => {
       }
       console.log('Server status updated:', message.payload);
     }
-    // Flows changed - refresh list (IndexedDB-based notification)
-    if (message.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) {
-      loadFlows();
-    }
   };
   chrome.runtime.onMessage.addListener(onMessage);
   // Store reference for cleanup
@@ -1712,20 +1595,13 @@ onMounted(async () => {
   await checkServerStatus();
   await refreshStorageStats();
   await loadCacheStats();
-  await loadFlows();
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentTabUrl.value = tab?.url || '';
-  } catch {}
 
   await checkSemanticEngineStatus();
   setupServerStatusListener();
-  // Auto-refresh workflows list when storage rr_flows changes
   try {
     const onChanged = (changes: any, area: string) => {
       try {
         if (area !== 'local') return;
-        if (Object.prototype.hasOwnProperty.call(changes || {}, 'rr_flows')) loadFlows();
         // auto-chrome-mcp fork: 다른 popup/탭이 force-focus 토글 바꿔도 즉시 반영.
         if (Object.prototype.hasOwnProperty.call(changes || {}, FORCE_FOCUS_STORAGE_KEY)) {
           forceFocusEnabled.value = changes[FORCE_FOCUS_STORAGE_KEY]?.newValue === true;

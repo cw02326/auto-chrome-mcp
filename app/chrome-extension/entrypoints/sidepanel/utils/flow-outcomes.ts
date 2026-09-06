@@ -112,6 +112,13 @@ export interface FlowOutcomeSummary {
   lastSuccessAt: Record<string, number>;
   /** 마지막으로 끝난 실행이 실패인 흐름. */
   failedFlowIds: Set<string>;
+  /**
+   * 흐름별 마지막으로 끝난 실행의 시각 (성공·실패 통틀어 가장 최근 것).
+   * 카드의 "마지막 실행" 줄이 이걸로 성공이든 실패든 하나만 보여준다.
+   */
+  lastRunAt: Record<string, number>;
+  /** 흐름별 마지막으로 끝난 실행의 결과. */
+  lastRunOutcome: Record<string, 'success' | 'failure'>;
 }
 
 /**
@@ -136,10 +143,14 @@ export function summarizeFlowOutcomes(outcomes: readonly FlowRunOutcome[]): Flow
   }
 
   const failedFlowIds = new Set<string>();
+  const lastRunAt: Record<string, number> = {};
+  const lastRunOutcome: Record<string, 'success' | 'failure'> = {};
   for (const [flowId, info] of latest) {
+    lastRunAt[flowId] = info.at;
+    lastRunOutcome[flowId] = info.outcome;
     if (info.outcome === 'failure') failedFlowIds.add(flowId);
   }
-  return { lastSuccessAt, failedFlowIds };
+  return { lastSuccessAt, failedFlowIds, lastRunAt, lastRunOutcome };
 }
 
 /** 두 이력을 한 번에 합치는 손잡이. 화면은 이것만 부른다. */

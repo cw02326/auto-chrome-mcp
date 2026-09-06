@@ -132,10 +132,6 @@ function onKeydown(event: KeyboardEvent, currentId: TabType) {
   transition: color var(--ac-motion-fast) ease;
 }
 
-.sp-tab:hover {
-  color: var(--ac-text-secondary);
-}
-
 /* 인접 버튼이 flush 로 붙어 있어 양수 offset 은 옆 버튼에 가려질 수 있다. inset 으로 그린다. */
 .sp-tab:focus-visible {
   outline: 2px solid var(--ac-focus-ring);
@@ -143,8 +139,7 @@ function onKeydown(event: KeyboardEvent, currentId: TabType) {
 }
 
 /* 활성 탭: 글자만 진해지고 아래 2px 밑줄이 붙는다. 배경은 바뀌지 않는다. */
-.sp-tab-active,
-.sp-tab-active:hover {
+.sp-tab-active {
   color: var(--ac-text);
 }
 
@@ -164,5 +159,15 @@ function onKeydown(event: KeyboardEvent, currentId: TabType) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sp-tab:hover {
+    color: var(--ac-text-secondary);
+  }
+
+  .sp-tab-active:hover {
+    color: var(--ac-text);
+  }
 }
 </style>

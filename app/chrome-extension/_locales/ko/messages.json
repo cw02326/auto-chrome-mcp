@@ -231,6 +231,10 @@
     "message": "알 수 없는 오류, 네트워크에서 HuggingFace에 접속할 수 있는지 확인하세요",
     "description": "알 수 없는 오류 대체 메시지"
   },
+  "popup_unknown_error": {
+    "message": "알 수 없는 오류",
+    "description": "오류 메시지가 없을 때의 대체 문구(범용)"
+  },
   "permissionDeniedErrorMessage": {
     "message": "권한이 거부되었습니다",
     "description": "권한 거부 오류 메시지"
@@ -1787,6 +1791,98 @@
       }
     }
   },
+  "sidepanel_card_status_label": {
+    "message": "상태",
+    "description": "카드 정보 목록: 상태 라벨"
+  },
+  "sidepanel_card_status_published": {
+    "message": "발행됨 · Claude 에서 실행할 수 있어요",
+    "description": "카드 상태 값: 발행됨"
+  },
+  "sidepanel_card_status_needs_republish": {
+    "message": "수정됨 · 다시 발행해야 반영돼요",
+    "description": "카드 상태 값: 재발행 필요"
+  },
+  "sidepanel_card_status_draft": {
+    "message": "저장만 됨 · 발행하면 Claude 에서 실행돼요",
+    "description": "카드 상태 값: 미발행"
+  },
+  "sidepanel_card_site_label": {
+    "message": "사이트",
+    "description": "카드 정보 목록: 사이트 라벨"
+  },
+  "sidepanel_card_last_run_label": {
+    "message": "마지막 실행",
+    "description": "카드 정보 목록: 마지막 실행 라벨"
+  },
+  "sidepanel_card_last_run_success": {
+    "message": "성공 · $TIME$",
+    "description": "카드 마지막 실행 값: 성공",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "오늘 00:12"
+      }
+    }
+  },
+  "sidepanel_card_last_run_failed": {
+    "message": "실패 · $TIME$",
+    "description": "카드 마지막 실행 값: 실패",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "어제 21:10"
+      }
+    }
+  },
+  "sidepanel_card_last_run_none": {
+    "message": "아직 실행한 적 없어요",
+    "description": "카드 마지막 실행 값: 기록 없음"
+  },
+  "sidepanel_card_next_schedule_label": {
+    "message": "다음 예약",
+    "description": "카드 정보 목록: 다음 예약 라벨"
+  },
+  "sidepanel_card_description_label": {
+    "message": "설명",
+    "description": "카드 정보 목록: 설명 라벨"
+  },
+  "sidepanel_card_day_today": {
+    "message": "오늘 $TIME$",
+    "description": "카드 시각: 오늘",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "00:12"
+      }
+    }
+  },
+  "sidepanel_card_day_yesterday": {
+    "message": "어제 $TIME$",
+    "description": "카드 시각: 어제",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "21:10"
+      }
+    }
+  },
+  "sidepanel_card_run_action": {
+    "message": "실행",
+    "description": "카드 버튼: 실행"
+  },
+  "sidepanel_card_schedule_action": {
+    "message": "예약",
+    "description": "카드 버튼: 예약"
+  },
+  "sidepanel_card_edit_action": {
+    "message": "편집",
+    "description": "카드 버튼: 편집"
+  },
+  "sidepanel_card_more_action": {
+    "message": "더보기",
+    "description": "카드 버튼: 더보기"
+  },
   "sidepanel_daily_filter_site_all": {
     "message": "전체 사이트",
     "description": "사이트 필터: 전체"
@@ -2254,6 +2350,45 @@
     "message": "진단 리포트",
     "description": "보조 버튼"
   },
+  "popup_local_model_button": {
+    "message": "로컬 모델 관리",
+    "description": "보조 버튼 - 로컬 임베딩 모델 관리 화면 진입"
+  },
+  "popup_semantic_engine_init_failed": {
+    "message": "초기화 요청을 보내지 못했습니다: $ERR$",
+    "description": "시맨틱 엔진 초기화 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_clear_data_generic_error": {
+    "message": "데이터를 지우지 못했습니다",
+    "description": "데이터 삭제 실패의 서버 응답이 비어 있을 때 쓰는 대체 오류 메시지"
+  },
+  "popup_clear_data_failed": {
+    "message": "데이터를 지우지 못했습니다: $ERR$",
+    "description": "데이터 삭제 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_model_switch_generic_error": {
+    "message": "모델을 전환하지 못했습니다",
+    "description": "모델 전환 실패의 서버 응답이 비어 있을 때 쓰는 대체 오류 메시지"
+  },
+  "popup_model_switch_failed": {
+    "message": "모델을 전환하지 못했습니다: $ERR$",
+    "description": "모델 전환 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
   "popup_diag_copy_json": {
     "message": "JSON 복사",
     "description": "버튼"
@@ -2398,6 +2533,15 @@
     "message": "여러 값은 쉼표로 구분해 적습니다",
     "description": "입력 도움말"
   },
+  "options_userscript_apply_failed": {
+    "message": "실행하지 못했습니다: $ERR$",
+    "description": "유저스크립트 생성/실행 실패 결과 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
   "popup_prompt_body": {
     "message": "지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP (auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 손대지 마.\n\n규칙:\n- 이름: \"chrome-mcp-stdio\"\n- transport: stdio (HTTP 안 씀)\n- command: \"node\"\n- args: [\"<npm root -g 출력값>/auto-chrome-mcp-bridge/dist/mcp/mcp-server-stdio.js\"]\n- env: { \"CHROME_PORT\": \"$PORT$\" }\n\n먼저 `npm root -g` 를 bash 로 실행해서 실제 경로 얻고, 그 다음에 working dir 의 .mcp.json (없으면 신설) 의 mcpServers.chrome-mcp-stdio 만 추가/갱신해줘. 기존 다른 server 항목은 보존.\n\n등록이 끝나면 아래 절차도 함께 안내해줘:\n1. Claude Code 를 Ctrl+C 두 번으로 종료 후 다시 실행 (mcp 서버 재로드)\n2. `/mcp` 입력해서 chrome-mcp-stdio 가 connected 상태인지 확인\n3. 확인 후 Esc 로 빠져나오기",
     "description": "Claude Code 등록 prompt 본문",
@@ -2426,5 +2570,71 @@
   "popup_fr_state_idle": {
     "message": "대기",
     "description": "재연결 단계 상태"
+  },
+  "menu_open_sidepanel": {
+    "message": "사이드패널 열기",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_daily_jobs": {
+    "message": "매일 작업",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_record_start": {
+    "message": "이 탭에서 녹화 시작",
+    "description": "우클릭 메뉴, 녹화 아님"
+  },
+  "menu_record_stop": {
+    "message": "녹화 중지",
+    "description": "우클릭 메뉴, 녹화 중"
+  },
+  "menu_element_markers": {
+    "message": "요소 마킹",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_web_editor_toggle": {
+    "message": "웹 에디터 켜기/끄기",
+    "description": "우클릭 메뉴"
+  },
+  "menu_quick_panel": {
+    "message": "빠른 패널",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_userscripts": {
+    "message": "유저스크립트 관리",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_force_reconnect": {
+    "message": "강제 재연결",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_page_parent": {
+    "message": "Auto Chrome MCP",
+    "description": "페이지 우클릭 메뉴의 부모"
+  },
+  "menu_page_mark_element": {
+    "message": "이 요소 마킹",
+    "description": "페이지 우클릭 메뉴"
+  },
+  "menu_notification_title": {
+    "message": "Auto Chrome MCP",
+    "description": "우클릭 메뉴가 띄우는 알림 제목"
+  },
+  "menu_force_reconnect_ok": {
+    "message": "강제 재연결 성공 (브리지 pid $PID$)",
+    "description": "우클릭 메뉴 알림",
+    "placeholders": {
+      "pid": {
+        "content": "$1"
+      }
+    }
+  },
+  "menu_force_reconnect_fail": {
+    "message": "강제 재연결 실패 ($STAGE$ 단계)",
+    "description": "우클릭 메뉴 알림",
+    "placeholders": {
+      "stage": {
+        "content": "$1"
+      }
+    }
   }
 }

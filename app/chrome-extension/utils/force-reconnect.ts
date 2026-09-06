@@ -40,6 +40,18 @@ export interface StageResult {
   durationMs?: number;
 }
 
+/**
+ * ③ spawn 과 ⑤ connect 가 배경에 요청을 넣는 방법 (2026-09-06 컨텍스트 메뉴 통합).
+ *
+ * 기본값은 `chrome.runtime.sendMessage` 다. 팝업처럼 배경 **밖** 에서 부를 때 맞다.
+ * 배경(서비스 워커) 자신이 이 흐름을 돌릴 때는 자기가 보낸 sendMessage 가 자기 리스너에
+ * 도달하지 않으므로, 배경 함수를 여기에 그대로 꽂아 준다.
+ */
+export interface ForceReconnectTransport {
+  respawn?: () => Promise<{ ok?: boolean; connected?: boolean } | undefined>;
+  connect?: (port: number) => Promise<{ success?: boolean; connected?: boolean } | undefined>;
+}
+
 export interface ForceReconnectOptions {
   /** Bridge HTTP port (default 12320 — v1.0.2 부터 fork 전용). */
   port?: number;
@@ -49,6 +61,8 @@ export interface ForceReconnectOptions {
   onProgress?: (step: StageResult) => void;
   /** Stage 별 timeout (ms). */
   timeouts?: Partial<Record<StageStep, number>>;
+  /** 배경 요청 경로. 생략하면 `chrome.runtime.sendMessage`. */
+  transport?: ForceReconnectTransport;
 }
 
 export interface ForceReconnectResult {
@@ -125,6 +139,12 @@ export async function forceReconnect(
   const base = `http://${host}:${port}`;
   const stages: StageResult[] = [];
   const cb = opts.onProgress;
+  const requestRespawn =
+    opts.transport?.respawn ??
+    (() => chrome.runtime.sendMessage({ type: 'force-reconnect-respawn' }));
+  const requestConnect =
+    opts.transport?.connect ??
+    ((p: number) => chrome.runtime.sendMessage({ type: 'connectNative', port: p }));
 
   // ---------- ① process_kill ----------
   // v1.0.6: drain + kill-self 둘 다 fire-and-forget. drain 이 응답 안 해도 kill-self 가
@@ -248,9 +268,7 @@ export async function forceReconnect(
     const t0 = now();
     emit(cb, step, { status: 'running', message: 'asking background to reconnect native' });
     try {
-      const respawnOk = await chrome.runtime.sendMessage({
-        type: 'force-reconnect-respawn',
-      });
+      const respawnOk = await requestRespawn();
       const duration = now() - t0;
       if (respawnOk && (respawnOk as any).ok) {
         const r = emit(cb, step, {
@@ -341,10 +359,7 @@ export async function forceReconnect(
     const t0 = now();
     emit(cb, step, { status: 'running', message: 'sending connectNative (= ⚡ 연결 버튼 효과)' });
     try {
-      const res: any = await chrome.runtime.sendMessage({
-        type: 'connectNative',
-        port,
-      });
+      const res: any = await requestConnect(port);
       const ackOk = !!(res && res.success);
       const connectedFlag = !!(res && (res.connected === true || res.connected === undefined));
 
