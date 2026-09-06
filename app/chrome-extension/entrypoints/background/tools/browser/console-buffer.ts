@@ -1,10 +1,10 @@
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 /**
- * ConsoleBuffer - 持久化的控制台日志缓冲管理器
+ * ConsoleBuffer - 콘솔 로그를 계속 모아 두는 버퍼 관리자
  *
- * 为每个 tab 维护一个滚动缓冲区，持续收集控制台事件。
- * 当 tab 导航到新域名时会自动清空缓冲，避免不同站点日志混淆。
+ * 탭마다 순환 버퍼를 하나씩 두고 콘솔 이벤트를 계속 모은다.
+ * 탭이 다른 도메인으로 이동하면 버퍼를 비운다. 사이트별 로그가 섞이지 않게 하려는 것이다.
  */
 
 const DEFAULT_MAX_BUFFER_MESSAGES = 2000;
@@ -131,13 +131,13 @@ function formatConsoleArgs(args: unknown[]): string {
 }
 
 /**
- * 从 CDP RemoteObject 提取安全的预览数据，丢弃 objectId 避免内存泄漏
+ * CDP RemoteObject 에서 안전한 미리보기만 뽑는다. objectId 는 버려 메모리 누수를 막는다
  */
 function extractArgPreview(arg: unknown): unknown {
   const a = arg as Record<string, unknown>;
   if (!a || typeof a !== 'object') return arg;
 
-  // 只保留安全的字段，丢弃 objectId
+  // 안전한 필드만 남기고 objectId 는 버린다
   const preview: Record<string, unknown> = {
     type: a.type,
   };
@@ -620,14 +620,14 @@ class ConsoleBuffer {
   }
 
   /**
-   * 检查指定 tab 是否正在进行 buffer 模式的捕获
+   * 이 탭이 버퍼 모드로 수집 중인지 확인한다
    */
   isCapturing(tabId: number): boolean {
     return this.buffers.has(tabId);
   }
 
   /**
-   * 确保指定 tab 的 buffer 捕获已启动
+   * 이 탭의 버퍼 수집이 켜져 있게 한다
    */
   async ensureStarted(tabId: number): Promise<void> {
     if (this.buffers.has(tabId)) return;
@@ -643,7 +643,7 @@ class ConsoleBuffer {
   }
 
   /**
-   * 清空指定 tab 的缓冲区
+   * 이 탭의 버퍼를 비운다
    */
   clear(
     tabId: number,
@@ -672,7 +672,7 @@ class ConsoleBuffer {
   }
 
   /**
-   * 读取指定 tab 的缓冲区内容
+   * 이 탭의 버퍼 내용을 읽는다
    */
   read(tabId: number, options: ConsoleBufferReadOptions = {}): ConsoleBufferReadResult | null {
     const state = this.buffers.get(tabId);
@@ -683,7 +683,7 @@ class ConsoleBuffer {
     const totalBufferedMessages = state.messages.length;
     const totalBufferedExceptions = state.exceptions.length;
 
-    // 过滤消息
+    // 메시지 거르기
     let messages = state.messages;
     if (onlyErrors) {
       messages = messages.filter((m) => isErrorLevel(m.level));
@@ -692,20 +692,20 @@ class ConsoleBuffer {
       messages = messages.filter((m) => matchesPattern(pattern, m.text || ''));
     }
 
-    // 按时间排序
+    // 시간순 정렬
     messages = [...messages].sort((a, b) => a.timestamp - b.timestamp);
 
-    // 应用 limit
+    // limit 적용
     let messageLimitReached = false;
     const normalizedLimit =
       typeof limit === 'number' && Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : null;
     if (normalizedLimit !== null && messages.length > normalizedLimit) {
       messageLimitReached = true;
-      // 保留最新的消息
+      // 최신 메시지만 남긴다
       messages = messages.slice(messages.length - normalizedLimit);
     }
 
-    // 过滤异常
+    // 예외 거르기
     let exceptions: BufferedConsoleException[] = [];
     if (includeExceptions) {
       exceptions = state.exceptions;
@@ -789,7 +789,7 @@ class ConsoleBuffer {
 
     if (typeof nextUrl === 'string') {
       const nextHost = extractHostname(nextUrl);
-      // 域名变化时清空缓冲
+      // 도메인이 바뀌면 버퍼를 비운다
       if (nextHost !== state.hostname) {
         this.clear(tabId, 'domain_changed');
         state.hostname = nextHost;
@@ -856,7 +856,7 @@ class ConsoleBuffer {
         url: safeString(callFrame?.url),
         lineNumber: safeNumber(callFrame?.lineNumber),
         stackTrace: stackTrace,
-        // 只存储安全的预览数据，避免内存泄漏
+        // 안전한 미리보기만 저장한다. 메모리 누수를 막으려는 것이다
         args: rawArgs.map(extractArgPreview),
         // auto-chrome-mcp fork (upstream #215): extractArgPreview는 preview 필드를 통째로 버리므로
         // 손실 없는 객체까지 description("Object")만 남았다. CDP 왕복 없이 preview를 복원해

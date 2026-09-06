@@ -227,6 +227,10 @@
     "message": "Model file corrupted or incomplete, please retry download",
     "description": "Model corruption error message"
   },
+  "popup_unknown_error": {
+    "message": "Unknown error",
+    "description": "오류 메시지가 없을 때의 대체 문구(범용)"
+  },
   "unknownErrorMessage": {
     "message": "Unknown error, please check if your network can access HuggingFace",
     "description": "Unknown error fallback message"
@@ -1787,6 +1791,98 @@
       }
     }
   },
+  "sidepanel_card_status_label": {
+    "message": "Status",
+    "description": "카드 정보 목록: 상태 라벨"
+  },
+  "sidepanel_card_status_published": {
+    "message": "Published · Runnable from Claude",
+    "description": "카드 상태 값: 발행됨"
+  },
+  "sidepanel_card_status_needs_republish": {
+    "message": "Edited · Republish to apply changes",
+    "description": "카드 상태 값: 재발행 필요"
+  },
+  "sidepanel_card_status_draft": {
+    "message": "Saved only · Publish to run from Claude",
+    "description": "카드 상태 값: 미발행"
+  },
+  "sidepanel_card_site_label": {
+    "message": "Site",
+    "description": "카드 정보 목록: 사이트 라벨"
+  },
+  "sidepanel_card_last_run_label": {
+    "message": "Last run",
+    "description": "카드 정보 목록: 마지막 실행 라벨"
+  },
+  "sidepanel_card_last_run_success": {
+    "message": "Success · $TIME$",
+    "description": "카드 마지막 실행 값: 성공",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "Today 00:12"
+      }
+    }
+  },
+  "sidepanel_card_last_run_failed": {
+    "message": "Failed · $TIME$",
+    "description": "카드 마지막 실행 값: 실패",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "Yesterday 21:10"
+      }
+    }
+  },
+  "sidepanel_card_last_run_none": {
+    "message": "Not run yet",
+    "description": "카드 마지막 실행 값: 기록 없음"
+  },
+  "sidepanel_card_next_schedule_label": {
+    "message": "Next run",
+    "description": "카드 정보 목록: 다음 예약 라벨"
+  },
+  "sidepanel_card_description_label": {
+    "message": "Description",
+    "description": "카드 정보 목록: 설명 라벨"
+  },
+  "sidepanel_card_day_today": {
+    "message": "Today $TIME$",
+    "description": "카드 시각: 오늘",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "00:12"
+      }
+    }
+  },
+  "sidepanel_card_day_yesterday": {
+    "message": "Yesterday $TIME$",
+    "description": "카드 시각: 어제",
+    "placeholders": {
+      "time": {
+        "content": "$1",
+        "example": "21:10"
+      }
+    }
+  },
+  "sidepanel_card_run_action": {
+    "message": "Run",
+    "description": "카드 버튼: 실행"
+  },
+  "sidepanel_card_schedule_action": {
+    "message": "Schedule",
+    "description": "카드 버튼: 예약"
+  },
+  "sidepanel_card_edit_action": {
+    "message": "Edit",
+    "description": "카드 버튼: 편집"
+  },
+  "sidepanel_card_more_action": {
+    "message": "More",
+    "description": "카드 버튼: 더보기"
+  },
   "sidepanel_daily_filter_site_all": {
     "message": "All sites",
     "description": "사이트 필터: 전체"
@@ -1964,5 +2060,581 @@
   "localModelPageTitle": {
     "message": "Local model",
     "description": "Title of the local model page in the popup"
+  },
+  "popup_title": {
+    "message": "Auto Chrome MCP",
+    "description": "팝업 헤더 제목"
+  },
+  "popup_conn_meta": {
+    "message": "Last checked $TIME$",
+    "description": "연결 카드 캡션",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      },
+      "time": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_conn_meta_port": {
+    "message": "Port $PORT$",
+    "description": "연결 카드 캡션 (확인 시각 없음)",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_settings_title": {
+    "message": "Behavior",
+    "description": "설정 카드 제목"
+  },
+  "popup_toggle_force_focus_label": {
+    "message": "Force focus",
+    "description": "토글 라벨"
+  },
+  "popup_toggle_force_focus_desc": {
+    "message": "Bring the Chrome window to the front while a tool runs",
+    "description": "토글 설명"
+  },
+  "popup_toggle_background_label": {
+    "message": "Background work",
+    "description": "토글 라벨"
+  },
+  "popup_toggle_background_desc": {
+    "message": "Work in a background tab without touching your tab or focus",
+    "description": "토글 설명"
+  },
+  "popup_toggle_dedicated_label": {
+    "message": "Dedicated work window",
+    "description": "토글 라벨"
+  },
+  "popup_toggle_dedicated_desc": {
+    "message": "Collect work tabs in a separate window, away from yours",
+    "description": "토글 설명"
+  },
+  "popup_toggle_tabgroup_label": {
+    "message": "Show work tab group",
+    "description": "토글 라벨"
+  },
+  "popup_toggle_tabgroup_desc": {
+    "message": "Group work tabs into the green MCP tab group",
+    "description": "토글 설명"
+  },
+  "popup_placement_label": {
+    "message": "Work window placement",
+    "description": "select 라벨"
+  },
+  "popup_placement_desc": {
+    "message": "How the dedicated work window is kept out of sight",
+    "description": "select 설명"
+  },
+  "popup_placement_minimized": {
+    "message": "Minimized (recommended)",
+    "description": "작업 창 배치 선택지"
+  },
+  "popup_placement_offscreen": {
+    "message": "Off screen",
+    "description": "작업 창 배치 선택지"
+  },
+  "popup_placement_visible": {
+    "message": "Visible (debugging)",
+    "description": "작업 창 배치 선택지"
+  },
+  "popup_reset_defaults": {
+    "message": "Restore the no interference defaults",
+    "description": "텍스트 버튼"
+  },
+  "popup_reset_defaults_hint": {
+    "message": "Turns the dedicated window on, placement to minimized, background work on and force focus off",
+    "description": "텍스트 버튼 설명"
+  },
+  "popup_reset_done": {
+    "message": "No interference defaults applied",
+    "description": "안내 문구"
+  },
+  "popup_reset_failed": {
+    "message": "Could not save the settings",
+    "description": "안내 문구"
+  },
+  "popup_prompt_title": {
+    "message": "Claude Code setup",
+    "description": "카드 제목"
+  },
+  "popup_prompt_hint": {
+    "message": "Paste it into claude in your terminal and .mcp.json is written for you",
+    "description": "카드 설명"
+  },
+  "popup_prompt_copy": {
+    "message": "Copy setup prompt",
+    "description": "주 버튼"
+  },
+  "popup_prompt_copied": {
+    "message": "Copied",
+    "description": "복사 직후 버튼 문구"
+  },
+  "popup_prompt_show": {
+    "message": "Show text",
+    "description": "텍스트 버튼"
+  },
+  "popup_prompt_hide": {
+    "message": "Hide text",
+    "description": "텍스트 버튼"
+  },
+  "popup_perms_title": {
+    "message": "Permissions",
+    "description": "카드 제목"
+  },
+  "popup_perms_hint": {
+    "message": "When a toggle is off, you are asked before the permission is used",
+    "description": "카드 설명"
+  },
+  "popup_perm_camera": {
+    "message": "Camera",
+    "description": "권한 이름"
+  },
+  "popup_perm_microphone": {
+    "message": "Microphone",
+    "description": "권한 이름"
+  },
+  "popup_perm_geolocation": {
+    "message": "Location",
+    "description": "권한 이름"
+  },
+  "popup_perm_os_open": {
+    "message": "Open the $NAME$ permission in system settings",
+    "description": "권한 행의 설정 버튼",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_perm_os_unsupported": {
+    "message": "This operating system ($OS$) cannot be opened automatically. Please turn the $NAME$ permission on in system settings.",
+    "description": "안내 alert",
+    "placeholders": {
+      "os": {
+        "content": "$1"
+      },
+      "name": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_perm_os_failed": {
+    "message": "Could not open system settings. Please turn the $NAME$ permission on yourself.",
+    "description": "실패 alert",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_tools_title": {
+    "message": "Recovery and diagnostics",
+    "description": "카드 제목"
+  },
+  "popup_fr_button": {
+    "message": "Force reconnect",
+    "description": "보조 버튼"
+  },
+  "popup_fr_run": {
+    "message": "Reconnect now",
+    "description": "패널 안 실행 버튼"
+  },
+  "popup_fr_running": {
+    "message": "Reconnecting",
+    "description": "실행 중 버튼 문구"
+  },
+  "popup_fr_idle": {
+    "message": "Press to restart the bridge",
+    "description": "요약 문구"
+  },
+  "popup_fr_progress": {
+    "message": "In progress",
+    "description": "요약 문구"
+  },
+  "popup_fr_ok": {
+    "message": "Connected (pid $PID$)",
+    "description": "요약 문구",
+    "placeholders": {
+      "pid": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_fail": {
+    "message": "Failed at stage $STAGE$",
+    "description": "요약 문구",
+    "placeholders": {
+      "stage": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_port_hint": {
+    "message": "Port $PORT$",
+    "description": "카드 부제",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_logs": {
+    "message": "$COUNT$ log lines",
+    "description": "로그 접이식 제목",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_stage_process_kill": {
+    "message": "1. Stop the process",
+    "description": "재연결 단계"
+  },
+  "popup_fr_stage_port_free": {
+    "message": "2. Check the port is free",
+    "description": "재연결 단계"
+  },
+  "popup_fr_stage_spawn": {
+    "message": "3. Restart the bridge",
+    "description": "재연결 단계"
+  },
+  "popup_fr_stage_handshake": {
+    "message": "4. Native handshake",
+    "description": "재연결 단계"
+  },
+  "popup_fr_stage_connect": {
+    "message": "5. Connect",
+    "description": "재연결 단계"
+  },
+  "popup_fr_stage_mcp_ping": {
+    "message": "6. MCP initialize ping",
+    "description": "재연결 단계"
+  },
+  "popup_fr_log_start": {
+    "message": "Force reconnect started (port $PORT$)",
+    "description": "로그 줄",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_log_ok": {
+    "message": "Connected (pid $PID$, session $SID$)",
+    "description": "로그 줄",
+    "placeholders": {
+      "pid": {
+        "content": "$1"
+      },
+      "sid": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_fr_log_fail": {
+    "message": "Stage $STAGE$ failed",
+    "description": "로그 줄",
+    "placeholders": {
+      "stage": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_button": {
+    "message": "Diagnostics",
+    "description": "보조 버튼"
+  },
+  "popup_local_model_button": {
+    "message": "Local model",
+    "description": "보조 버튼 - 로컬 임베딩 모델 관리 화면 진입"
+  },
+  "popup_semantic_engine_init_failed": {
+    "message": "Could not send the initialization request: $ERR$",
+    "description": "시맨틱 엔진 초기화 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_clear_data_generic_error": {
+    "message": "Failed to clear data",
+    "description": "데이터 삭제 실패의 서버 응답이 비어 있을 때 쓰는 대체 오류 메시지"
+  },
+  "popup_clear_data_failed": {
+    "message": "Could not clear data: $ERR$",
+    "description": "데이터 삭제 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_model_switch_generic_error": {
+    "message": "Model switch failed",
+    "description": "모델 전환 실패의 서버 응답이 비어 있을 때 쓰는 대체 오류 메시지"
+  },
+  "popup_model_switch_failed": {
+    "message": "Could not switch models: $ERR$",
+    "description": "모델 전환 실패 진행 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_copy_json": {
+    "message": "Copy JSON",
+    "description": "버튼"
+  },
+  "popup_diag_run": {
+    "message": "Run self test",
+    "description": "버튼"
+  },
+  "popup_diag_running": {
+    "message": "Running",
+    "description": "버튼"
+  },
+  "popup_diag_section_env": {
+    "message": "Environment",
+    "description": "섹션 제목"
+  },
+  "popup_diag_key_extension": {
+    "message": "Extension",
+    "description": "표 항목 이름"
+  },
+  "popup_diag_section_bridge": {
+    "message": "Bridge process",
+    "description": "섹션 제목"
+  },
+  "popup_diag_key_uptime": {
+    "message": "Uptime",
+    "description": "표 항목 이름"
+  },
+  "popup_diag_key_memory": {
+    "message": "Memory",
+    "description": "표 항목 이름"
+  },
+  "popup_diag_key_transports": {
+    "message": "Active transports",
+    "description": "표 항목 이름"
+  },
+  "popup_diag_health_error": {
+    "message": "$ERR$ · cannot reach $URL$/health",
+    "description": "오류 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      },
+      "url": {
+        "content": "$2"
+      }
+    }
+  },
+  "popup_diag_health_loading": {
+    "message": "Waiting for the /health response",
+    "description": "대기 문구"
+  },
+  "popup_diag_section_selftest": {
+    "message": "Self test results",
+    "description": "섹션 제목"
+  },
+  "popup_diag_copied": {
+    "message": "Diagnostic JSON copied to the clipboard",
+    "description": "알림"
+  },
+  "popup_diag_copy_failed": {
+    "message": "Could not copy: $ERR$",
+    "description": "알림",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_test_initialize_first": {
+    "message": "initialize, first call",
+    "description": "자가 진단 항목"
+  },
+  "popup_diag_test_initialize_second": {
+    "message": "initialize, second call (other session alive)",
+    "description": "자가 진단 항목"
+  },
+  "popup_diag_test_health_pid": {
+    "message": "/health returns bridge.pid",
+    "description": "자가 진단 항목"
+  },
+  "popup_diag_test_pagehide": {
+    "message": "Chrome 144+ pagehide event (info)",
+    "description": "자가 진단 항목"
+  },
+  "popup_diag_test_env": {
+    "message": "CHROME_MCP_HOST environment variable (info)",
+    "description": "자가 진단 항목"
+  },
+  "popup_diag_detail_session": {
+    "message": "Session $SID$",
+    "description": "자가 진단 상세",
+    "placeholders": {
+      "sid": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_detail_session_distinct": {
+    "message": "Session $SID$ (differs from the first)",
+    "description": "자가 진단 상세",
+    "placeholders": {
+      "sid": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_detail_session_same": {
+    "message": "Same session id as the first call",
+    "description": "자가 진단 상세"
+  },
+  "popup_diag_detail_pid": {
+    "message": "pid $PID$",
+    "description": "자가 진단 상세",
+    "placeholders": {
+      "pid": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_diag_detail_no_pid": {
+    "message": "no pid",
+    "description": "자가 진단 상세"
+  },
+  "popup_diag_detail_pagehide": {
+    "message": "Static check: upstream PR #329 merged",
+    "description": "자가 진단 상세"
+  },
+  "popup_diag_detail_env": {
+    "message": "10 unit tests pass",
+    "description": "자가 진단 상세"
+  },
+  "options_page_title": {
+    "message": "Userscripts",
+    "description": "옵션 페이지 제목"
+  },
+  "options_emergency_desc": {
+    "message": "Stops every userscript at once",
+    "description": "긴급 스위치 설명"
+  },
+  "options_form_hint": {
+    "message": "Separate several values with commas",
+    "description": "입력 도움말"
+  },
+  "options_userscript_apply_failed": {
+    "message": "Could not run: $ERR$",
+    "description": "유저스크립트 생성/실행 실패 결과 문구",
+    "placeholders": {
+      "err": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_prompt_body": {
+    "message": "Register our chrome MCP (auto-chrome-mcp) in the .mcp.json of the current working dir (this project folder). Do not touch global config such as ~/.claude.json.\n\nRules:\n- name: \"chrome-mcp-stdio\"\n- transport: stdio (no HTTP)\n- command: \"node\"\n- args: [\"<output of npm root -g>/auto-chrome-mcp-bridge/dist/mcp/mcp-server-stdio.js\"]\n- env: { \"CHROME_PORT\": \"$PORT$\" }\n\nFirst run `npm root -g` in bash to get the real path, then add or update only mcpServers.chrome-mcp-stdio in the working dir .mcp.json (create it if missing). Keep every other server entry.\n\nWhen it is registered, also explain these steps:\n1. Quit Claude Code with Ctrl+C twice and start it again (reloads mcp servers)\n2. Type `/mcp` and check that chrome-mcp-stdio is connected\n3. Press Esc to leave",
+    "description": "Claude Code 등록 prompt 본문",
+    "placeholders": {
+      "port": {
+        "content": "$1"
+      }
+    }
+  },
+  "popup_fr_state_running": {
+    "message": "running",
+    "description": "재연결 단계 상태"
+  },
+  "popup_fr_state_success": {
+    "message": "ok",
+    "description": "재연결 단계 상태"
+  },
+  "popup_fr_state_fail": {
+    "message": "failed",
+    "description": "재연결 단계 상태"
+  },
+  "popup_fr_state_skipped": {
+    "message": "skipped",
+    "description": "재연결 단계 상태"
+  },
+  "popup_fr_state_idle": {
+    "message": "waiting",
+    "description": "재연결 단계 상태"
+  },
+  "menu_open_sidepanel": {
+    "message": "Open side panel",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_daily_jobs": {
+    "message": "Daily jobs",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_record_start": {
+    "message": "Record this tab",
+    "description": "우클릭 메뉴, 녹화 아님"
+  },
+  "menu_record_stop": {
+    "message": "Stop recording",
+    "description": "우클릭 메뉴, 녹화 중"
+  },
+  "menu_element_markers": {
+    "message": "Element markers",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_web_editor_toggle": {
+    "message": "Toggle web editor",
+    "description": "우클릭 메뉴"
+  },
+  "menu_quick_panel": {
+    "message": "Quick panel",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_userscripts": {
+    "message": "Userscripts",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_force_reconnect": {
+    "message": "Force reconnect",
+    "description": "아이콘 우클릭 메뉴"
+  },
+  "menu_page_parent": {
+    "message": "Auto Chrome MCP",
+    "description": "페이지 우클릭 메뉴의 부모"
+  },
+  "menu_page_mark_element": {
+    "message": "Mark this element",
+    "description": "페이지 우클릭 메뉴"
+  },
+  "menu_notification_title": {
+    "message": "Auto Chrome MCP",
+    "description": "우클릭 메뉴가 띄우는 알림 제목"
+  },
+  "menu_force_reconnect_ok": {
+    "message": "Force reconnect succeeded (bridge pid $PID$)",
+    "description": "우클릭 메뉴 알림",
+    "placeholders": {
+      "pid": {
+        "content": "$1"
+      }
+    }
+  },
+  "menu_force_reconnect_fail": {
+    "message": "Force reconnect failed at stage $STAGE$",
+    "description": "우클릭 메뉴 알림",
+    "placeholders": {
+      "stage": {
+        "content": "$1"
+      }
+    }
   }
 }

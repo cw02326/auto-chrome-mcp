@@ -1,197 +1,39 @@
 <template>
-  <div
-    ref="wrapperRef"
-    class="navigator-wrapper"
-    :style="wrapperStyle"
-    :class="{ 'navigator-dragging': isDragging }"
-  >
-    <!-- 트리거 버튼 (드래그 핸들 역할도 겸함) -->
-    <button
-      ref="triggerRef"
-      class="navigator-trigger"
-      :class="{ 'navigator-trigger-active': isOpen }"
-      @click="handleTriggerClick"
-      @dblclick="resetToDefault"
-      :title="getMessage('sidepanel_nav_trigger_title')"
-    >
-      <svg
-        class="navigator-icon"
-        viewBox="0 0 24 24"
-        width="20"
-        height="20"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    </button>
+  <!--
+    상단 고정 탭 바 (2026-09-06 토스 스타일 개편).
 
-    <!-- 플로팅 메뉴 -->
-    <Transition name="navigator-menu">
-      <div v-if="isOpen" class="navigator-overlay" @click="closeMenu">
-        <div class="navigator-menu" :style="menuStyle" @click.stop>
-          <div class="navigator-header">
-            <span class="navigator-title">{{ getMessage('sidepanel_nav_switch_page') }}</span>
-            <button class="navigator-close" @click="closeMenu">
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div class="navigator-items">
-            <button
-              class="navigator-item"
-              :class="{ 'navigator-item-active': activeTab === 'workflows' }"
-              @click="selectTab('workflows')"
-            >
-              <div class="navigator-item-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="20"
-                  height="20"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-                  />
-                </svg>
-              </div>
-              <div class="navigator-item-content">
-                <span class="navigator-item-title">{{
-                  getMessage('sidepanel_nav_workflows_title')
-                }}</span>
-                <span class="navigator-item-desc">{{
-                  getMessage('sidepanel_nav_workflows_desc')
-                }}</span>
-              </div>
-              <div v-if="activeTab === 'workflows'" class="navigator-item-check">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            </button>
-            <!-- 매일 작업: 예약해 둔 흐름·단축과 그 실행 이력 (2026-09-05 2단계 E) -->
-            <button
-              class="navigator-item"
-              :class="{ 'navigator-item-active': activeTab === 'daily' }"
-              @click="selectTab('daily')"
-            >
-              <div class="navigator-item-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="20"
-                  height="20"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M8 7V3m8 4V3M4 11h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"
-                  />
-                </svg>
-              </div>
-              <div class="navigator-item-content">
-                <span class="navigator-item-title">{{
-                  getMessage('sidepanel_daily_tab_title')
-                }}</span>
-                <span class="navigator-item-desc">{{
-                  getMessage('sidepanel_daily_tab_desc')
-                }}</span>
-              </div>
-              <div v-if="activeTab === 'daily'" class="navigator-item-check">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            </button>
-            <button
-              class="navigator-item"
-              :class="{ 'navigator-item-active': activeTab === 'element-markers' }"
-              @click="selectTab('element-markers')"
-            >
-              <div class="navigator-item-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="20"
-                  height="20"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                  />
-                </svg>
-              </div>
-              <div class="navigator-item-content">
-                <span class="navigator-item-title">{{
-                  getMessage('sidepanel_nav_markers_title')
-                }}</span>
-                <span class="navigator-item-desc">{{
-                  getMessage('sidepanel_nav_markers_desc')
-                }}</span>
-              </div>
-              <div v-if="activeTab === 'element-markers'" class="navigator-item-check">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </div>
+    예전에는 화면 위를 떠다니는 햄버거 버튼이 오버레이 메뉴를 열었다. 좁은 패널에서 그
+    버튼이 내용 위를 가렸고, 지금 어느 화면인지도 열어 봐야 알 수 있었다. 세 화면뿐이라
+    탭 세 개를 늘 보이게 두는 편이 짧다. 드래그 이동·더블클릭 초기화는 함께 없앴다.
+  -->
+  <nav class="sp-tabs" role="tablist">
+    <button
+      v-for="tab in tabs"
+      :key="tab.id"
+      :ref="(el) => setTabRef(tab.id, el)"
+      :id="`sp-tab-${tab.id}`"
+      class="sp-tab"
+      :class="{ 'sp-tab-active': activeTab === tab.id }"
+      type="button"
+      role="tab"
+      :aria-selected="activeTab === tab.id"
+      :aria-controls="`sp-panel-${tab.id}`"
+      :tabindex="activeTab === tab.id ? 0 : -1"
+      @click="selectTab(tab.id)"
+      @keydown="onKeydown($event, tab.id)"
+    >
+      <span class="sp-tab-text">{{ tab.text }}</span>
+    </button>
+  </nav>
 </template>
 
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 import { getMessage } from '@/utils/i18n';
-import { useFloatingDrag } from '../composables/useFloatingDrag';
 
 type TabType = 'workflows' | 'daily' | 'element-markers';
 
-const BUTTON_SIZE = 36;
-const CLAMP_MARGIN = 12;
-
-const props = defineProps<{
+defineProps<{
   activeTab: TabType;
 }>();
 
@@ -199,257 +41,133 @@ const emit = defineEmits<{
   (e: 'change', tab: TabType): void;
 }>();
 
-const isOpen = ref(false);
-const wrapperRef = ref<HTMLElement | null>(null);
-const triggerRef = ref<HTMLElement | null>(null);
-
-// Initialize floating drag
-const { positionStyle, isDragging, resetToDefault } = useFloatingDrag(triggerRef, wrapperRef, {
-  clampMargin: CLAMP_MARGIN,
-  clickThresholdMs: 150,
-  moveThresholdPx: 5,
-  getDefaultPosition: () => ({
-    left: window.innerWidth - BUTTON_SIZE - CLAMP_MARGIN,
-    top: window.innerHeight - BUTTON_SIZE - CLAMP_MARGIN,
-  }),
-});
-
-// Wrapper style with dynamic position
-const wrapperStyle = computed(() => ({
-  left: positionStyle.value.left,
-  top: positionStyle.value.top,
-}));
-
-// Menu position: prefer appearing above and to the left of the trigger
-const menuStyle = computed(() => {
-  // Menu appears in fixed position near the trigger
-  return {};
-});
-
-function handleTriggerClick() {
-  // Only toggle menu if not currently dragging
-  if (!isDragging.value) {
-    isOpen.value = !isOpen.value;
-  }
-}
-
-function closeMenu() {
-  isOpen.value = false;
-}
+/** 탭 세 개. 문구 키는 예전 메뉴가 쓰던 것을 그대로 쓴다. */
+const tabs = computed<Array<{ id: TabType; text: string }>>(() => [
+  { id: 'workflows', text: getMessage('sidepanel_nav_workflows_title') },
+  { id: 'daily', text: getMessage('sidepanel_daily_tab_title') },
+  { id: 'element-markers', text: getMessage('sidepanel_nav_markers_title') },
+]);
 
 function selectTab(tab: TabType) {
   emit('change', tab);
-  closeMenu();
+}
+
+/** v-for 항목별 DOM ref. roving tabindex 이동 시 실제 버튼에 포커스를 옮기는 데 쓴다. */
+const tabRefs = new Map<TabType, HTMLButtonElement>();
+
+function setTabRef(id: TabType, el: Element | null) {
+  if (el) {
+    tabRefs.set(id, el as HTMLButtonElement);
+  } else {
+    tabRefs.delete(id);
+  }
+}
+
+function focusTab(id: TabType) {
+  tabRefs.get(id)?.focus();
+}
+
+/**
+ * 화살표/Home/End 키로 탭 사이를 이동한다. 탭이 곧 패널이라 별도의 "활성화" 단계 없이
+ * 포커스 이동과 동시에 선택도 바뀐다(클릭과 동일한 동작). 스크롤 등 기본 동작은 막는다.
+ */
+function onKeydown(event: KeyboardEvent, currentId: TabType) {
+  const list = tabs.value;
+  const index = list.findIndex((tab) => tab.id === currentId);
+  if (index === -1) return;
+
+  let targetIndex: number;
+  switch (event.key) {
+    case 'ArrowRight':
+      targetIndex = (index + 1) % list.length;
+      break;
+    case 'ArrowLeft':
+      targetIndex = (index - 1 + list.length) % list.length;
+      break;
+    case 'Home':
+      targetIndex = 0;
+      break;
+    case 'End':
+      targetIndex = list.length - 1;
+      break;
+    default:
+      return;
+  }
+
+  event.preventDefault();
+  const targetTab = list[targetIndex];
+  selectTab(targetTab.id);
+  focusTab(targetTab.id);
 }
 </script>
 
 <style scoped>
-.navigator-wrapper {
-  position: fixed;
-  z-index: 1000;
-  touch-action: none;
-}
-
-.navigator-dragging {
-  cursor: grabbing;
-}
-
-.navigator-trigger {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ac-surface, #ffffff);
-  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #6e6e6e);
-  cursor: grab;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-  touch-action: none;
-  user-select: none;
-}
-
-.navigator-trigger:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-  color: var(--ac-text, #1a1a1a);
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
-}
-
-.navigator-trigger:active,
-.navigator-dragging .navigator-trigger {
-  cursor: grabbing;
-}
-
-.navigator-trigger-active {
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, #ffffff);
-  border-color: var(--ac-accent, #d97757);
-}
-
-.navigator-trigger-active:hover {
-  background: var(--ac-accent-hover, #c4664a);
-  color: var(--ac-accent-contrast, #ffffff);
-}
-
-.navigator-icon {
+.sp-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   flex-shrink: 0;
-  pointer-events: none;
-}
-
-.navigator-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
   display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 12px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 8px;
+  background-color: var(--ac-bg);
+  box-shadow: inset 0 -0.75px 0 0 var(--ac-divider);
 }
 
-.navigator-menu {
-  width: 280px;
-  max-height: calc(100vh - 80px);
-  background: var(--ac-surface, #ffffff);
-  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
-  overflow: hidden;
-}
-
-.navigator-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
-}
-
-.navigator-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ac-text, #1a1a1a);
-}
-
-.navigator-close {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #6e6e6e);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.navigator-close:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-  color: var(--ac-text, #1a1a1a);
-}
-
-.navigator-items {
-  padding: 8px;
-}
-
-.navigator-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: transparent;
-  border: none;
-  border-radius: var(--ac-radius-inner, 8px);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  text-align: left;
-}
-
-.navigator-item:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-}
-
-.navigator-item-active {
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
-}
-
-.navigator-item-active:hover {
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
-}
-
-.navigator-item-icon {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ac-surface-muted, #f2f0eb);
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #6e6e6e);
-  flex-shrink: 0;
-}
-
-.navigator-item-active .navigator-item-icon {
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, #ffffff);
-}
-
-.navigator-item-content {
+.sp-tab {
+  position: relative;
   flex: 1;
   min-width: 0;
-}
-
-.navigator-item-title {
-  display: block;
+  height: 40px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--ac-text-caption);
+  font-family: inherit;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--ac-text, #1a1a1a);
-  line-height: 1.3;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+  transition: color var(--ac-motion-fast) ease;
 }
 
-.navigator-item-desc {
+/* 인접 버튼이 flush 로 붙어 있어 양수 offset 은 옆 버튼에 가려질 수 있다. inset 으로 그린다. */
+.sp-tab:focus-visible {
+  outline: 2px solid var(--ac-focus-ring);
+  outline-offset: -2px;
+}
+
+/* 활성 탭: 글자만 진해지고 아래 2px 밑줄이 붙는다. 배경은 바뀌지 않는다. */
+.sp-tab-active {
+  color: var(--ac-text);
+}
+
+.sp-tab-active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 10px;
+  background-color: var(--ac-tab-underline);
+}
+
+.sp-tab-text {
   display: block;
-  font-size: 12px;
-  color: var(--ac-text-subtle, #a8a29e);
-  line-height: 1.3;
-  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.navigator-item-check {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ac-accent, #d97757);
-  flex-shrink: 0;
-}
+@media (hover: hover) and (pointer: fine) {
+  .sp-tab:hover {
+    color: var(--ac-text-secondary);
+  }
 
-/* Transition animations */
-.navigator-menu-enter-active,
-.navigator-menu-leave-active {
-  transition: opacity var(--ac-motion-fast, 120ms) ease;
-}
-
-.navigator-menu-enter-active .navigator-menu,
-.navigator-menu-leave-active .navigator-menu {
-  transition:
-    transform var(--ac-motion-fast, 120ms) ease,
-    opacity var(--ac-motion-fast, 120ms) ease;
-}
-
-.navigator-menu-enter-from,
-.navigator-menu-leave-to {
-  opacity: 0;
-}
-
-.navigator-menu-enter-from .navigator-menu,
-.navigator-menu-leave-to .navigator-menu {
-  opacity: 0;
-  transform: translateY(8px);
+  .sp-tab-active:hover {
+    color: var(--ac-text);
+  }
 }
 </style>

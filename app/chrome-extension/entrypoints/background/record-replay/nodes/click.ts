@@ -9,7 +9,7 @@ import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 export const clickNode: NodeRuntime<any> = {
   validate: (step) => {
     const ok = !!(step as any).target?.candidates?.length;
-    return ok ? { ok } : { ok, errors: ['缺少目标选择器候选'] };
+    return ok ? { ok } : { ok, errors: ['대상 선택자 후보가 없습니다'] };
   },
   run: async (ctx: ExecCtx, step: Step) => {
     const tabId = await resolveRunTab(ctx);

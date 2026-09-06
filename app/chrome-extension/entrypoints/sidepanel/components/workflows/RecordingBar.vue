@@ -1,36 +1,28 @@
 <template>
-  <div class="rec-bar" :style="barStyle">
-    <!-- 쉬는 중: 시작 버튼과 짧은 안내 -->
-    <template v-if="!recording">
-      <button
-        class="rec-btn rec-btn-start"
-        :style="startStyle"
-        :disabled="busy"
-        @click="$emit('start')"
-      >
-        <span class="rec-dot rec-dot-idle"></span>
-        <span>{{ getMessage('sidepanel_record_start') }}</span>
-      </button>
-      <span class="rec-hint" :style="hintStyle">{{ getMessage('sidepanel_record_hint') }}</span>
-    </template>
+  <div class="rec-bar">
+    <div class="rec-card ac-card">
+      <!-- 쉬는 중: 시작 버튼과 짧은 안내 -->
+      <template v-if="!recording">
+        <button class="ac-button ac-button--primary" :disabled="busy" @click="$emit('start')">
+          <span class="rec-dot rec-dot-idle"></span>
+          <span>{{ getMessage('sidepanel_record_start') }}</span>
+        </button>
+        <span class="rec-hint ac-caption">{{ getMessage('sidepanel_record_hint') }}</span>
+      </template>
 
-    <!-- 녹화 중: 빨간 점 + 경과 시간 + 잡힌 단계 수 + 중지 버튼 -->
-    <template v-else>
-      <span class="rec-dot rec-dot-live"></span>
-      <span class="rec-state" :style="stateStyle">{{ stateText }}</span>
-      <span class="rec-meta" :style="hintStyle">{{ elapsedText }}</span>
-      <span class="rec-meta" :style="hintStyle">{{
-        getMessage('sidepanel_record_steps', [String(stepCount)])
-      }}</span>
-      <button
-        class="rec-btn rec-btn-stop"
-        :style="stopStyle"
-        :disabled="busy"
-        @click="$emit('stop')"
-      >
-        {{ getMessage('sidepanel_record_stop') }}
-      </button>
-    </template>
+      <!-- 녹화 중: 빨간 점 + 경과 시간 + 잡힌 단계 수 + 중지 버튼 -->
+      <template v-else>
+        <span class="rec-dot rec-dot-live"></span>
+        <span class="rec-state">{{ stateText }}</span>
+        <span class="rec-meta ac-caption ac-num">{{ elapsedText }}</span>
+        <span class="rec-meta ac-caption ac-num">{{
+          getMessage('sidepanel_record_steps', [String(stepCount)])
+        }}</span>
+        <button class="ac-button ac-button--ghost rec-stop" :disabled="busy" @click="$emit('stop')">
+          {{ getMessage('sidepanel_record_stop') }}
+        </button>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -64,89 +56,66 @@ const stateText = computed(() => {
   if (props.status === 'stopping') return getMessage('sidepanel_record_stopping');
   return getMessage('sidepanel_record_recording');
 });
-
-const barStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface)',
-  borderBottom: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-}));
-
-const hintStyle = computed(() => ({ color: 'var(--ac-text-subtle)' }));
-const stateStyle = computed(() => ({ color: 'var(--ac-text)' }));
-
-const startStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent)',
-  color: 'var(--ac-accent-contrast)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
-
-const stopStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted)',
-  color: 'var(--ac-text)',
-  borderRadius: 'var(--ac-radius-button)',
-}));
 </script>
 
 <style scoped>
 .rec-bar {
+  flex-shrink: 0;
+  padding: 8px 12px 0;
+}
+
+.rec-card {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  flex-shrink: 0;
+  padding: 12px 16px;
 }
 
-.rec-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.rec-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.rec-btn-stop {
-  margin-left: auto;
+/* 안내 문구는 잘리지 않고 최대 두 줄로 흐른다(사용자 요구, 2026-09-06). */
+.rec-hint {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  line-height: 18px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .rec-dot {
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--ac-radius-pill);
   flex-shrink: 0;
+  background-color: var(--ac-danger);
 }
 
+/*
+  파란 주 버튼 위의 빨간 점은 그대로 두면 흐릿하다. 흰 테두리를 얇게 둘러 어느 배경에서도
+  녹화 표시로 읽히게 한다.
+*/
 .rec-dot-idle {
-  background-color: currentColor;
-  opacity: 0.85;
+  box-shadow: 0 0 0 1.5px var(--ac-accent-contrast);
 }
 
 .rec-dot-live {
-  background-color: var(--ac-danger, #ef4444);
   animation: rec-pulse 1.4s ease-in-out infinite;
 }
 
 .rec-state {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 20px;
+  color: var(--ac-text);
 }
 
-.rec-meta,
-.rec-hint {
-  font-size: 12px;
+.rec-meta {
+  flex-shrink: 0;
 }
 
-.rec-hint {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.rec-stop {
+  margin-left: auto;
 }
 
 @keyframes rec-pulse {
@@ -156,6 +125,12 @@ const stopStyle = computed(() => ({
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot-live {
+    animation: none;
   }
 }
 </style>

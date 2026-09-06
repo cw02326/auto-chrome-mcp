@@ -13,7 +13,6 @@ import {
 import { openAgentChatSidepanel } from '../utils/sidepanel';
 import { getBridgeAuthHeaders } from '@/utils/bridge-auth';
 
-const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
 const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
@@ -670,22 +669,6 @@ function buildAgentPrompt(payload: WebEditorApplyPayload): string {
   return lines.join('\n');
 }
 
-async function ensureContextMenu(): Promise<void> {
-  try {
-    if (!(chrome as any).contextMenus?.create) return;
-    try {
-      await chrome.contextMenus.remove(CONTEXT_MENU_ID);
-    } catch {}
-    await chrome.contextMenus.create({
-      id: CONTEXT_MENU_ID,
-      title: '切换网页编辑模式',
-      contexts: ['all'],
-    });
-  } catch (error) {
-    console.warn('[WebEditor] Failed to ensure context menu:', error);
-  }
-}
-
 /**
  * Get the appropriate action constants based on version
  */
@@ -875,7 +858,7 @@ async function registerPropsAgentEarlyInjection(tabUrl: string): Promise<EarlyIn
   return { id, host, matches, alreadyRegistered };
 }
 
-async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
+export async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
   await ensureEditorInjected(tabId);
   const logPrefix = USE_WEB_EDITOR_V2 ? '[WebEditorV2]' : '[WebEditor]';
   const actions = getActions();
@@ -913,7 +896,7 @@ async function getActiveTabId(): Promise<number | null> {
 }
 
 export function initWebEditorListeners(): void {
-  ensureContextMenu().catch(() => {});
+  // 컨텍스트 메뉴는 background/context-menus.ts 한 곳이 만들고 클릭도 거기서 받는다.
 
   // Clean up session storage when tab is closed to avoid stale data
   chrome.tabs.onRemoved.addListener((tabId) => {
@@ -926,17 +909,6 @@ export function initWebEditorListeners(): void {
       chrome.storage.session.remove(keys).catch(() => {});
     } catch {}
   });
-
-  if ((chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-      try {
-        if (info.menuItemId !== CONTEXT_MENU_ID) return;
-        const tabId = tab?.id;
-        if (typeof tabId !== 'number') return;
-        await toggleEditorInTab(tabId);
-      } catch {}
-    });
-  }
 
   chrome.commands.onCommand.addListener(async (command) => {
     try {
@@ -1500,7 +1472,7 @@ export function initWebEditorListeners(): void {
             return sendResponse({
               success: false,
               error:
-                'No Agent project selected. Open Side Panel → 智能助手 and select/create a project first.',
+                'No Agent project selected. Open Side Panel → Agent Chat and select/create a project first.',
             });
           }
 

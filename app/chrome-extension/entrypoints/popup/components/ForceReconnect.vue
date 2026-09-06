@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { getMessage } from '@/utils/i18n';
 import { forceReconnect, type StageResult, type StageStep } from '@/utils/force-reconnect';
 
 const props = defineProps<{
   port: number;
+  /**
+   * 팝업의 "강제 재연결" 보조 버튼이 켜고 끄는 값. 진행 중일 때는 이 값과 상관없이
+   * 패널을 펼쳐 둔다. 사용자가 접어 놓고 결과를 놓치는 일이 없게 하려는 것이다.
+   */
+  open?: boolean;
 }>();
 
-// 5단계 모두 성공 → 부모(popup) 가 connection status 를 다시 polling 하도록 알림.
-// fail 인 경우에도 상태가 바뀌었을 수 있으니 같이 emit (parent 가 결정).
+// 5단계 모두 성공하면 부모(popup) 가 connection status 를 다시 polling 하도록 알린다.
+// fail 인 경우에도 상태가 바뀌었을 수 있으니 같이 emit 하고 판단은 부모가 한다.
 const emit = defineEmits<{
   (e: 'reconnected', payload: { ok: boolean; finalBridgePid?: number }): void;
 }>();
-
-// v1.0.13: 카드 접기/펼치기 — 기본 접힘. inFlight 중엔 강제 표시.
-const expanded = ref(false);
 
 const stages = ref<Record<StageStep, StageResult | undefined>>({
   process_kill: undefined,
@@ -33,30 +36,16 @@ const lastResult = ref<{
   finalSessionId?: string;
 }>({});
 
-const stageLabel: Record<StageStep, string> = {
-  process_kill: '① 프로세스 종료',
-  port_free: '② 포트 해제 확인',
-  spawn: '③ 브릿지 재시작',
-  handshake: '④ 네이티브 핸드셰이크',
-  connect: '⑤ 연결 (⚡ 연결 버튼 효과)',
-  mcp_ping: '⑥ MCP 초기화 핑',
-};
+const visible = computed(() => props.open === true || inFlight.value);
 
-const statusIcon = (s?: StageResult): string => {
-  if (!s) return '⚪';
-  switch (s.status) {
-    case 'running':
-      return '🔄';
-    case 'success':
-      return '✅';
-    case 'fail':
-      return '❌';
-    case 'skipped':
-      return '⏭️';
-    default:
-      return '⚪';
-  }
-};
+const stageLabel = computed<Record<StageStep, string>>(() => ({
+  process_kill: getMessage('popup_fr_stage_process_kill'),
+  port_free: getMessage('popup_fr_stage_port_free'),
+  spawn: getMessage('popup_fr_stage_spawn'),
+  handshake: getMessage('popup_fr_stage_handshake'),
+  connect: getMessage('popup_fr_stage_connect'),
+  mcp_ping: getMessage('popup_fr_stage_mcp_ping'),
+}));
 
 const ts = () => new Date().toLocaleTimeString('en-US', { hour12: false });
 
@@ -74,14 +63,14 @@ const handleClick = async () => {
     stages.value[k] = undefined;
   }
   logs.value = [];
-  append(`강제 재연결 시작 (port ${props.port})`);
+  append(getMessage('popup_fr_log_start', [String(props.port)]));
 
   const result = await forceReconnect({
     port: props.port,
     onProgress: (s) => {
       stages.value[s.step] = s;
       const dur = s.durationMs ? ` (${s.durationMs}ms)` : '';
-      append(`${stageLabel[s.step]}: ${s.status}${dur}${s.message ? ' — ' + s.message : ''}`);
+      append(`${stageLabel.value[s.step]}: ${s.status}${dur}${s.message ? ': ' + s.message : ''}`);
     },
   });
 
@@ -94,212 +83,168 @@ const handleClick = async () => {
 
   if (result.ok) {
     append(
-      `✅ 연결됨 (pid ${result.finalBridgePid ?? '?'}, 세션 ${result.finalSessionId?.slice(0, 8) ?? '?'}…)`,
+      getMessage('popup_fr_log_ok', [
+        String(result.finalBridgePid ?? '?'),
+        result.finalSessionId?.slice(0, 8) ?? '?',
+      ]),
     );
   } else {
-    append(`❌ ${result.failedAt} 단계 실패`);
+    append(getMessage('popup_fr_log_fail', [String(result.failedAt ?? '?')]));
   }
   inFlight.value = false;
 
-  // popup 에게 알림 — 자체 connection status polling 을 다시 돌게.
+  // popup 에게 알린다. 자체 connection status polling 을 다시 돌게 하려는 것이다.
   emit('reconnected', { ok: result.ok, finalBridgePid: result.finalBridgePid });
 };
 
 const summaryText = computed(() => {
-  if (inFlight.value) return '진행 중…';
-  if (lastResult.value.ok === true) return `연결됨 (pid ${lastResult.value.finalBridgePid ?? '?'})`;
-  if (lastResult.value.ok === false) return `${lastResult.value.failedAt} 단계에서 실패`;
-  return '대기 중 — 클릭하면 강제 재연결';
+  if (inFlight.value) return getMessage('popup_fr_progress');
+  if (lastResult.value.ok === true) {
+    return getMessage('popup_fr_ok', [String(lastResult.value.finalBridgePid ?? '?')]);
+  }
+  if (lastResult.value.ok === false) {
+    return getMessage('popup_fr_fail', [String(lastResult.value.failedAt ?? '?')]);
+  }
+  return getMessage('popup_fr_idle');
 });
+
+/** 단계 하나의 상태를 색 있는 글자로 함께 보여 준다 (색만으로 구분하지 않는다). */
+const stageToneClass = (s?: StageResult): string => {
+  switch (s?.status) {
+    case 'success':
+      return 'ac-text-success';
+    case 'fail':
+      return 'ac-text-danger';
+    case 'running':
+      return 'ac-text-accent';
+    default:
+      return 'ac-text-caption';
+  }
+};
+
+const stageStateText = (s?: StageResult): string => {
+  switch (s?.status) {
+    case 'running':
+      return getMessage('popup_fr_state_running');
+    case 'success':
+      return getMessage('popup_fr_state_success');
+    case 'fail':
+      return getMessage('popup_fr_state_fail');
+    case 'skipped':
+      return getMessage('popup_fr_state_skipped');
+    default:
+      return getMessage('popup_fr_state_idle');
+  }
+};
 </script>
 
 <template>
-  <div class="force-reconnect-card">
-    <!-- v1.0.13: 헤더 클릭으로 토글. inFlight 시엔 진행 보이게 강제 expanded. -->
-    <div class="fr-header fr-header--toggle" @click="expanded = !expanded">
-      <h3 class="fr-title">
-        <span class="fr-chevron" :class="{ 'fr-chevron--open': expanded || inFlight }">▶</span>
-        ⚡ 강제 재연결
-        <span class="fr-port-hint">(포트 {{ props.port }})</span>
-      </h3>
-      <p class="fr-summary">{{ summaryText }}</p>
+  <div v-if="visible" class="fr-panel">
+    <div class="fr-head">
+      <p class="ac-sub fr-clip">{{ summaryText }}</p>
+      <p class="ac-caption ac-num">{{ getMessage('popup_fr_port_hint', [String(props.port)]) }}</p>
     </div>
 
-    <div v-if="expanded || inFlight">
-      <button class="fr-button" :disabled="inFlight" @click.stop="handleClick">
-        <span v-if="inFlight">재연결 중…</span>
-        <span v-else>⚡ 강제 재연결</span>
-      </button>
+    <button
+      type="button"
+      class="ac-button ac-button--primary fr-run"
+      :disabled="inFlight"
+      @click="handleClick"
+    >
+      {{ inFlight ? getMessage('popup_fr_running') : getMessage('popup_fr_run') }}
+    </button>
 
-      <div class="fr-stages">
-        <div
-          v-for="(label, key) in stageLabel"
-          :key="key"
-          :class="['fr-stage', `fr-stage--${stages[key as StageStep]?.status ?? 'idle'}`]"
-        >
-          <span class="fr-stage-icon">{{ statusIcon(stages[key as StageStep]) }}</span>
-          <span class="fr-stage-label">{{ label }}</span>
-          <span v-if="stages[key as StageStep]?.durationMs" class="fr-stage-time">
-            {{ stages[key as StageStep]?.durationMs }}ms
-          </span>
-        </div>
+    <div class="fr-stages">
+      <div v-for="(label, key) in stageLabel" :key="key" class="fr-stage">
+        <span class="ac-sub fr-clip">{{ label }}</span>
+        <span class="ac-caption fr-state" :class="stageToneClass(stages[key as StageStep])">{{
+          stageStateText(stages[key as StageStep])
+        }}</span>
+        <span v-if="stages[key as StageStep]?.durationMs" class="ac-caption ac-num">
+          {{ stages[key as StageStep]?.durationMs }}ms
+        </span>
       </div>
-
-      <details v-if="logs.length > 0" class="fr-logs">
-        <summary>로그 ({{ logs.length }})</summary>
-        <pre class="fr-logs-pre">{{ logs.join('\n') }}</pre>
-      </details>
     </div>
+
+    <details v-if="logs.length > 0" class="fr-logs">
+      <summary class="ac-sub fr-summary">
+        {{ getMessage('popup_fr_logs', [String(logs.length)]) }}
+      </summary>
+      <pre class="fr-logs-pre">{{ logs.join('\n') }}</pre>
+    </details>
   </div>
 </template>
 
 <style scoped>
-.force-reconnect-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 12px;
-  margin: 8px 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    sans-serif;
+/* 레이아웃만. 색·글꼴·버튼 모양은 ui/theme.css 의 .ac-* 가 그린다. */
+.fr-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  box-shadow: inset 0 0.75px 0 0 var(--ac-divider);
 }
 
-/* v1.0.13: 토글 가능 헤더 */
-.fr-header--toggle {
-  cursor: pointer;
-  user-select: none;
-}
-.fr-chevron {
-  display: inline-block;
-  font-size: 10px;
-  transition: transform 0.15s ease;
-  color: #94a3b8;
-  margin-right: 4px;
-}
-.fr-chevron--open {
-  transform: rotate(90deg);
-}
-.fr-port-hint {
-  font-size: 11px;
-  color: #94a3b8;
-  font-weight: 400;
-  margin-left: 4px;
+.fr-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 
-.fr-header {
-  margin-bottom: 8px;
+.fr-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
-.fr-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0 0 2px 0;
-  color: #1f2937;
-}
-
-.fr-summary {
-  font-size: 12px;
-  color: #6b7280;
-  margin: 0;
-}
-
-.fr-button {
+.fr-run {
   width: 100%;
-  padding: 8px 12px;
-  background: #cc785c;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-bottom: 12px;
-  transition: background 0.15s;
-}
-
-.fr-button:hover:not(:disabled) {
-  background: #a9583e;
-}
-
-.fr-button:disabled {
-  background: #d1d5db;
-  cursor: not-allowed;
 }
 
 .fr-stages {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
 }
 
 .fr-stage {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  background: #f9fafb;
+  gap: 8px;
+  min-height: 32px;
 }
 
-.fr-stage--running {
-  background: #fef3c7;
+.fr-stage + .fr-stage {
+  box-shadow: inset 0 0.75px 0 0 var(--ac-divider);
 }
 
-.fr-stage--success {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.fr-stage--fail {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.fr-stage--skipped {
-  background: #f3f4f6;
-  color: #6b7280;
-}
-
-.fr-stage-icon {
-  font-size: 14px;
-}
-
-.fr-stage-label {
+.fr-stage .ac-sub {
   flex: 1;
 }
 
-.fr-stage-time {
-  font-size: 10px;
-  color: #6b7280;
-  font-variant-numeric: tabular-nums;
+.fr-state {
+  flex-shrink: 0;
 }
 
-.fr-logs {
-  margin-top: 8px;
-  font-size: 11px;
-  color: #4b5563;
-}
-
-.fr-logs summary {
+.fr-summary {
   cursor: pointer;
-  user-select: none;
-  font-weight: 500;
+  padding: 6px 0;
 }
 
 .fr-logs-pre {
-  background: #1f2937;
-  color: #f3f4f6;
-  padding: 8px;
-  border-radius: 4px;
-  margin-top: 4px;
-  font-size: 10px;
+  max-height: 160px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-muted);
+  color: var(--ac-text-secondary);
+  font-family: var(--ac-font-mono);
+  font-size: 12px;
+  line-height: 18px;
   white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
-  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  word-break: break-all;
 }
 </style>

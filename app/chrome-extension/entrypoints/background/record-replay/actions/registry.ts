@@ -1,11 +1,11 @@
 /**
- * Action Registry - Action 执行器注册表和执行管道
+ * Action Registry - Action 실행기 레지스트리와 실행 파이프라인
  *
- * 特性：
- * - 动态注册/注销 handler
- * - 中间件/钩子机制 (beforeExecute, afterExecute)
- * - 重试和超时策略
- * - 类型安全
+ * 특징:
+ * - handler 동적 등록/해제
+ * - 미들웨어/훅 (beforeExecute, afterExecute)
+ * - 재시도와 시간 제한 정책
+ * - 타입 안전
  */
 
 import type {
@@ -34,7 +34,7 @@ import type {
 import { sleepWithSignal } from '@/utils/tool-watchdog';
 
 // ================================
-// 类型定义
+// 타입 정의
 // ================================
 
 type AnyExecutableAction = {
@@ -71,7 +71,7 @@ export interface ActionRegistryHooks {
 }
 
 // ================================
-// 工具函数
+// 도우미 함수
 // ================================
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -135,7 +135,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 // ================================
-// Resolvable 解析器
+// Resolvable 해석기
 // ================================
 
 function isVariablePointer(value: unknown): value is VariablePointer {
@@ -298,7 +298,7 @@ export function tryResolveNumber(
 export const tryResolveValue = tryResolveJson;
 
 // ================================
-// 重试和超时逻辑
+// 재시도·시간 제한 처리
 // ================================
 
 function shouldRetry(policy: RetryPolicy | undefined, error: ActionError | undefined): boolean {
@@ -357,7 +357,7 @@ async function runWithTimeout<T>(
 }
 
 // ================================
-// ActionRegistry 类
+// ActionRegistry 클래스
 // ================================
 
 export class ActionRegistry {
@@ -366,7 +366,7 @@ export class ActionRegistry {
   private readonly afterHooks: AfterExecuteHook[] = [];
 
   /**
-   * 注册 action handler
+   * action handler 등록
    */
   register<T extends ExecutableActionType>(
     handler: ActionHandler<T>,
@@ -383,7 +383,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 注销 action handler
+   * action handler 해제
    */
   unregister<T extends ExecutableActionType>(type: T): boolean {
     const exists = this.handlers[type] !== undefined;
@@ -392,21 +392,21 @@ export class ActionRegistry {
   }
 
   /**
-   * 获取 handler
+   * handler 가져오기
    */
   get<T extends ExecutableActionType>(type: T): ActionHandler<T> | undefined {
     return this.handlers[type];
   }
 
   /**
-   * 检查是否存在 handler
+   * handler 가 있는지 확인
    */
   has(type: ExecutableActionType): boolean {
     return this.handlers[type] !== undefined;
   }
 
   /**
-   * 列出所有已注册的 handler
+   * 등록된 handler 를 모두 나열
    */
   list(): ReadonlyArray<AnyExecutableHandler> {
     const arr = Object.values(this.handlers).filter(
@@ -416,7 +416,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 注册 beforeExecute 钩子
+   * beforeExecute 훅 등록
    */
   onBeforeExecute(hook: BeforeExecuteHook): () => void {
     this.beforeHooks.push(hook);
@@ -427,7 +427,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 注册 afterExecute 钩子
+   * afterExecute 훅 등록
    */
   onAfterExecute(hook: AfterExecuteHook): () => void {
     this.afterHooks.push(hook);
@@ -438,7 +438,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 批量注册钩子
+   * 훅 일괄 등록
    */
   use(hooks: ActionRegistryHooks): () => void {
     const disposers: Array<() => void> = [];
@@ -450,7 +450,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 验证 action 配置
+   * action 설정 검증
    */
   validate<T extends ExecutableActionType>(action: ExecutableAction<T>): ValidationResult {
     const handler = this.get(action.type);
@@ -460,7 +460,7 @@ export class ActionRegistry {
   }
 
   /**
-   * 执行 action
+   * action 실행
    */
   async execute<T extends ExecutableActionType>(
     ctx: ActionExecutionContext,
@@ -468,12 +468,12 @@ export class ActionRegistry {
   ): Promise<ActionExecutionResult<T>> {
     const startedAt = Date.now();
 
-    // 跳过禁用的 action
+    // 꺼진 action 은 건너뛴다
     if (action.disabled) {
       return { status: 'skipped', durationMs: Date.now() - startedAt };
     }
 
-    // 获取 handler
+    // handler 가져오기
     const handler = this.get(action.type);
     if (!handler) {
       return {
@@ -486,7 +486,7 @@ export class ActionRegistry {
       };
     }
 
-    // 验证
+    // 검증
     const v = this.validate(action);
     if (!v.ok) {
       let result: ActionExecutionResult<T> = {
@@ -494,7 +494,7 @@ export class ActionRegistry {
         error: { code: 'VALIDATION_ERROR', message: v.errors.join(', ') },
       };
 
-      // 调用 afterExecute 钩子
+      // afterExecute 훅 호출
       for (const hook of this.afterHooks) {
         try {
           const maybe = await hook({ ctx, action, handler, result, attempt: 0 });
@@ -512,7 +512,7 @@ export class ActionRegistry {
       return result;
     }
 
-    // 计算重试和超时参数
+    // 재시도·시간 제한 값 계산
     const retryPolicy = action.policy?.retry;
     const timeoutPolicy = action.policy?.timeout;
     const maxAttempts = 1 + Math.max(0, Math.floor(retryPolicy?.retries ?? 0));
@@ -527,7 +527,7 @@ export class ActionRegistry {
 
     let last: ActionExecutionResult<T> | undefined;
 
-    // 执行循环（支持重试）
+    // 실행 루프(재시도 포함)
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptTimeoutMs: number | undefined = (() => {
         if (!timeoutPolicy || timeoutPolicy.ms <= 0) return undefined;
@@ -541,7 +541,7 @@ export class ActionRegistry {
         break;
       }
 
-      // beforeExecute 钩子（可以短路）
+      // beforeExecute 훅(중간에 끊을 수 있다)
       let shortCircuited: ActionExecutionResult<T> | undefined;
       for (const hook of this.beforeHooks) {
         try {
@@ -559,7 +559,7 @@ export class ActionRegistry {
         }
       }
 
-      // 执行 handler
+      // handler 실행
       const runOutcome =
         shortCircuited ??
         (await (async () => {
@@ -575,7 +575,7 @@ export class ActionRegistry {
 
       let result: ActionExecutionResult<T> = runOutcome;
 
-      // afterExecute 钩子（可以替换结果）
+      // afterExecute 훅(결과를 바꿀 수 있다)
       for (const hook of this.afterHooks) {
         try {
           const maybe = await hook({ ctx, action, handler, result, attempt });
@@ -591,10 +591,10 @@ export class ActionRegistry {
 
       last = result;
 
-      // 成功则退出
+      // 성공하면 빠져나간다
       if (result.status !== 'failed') break;
 
-      // 判断是否重试
+      // 재시도할지 판단
       const canRetry = attempt < maxAttempts - 1 && shouldRetry(retryPolicy, result.error);
       if (!canRetry) break;
 
@@ -630,11 +630,11 @@ export class ActionRegistry {
 }
 
 // ================================
-// 导出工厂函数
+// 팩토리 함수 내보내기
 // ================================
 
 /**
- * 创建默认的 ActionRegistry 实例
+ * 기본 ActionRegistry 인스턴스를 만든다
  */
 export function createActionRegistry(): ActionRegistry {
   return new ActionRegistry();

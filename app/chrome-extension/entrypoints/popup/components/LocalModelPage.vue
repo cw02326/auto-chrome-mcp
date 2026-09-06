@@ -1,60 +1,63 @@
 <template>
-  <div class="local-model-page">
-    <!-- 홈으로 돌아가는 버튼 -->
-    <div class="page-header">
-      <button class="back-button" @click="$emit('back')" :title="getMessage('backToHomeTooltip')">
+  <div class="lm-page">
+    <header class="lm-header">
+      <button
+        type="button"
+        class="ac-button ac-button--quiet ac-button--sm"
+        :title="getMessage('backToHomeTooltip')"
+        @click="$emit('back')"
+      >
         <svg
           viewBox="0 0 24 24"
-          width="20"
-          height="20"
           fill="none"
           stroke="currentColor"
           stroke-width="2"
+          aria-hidden="true"
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
         <span>{{ getMessage('backButton') }}</span>
       </button>
-      <h2 class="page-title">{{ getMessage('localModelPageTitle') }}</h2>
-    </div>
+      <h1 class="ac-title">{{ getMessage('localModelPageTitle') }}</h1>
+    </header>
 
-    <div class="page-content">
-      <!-- 语义引擎 -->
-      <div class="section">
-        <h3 class="section-title">{{ getMessage('semanticEngineLabel') }}</h3>
-        <div class="semantic-engine-card">
-          <div class="semantic-engine-status">
-            <div class="status-info">
-              <span :class="['status-dot', getSemanticEngineStatusClass()]"></span>
-              <span class="status-text">{{ getSemanticEngineStatusText() }}</span>
-            </div>
-            <div v-if="semanticEngineLastUpdated" class="status-timestamp">
+    <div class="lm-scroll">
+      <!-- 의미 검색 엔진 -->
+      <section class="ac-card lm-card">
+        <h2 class="ac-heading">{{ getMessage('semanticEngineLabel') }}</h2>
+
+        <div class="lm-status">
+          <span :class="['lm-dot', getSemanticEngineStatusClass()]" aria-hidden="true"></span>
+          <div class="lm-status-text">
+            <p class="ac-body">{{ getSemanticEngineStatusText() }}</p>
+            <p v-if="semanticEngineLastUpdated" class="ac-caption">
               {{ getMessage('lastUpdatedLabel') }}
               {{ new Date(semanticEngineLastUpdated).toLocaleTimeString() }}
-            </div>
+            </p>
           </div>
-
-          <ProgressIndicator
-            v-if="isSemanticEngineInitializing"
-            :visible="isSemanticEngineInitializing"
-            :text="semanticEngineInitProgress"
-            :showSpinner="true"
-          />
-
-          <button
-            class="primary-action-button"
-            :disabled="isSemanticEngineInitializing"
-            @click="$emit('initializeSemanticEngine')"
-          >
-            <BoltIcon />
-            <span>{{ getSemanticEngineButtonText() }}</span>
-          </button>
         </div>
-      </div>
 
-      <!-- Embedding模型选择 -->
-      <div class="section">
-        <h3 class="section-title">{{ getMessage('embeddingModelLabel') }}</h3>
+        <ProgressIndicator
+          v-if="isSemanticEngineInitializing"
+          :visible="isSemanticEngineInitializing"
+          :text="semanticEngineInitProgress"
+          :showSpinner="true"
+        />
+
+        <button
+          type="button"
+          class="ac-button ac-button--primary lm-full"
+          :disabled="isSemanticEngineInitializing"
+          @click="$emit('initializeSemanticEngine')"
+        >
+          <BoltIcon />
+          <span>{{ getSemanticEngineButtonText() }}</span>
+        </button>
+      </section>
+
+      <!-- 임베딩 모델 -->
+      <section class="ac-card lm-card">
+        <h2 class="ac-heading">{{ getMessage('embeddingModelLabel') }}</h2>
 
         <ProgressIndicator
           v-if="isModelSwitching || isModelDownloading"
@@ -63,102 +66,66 @@
           :showSpinner="true"
         />
 
-        <div v-if="modelInitializationStatus === 'error'" class="error-card">
-          <div class="error-content">
-            <div class="error-icon">⚠️</div>
-            <div class="error-details">
-              <p class="error-title">{{ getMessage('semanticEngineInitFailedStatus') }}</p>
-              <p class="error-message">{{
-                modelErrorMessage || getMessage('semanticEngineInitFailedStatus')
-              }}</p>
-              <p class="error-suggestion">{{ errorTypeText }}</p>
-            </div>
-          </div>
+        <div v-if="modelInitializationStatus === 'error'" class="lm-error">
+          <p class="ac-body ac-text-danger">{{ getMessage('semanticEngineInitFailedStatus') }}</p>
+          <p class="ac-sub">
+            {{ modelErrorMessage || getMessage('semanticEngineInitFailedStatus') }}
+          </p>
+          <p class="ac-caption">{{ errorTypeText }}</p>
           <button
-            class="retry-button"
-            @click="$emit('retryModelInitialization')"
+            type="button"
+            class="ac-button ac-button--ghost ac-button--sm"
             :disabled="isModelSwitching || isModelDownloading"
+            @click="$emit('retryModelInitialization')"
           >
-            <span>🔄</span>
-            <span>{{ getMessage('retryButton') }}</span>
+            {{ getMessage('retryButton') }}
           </button>
         </div>
 
-        <div class="model-list">
-          <div
+        <div class="lm-models">
+          <button
             v-for="model in availableModels"
             :key="model.preset"
-            :class="[
-              'model-card',
-              {
-                selected: currentModel === model.preset,
-                disabled: isModelSwitching || isModelDownloading,
-              },
-            ]"
-            @click="!isModelSwitching && !isModelDownloading && $emit('switchModel', model.preset)"
+            type="button"
+            class="lm-model"
+            :class="{ 'lm-model--on': currentModel === model.preset }"
+            :disabled="isModelSwitching || isModelDownloading"
+            @click="$emit('switchModel', model.preset)"
           >
-            <div class="model-header">
-              <div class="model-info">
-                <p class="model-name" :class="{ 'selected-text': currentModel === model.preset }">
-                  {{ model.preset }}
-                </p>
-                <p class="model-description">{{ getModelDescription(model) }}</p>
-              </div>
-              <div v-if="currentModel === model.preset" class="check-icon">
-                <CheckIcon class="text-white" />
-              </div>
-            </div>
-            <div class="model-tags">
-              <span class="model-tag performance">{{ getPerformanceText(model.performance) }}</span>
-              <span class="model-tag size">{{ model.size }}</span>
-              <span class="model-tag dimension">{{ model.dimension }}D</span>
-            </div>
-          </div>
+            <span class="lm-model-head">
+              <span class="ac-body ac-clip">{{ model.preset }}</span>
+              <CheckIcon v-if="currentModel === model.preset" class="lm-check" />
+            </span>
+            <span class="ac-caption lm-model-desc">{{ getModelDescription(model) }}</span>
+            <span class="lm-tags">
+              <span class="ac-badge">{{ getPerformanceText(model.performance) }}</span>
+              <span class="ac-badge">{{ model.size }}</span>
+              <span class="ac-badge ac-num">{{ model.dimension }}D</span>
+            </span>
+          </button>
         </div>
-      </div>
+      </section>
 
-      <!-- 索引数据管理 -->
-      <div class="section">
-        <h3 class="section-title">{{ getMessage('indexDataManagementLabel') }}</h3>
-        <div class="stats-grid">
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexedPagesLabel') }}</p>
-              <span class="stats-icon violet">
-                <DocumentIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ storageStats?.indexedPages || 0 }}</p>
+      <!-- 색인 데이터 -->
+      <section class="ac-card lm-card">
+        <h2 class="ac-heading">{{ getMessage('indexDataManagementLabel') }}</h2>
+
+        <div class="lm-stats">
+          <div class="lm-stat">
+            <p class="ac-caption">{{ getMessage('indexedPagesLabel') }}</p>
+            <p class="ac-heading ac-num">{{ storageStats?.indexedPages || 0 }}</p>
           </div>
-
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexSizeLabel') }}</p>
-              <span class="stats-icon teal">
-                <DatabaseIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ formatIndexSize() }}</p>
+          <div class="lm-stat">
+            <p class="ac-caption">{{ getMessage('indexSizeLabel') }}</p>
+            <p class="ac-heading ac-num">{{ formatIndexSize() }}</p>
           </div>
-
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('activeTabsLabel') }}</p>
-              <span class="stats-icon blue">
-                <TabIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ storageStats?.totalTabs || 0 }}</p>
+          <div class="lm-stat">
+            <p class="ac-caption">{{ getMessage('activeTabsLabel') }}</p>
+            <p class="ac-heading ac-num">{{ storageStats?.totalTabs || 0 }}</p>
           </div>
-
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('vectorDocumentsLabel') }}</p>
-              <span class="stats-icon green">
-                <VectorIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ storageStats?.totalDocuments || 0 }}</p>
+          <div class="lm-stat">
+            <p class="ac-caption">{{ getMessage('vectorDocumentsLabel') }}</p>
+            <p class="ac-heading ac-num">{{ storageStats?.totalDocuments || 0 }}</p>
           </div>
         </div>
 
@@ -170,7 +137,8 @@
         />
 
         <button
-          class="danger-action-button"
+          type="button"
+          class="ac-button ac-button--danger lm-full"
           :disabled="isClearingData"
           @click="$emit('showClearConfirmation')"
         >
@@ -179,9 +147,9 @@
             isClearingData ? getMessage('clearingStatus') : getMessage('clearAllDataButton')
           }}</span>
         </button>
-      </div>
+      </section>
 
-      <!-- 模型缓存管理 -->
+      <!-- 모델 캐시 -->
       <ModelCacheManagement
         :cache-stats="cacheStats"
         :is-managing-cache="isManagingCache"
@@ -197,15 +165,7 @@ import { computed } from 'vue';
 import { getMessage } from '@/utils/i18n';
 import ProgressIndicator from './ProgressIndicator.vue';
 import ModelCacheManagement from './ModelCacheManagement.vue';
-import {
-  DocumentIcon,
-  DatabaseIcon,
-  BoltIcon,
-  TrashIcon,
-  CheckIcon,
-  TabIcon,
-  VectorIcon,
-} from './icons';
+import { BoltIcon, TrashIcon, CheckIcon } from './icons';
 
 interface Props {
   // 语义引擎
@@ -350,396 +310,181 @@ const formatIndexSize = () => {
 </script>
 
 <style scoped>
-.local-model-page {
+/* 레이아웃만. 색·글꼴·버튼 모양은 ui/theme.css 의 .ac-* 가 그린다. */
+.lm-page {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-height: 0;
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--ac-border, #e7e5e4);
-  background: var(--ac-surface, #ffffff);
-}
-
-.back-button {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: var(--ac-surface-muted, #f2f0eb);
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  color: var(--ac-text-muted, #6e6e6e);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.back-button:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-  color: var(--ac-text, #1a1a1a);
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ac-text, #1a1a1a);
-  margin: 0;
-}
-
-.page-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-}
-
-.section {
-  margin-bottom: 24px;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ac-text, #374151);
-  margin-bottom: 12px;
-}
-
-.semantic-engine-card {
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-  padding: 16px;
+.lm-header {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.semantic-engine-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.status-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-dot {
-  height: 8px;
-  width: 8px;
-  border-radius: 50%;
-}
-
-.status-dot.bg-emerald-500 {
-  background-color: #10b981;
-}
-.status-dot.bg-yellow-500 {
-  background-color: #eab308;
-}
-.status-dot.bg-red-500 {
-  background-color: #ef4444;
-}
-.status-dot.bg-gray-500 {
-  background-color: #6b7280;
-}
-
-.status-text {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ac-text, #1a1a1a);
-}
-
-.status-timestamp {
-  font-size: 12px;
-  color: var(--ac-text-subtle, #9ca3af);
-}
-
-.primary-action-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, white);
-  font-weight: 600;
-  padding: 12px 16px;
-  border-radius: var(--ac-radius-button, 8px);
-  border: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.primary-action-button:hover:not(:disabled) {
-  background: var(--ac-accent-hover, #c4664a);
-}
-
-.primary-action-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.danger-action-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--ac-surface, white);
-  border: 1px solid var(--ac-border, #d1d5db);
-  color: var(--ac-text, #374151);
-  font-weight: 600;
-  padding: 12px 16px;
-  border-radius: var(--ac-radius-button, 8px);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  margin-top: 12px;
-}
-
-.danger-action-button:hover:not(:disabled) {
-  border-color: #ef4444;
-  color: #dc2626;
-}
-
-.danger-action-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 模型列表 */
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.model-card {
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  padding: 16px;
-  cursor: pointer;
-  border: 1px solid var(--ac-border, #e5e7eb);
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.model-card:hover {
-  border-color: var(--ac-accent, #d97757);
-}
-
-.model-card.selected {
-  border: 2px solid var(--ac-accent, #d97757);
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.08));
-}
-
-.model-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.model-header {
-  display: flex;
-  justify-content: space-between;
   align-items: flex-start;
-}
-
-.model-info {
-  flex: 1;
-}
-
-.model-name {
-  font-weight: 600;
-  color: var(--ac-text, #1e293b);
-  margin: 0 0 4px 0;
-}
-
-.model-name.selected-text {
-  color: var(--ac-accent, #d97757);
-}
-
-.model-description {
-  font-size: 14px;
-  color: var(--ac-text-muted, #64748b);
-  margin: 0;
-}
-
-.check-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  background: var(--ac-accent, #d97757);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.model-tags {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.model-tag {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 9999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.model-tag.performance {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.model-tag.size {
-  background: var(--ac-accent-subtle, #ddd6fe);
-  color: var(--ac-accent, #5b21b6);
-}
-
-.model-tag.dimension {
-  background: var(--ac-surface-muted, #e5e7eb);
-  color: var(--ac-text-muted, #4b5563);
-}
-
-/* 统计网格 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.stats-card {
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-  padding: 16px;
-}
-
-.stats-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.stats-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ac-text-muted, #64748b);
-  margin: 0;
-}
-
-.stats-icon {
-  padding: 8px;
-  border-radius: 8px;
-}
-
-.stats-icon.violet {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-.stats-icon.teal {
-  background: #ccfbf1;
-  color: #0d9488;
-}
-.stats-icon.blue {
-  background: #dbeafe;
-  color: #2563eb;
-}
-.stats-icon.green {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-.stats-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--ac-text, #0f172a);
-  margin: 0;
-}
-
-/* 错误卡片 */
-.error-card {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: var(--ac-radius-card, 12px);
-  padding: 16px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.error-content {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.error-icon {
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.error-details {
-  flex: 1;
-}
-
-.error-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #dc2626;
-  margin: 0 0 4px 0;
-}
-
-.error-message {
-  font-size: 14px;
-  color: #991b1b;
-  margin: 0 0 8px 0;
-  font-weight: 500;
-}
-
-.error-suggestion {
-  font-size: 13px;
-  color: #7f1d1d;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.retry-button {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  background: #dc2626;
-  color: white;
-  font-weight: 600;
-  padding: 8px 16px;
-  border-radius: 8px;
+  flex-shrink: 0;
+  padding: 16px 16px 12px;
+}
+
+.lm-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+
+.lm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.lm-full {
+  width: 100%;
+}
+
+.lm-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lm-status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lm-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--ac-radius-pill);
+  background-color: var(--ac-text-tertiary);
+}
+
+/* 상태 점의 색. 클래스 이름은 스크립트가 돌려주는 값을 그대로 쓴다. */
+.lm-dot.bg-emerald-500 {
+  background-color: var(--ac-success);
+}
+
+.lm-dot.bg-yellow-500 {
+  background-color: var(--ac-warning);
+}
+
+.lm-dot.bg-red-500 {
+  background-color: var(--ac-danger);
+}
+
+.lm-dot.bg-gray-500 {
+  background-color: var(--ac-text-tertiary);
+}
+
+.lm-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-danger-soft);
+}
+
+.lm-models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lm-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  text-align: left;
   border: none;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-muted);
   cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  font-size: 14px;
+  transition: background-color var(--ac-motion-fast) ease;
+}
+
+.lm-model:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lm-model:focus-visible {
+  outline: 2px solid var(--ac-focus-ring);
+  outline-offset: 2px;
+}
+
+.lm-model--on {
+  background-color: var(--ac-accent-soft);
+}
+
+.lm-model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lm-check {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--ac-accent-text);
+}
+
+.lm-model-desc {
+  display: block;
+}
+
+.lm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lm-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lm-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-muted);
+}
+
+/* 아이콘 컴포넌트는 viewBox 만 갖고 있어 크기를 여기서 정한다. */
+.ac-button svg {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
-.retry-button:hover:not(:disabled) {
-  background: #b91c1c;
-}
+@media (hover: hover) and (pointer: fine) {
+  .lm-model:hover:not(:disabled) {
+    background-color: var(--ac-surface-hover);
+  }
 
-.retry-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+  .lm-model--on:hover {
+    background-color: var(--ac-accent-soft);
+  }
 }
 </style>

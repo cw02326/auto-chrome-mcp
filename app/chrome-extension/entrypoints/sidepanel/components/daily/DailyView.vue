@@ -1,69 +1,76 @@
 <template>
-  <div class="dv-root" :style="rootStyle">
-    <div class="dv-header" :style="headerStyle">
+  <div class="dv-root">
+    <div class="dv-header">
       <div class="dv-header-row">
-        <span class="dv-title" :style="textStyle">{{ getMessage('sidepanel_daily_title') }}</span>
-        <span class="dv-count" :style="subtleStyle">{{
+        <span class="ac-title dv-title">{{ getMessage('sidepanel_daily_title') }}</span>
+        <span class="ac-caption ac-num dv-count">{{
           getMessage('sidepanel_daily_count', [String(schedules.length)])
         }}</span>
-        <button class="dv-btn" :style="ghostStyle" @click="$emit('refresh')">
+        <button
+          class="ac-button ac-button--ghost ac-button--sm"
+          type="button"
+          @click="$emit('refresh')"
+        >
           {{ getMessage('sidepanel_daily_refresh') }}
         </button>
       </div>
       <!-- 예약이 언제 도는지에 대한 한 줄. 크롬이 꺼져 있으면 그 시간은 건너뛴다. -->
-      <p class="dv-note" :style="subtleStyle">{{ getMessage('sidepanel_daily_chrome_note') }}</p>
+      <p class="ac-caption dv-note">{{ getMessage('sidepanel_daily_chrome_note') }}</p>
     </div>
 
     <div class="dv-body ac-scroll">
-      <div v-if="error" class="dv-error" :style="dangerStyle">{{ error }}</div>
+      <div v-if="error" class="ac-error-text dv-error">{{ error }}</div>
 
       <!-- 빈 상태: 어디서 시작하는지 알려 주고 그 화면으로 보낸다 -->
       <div v-if="schedules.length === 0" class="dv-empty">
-        <div class="dv-empty-title" :style="textStyle">
+        <div class="ac-heading">
           {{ getMessage('sidepanel_daily_empty_title') }}
         </div>
-        <div class="dv-empty-hint" :style="subtleStyle">
+        <div class="ac-sub dv-empty-hint">
           {{ getMessage('sidepanel_daily_empty_hint') }}
         </div>
-        <button class="dv-btn dv-btn-primary" :style="primaryStyle" @click="$emit('go-flows')">
+        <button class="ac-button ac-button--primary" type="button" @click="$emit('go-flows')">
           {{ getMessage('sidepanel_daily_empty_action') }}
         </button>
       </div>
 
       <ul v-else class="dv-list">
-        <li
-          v-for="schedule in schedules"
-          :key="schedule.scheduleId"
-          class="dv-item"
-          :style="itemStyle"
-        >
-          <div class="dv-item-main" @click="toggleExpand(schedule.scheduleId)">
+        <li v-for="schedule in schedules" :key="schedule.scheduleId" class="ac-card dv-item">
+          <button
+            type="button"
+            class="dv-item-main"
+            :aria-expanded="expanded === schedule.scheduleId"
+            @click="toggleExpand(schedule.scheduleId)"
+          >
             <div class="dv-item-head">
-              <span class="dv-name" :style="textStyle">{{ schedule.label }}</span>
-              <span class="dv-kind" :style="kindStyle(schedule)">{{ kindText(schedule) }}</span>
+              <span class="ac-heading ac-clip dv-name" :title="schedule.label">{{
+                schedule.label
+              }}</span>
+              <span
+                class="ac-badge"
+                :class="{ 'ac-badge--accent': schedule.target?.kind !== 'shortcut' }"
+                >{{ kindText(schedule) }}</span
+              >
             </div>
-            <div class="dv-line" :style="mutedStyle">
+            <div class="ac-sub dv-line">
               {{ summarizeSchedule(schedule.schedule) }}
             </div>
-            <div class="dv-line" :style="subtleStyle">
-              <template v-if="schedule.enabled">{{
-                getMessage('sidepanel_daily_next_run', [formatNextRun(schedule.nextAt, now)])
-              }}</template>
-              <template v-else>{{ getMessage('sidepanel_daily_paused') }}</template>
+            <div class="ac-sub dv-line">
+              {{ formatScheduleEnabledLine(schedule.enabled, schedule.nextAt, now) }}
             </div>
-            <div class="dv-line">
+            <div class="ac-caption dv-line">
               <template v-if="schedule.lastStatus">
-                <span :style="{ color: runStatusColor(schedule.lastStatus) }">{{
+                <span :class="runStatusClass(schedule.lastStatus)">{{
                   formatRunStatus(schedule.lastStatus)
                 }}</span>
-                <span :style="subtleStyle"> {{ formatRunTime(schedule.lastRunAt, now) }}</span>
+                <span> {{ formatRunTime(schedule.lastRunAt, now) }}</span>
               </template>
-              <span v-else :style="subtleStyle">{{ getMessage('sidepanel_daily_last_none') }}</span>
+              <span v-else>{{ getMessage('sidepanel_daily_last_none') }}</span>
             </div>
-          </div>
+          </button>
 
           <div class="dv-item-side">
-            <label class="dv-switch" :title="getMessage('sidepanel_daily_enable_label')">
+            <label class="ac-switch" :title="getMessage('sidepanel_daily_enable_label')">
               <input
                 type="checkbox"
                 :checked="schedule.enabled"
@@ -74,13 +81,13 @@
                   })
                 "
               />
-              <span class="dv-switch-text" :style="subtleStyle">{{
-                getMessage('sidepanel_daily_enable_label')
-              }}</span>
+              <span class="ac-switch-track"></span>
             </label>
             <button
-              class="dv-btn dv-btn-small"
-              :style="ghostStyle"
+              class="ac-button ac-button--ghost ac-button--sm"
+              type="button"
+              :aria-expanded="expanded === schedule.scheduleId ? 'true' : 'false'"
+              :aria-controls="`dv-detail-${schedule.scheduleId}`"
               @click="toggleExpand(schedule.scheduleId)"
             >
               {{
@@ -91,25 +98,29 @@
             </button>
           </div>
 
-          <div v-if="expanded === schedule.scheduleId" class="dv-detail">
+          <div
+            v-if="expanded === schedule.scheduleId"
+            :id="`dv-detail-${schedule.scheduleId}`"
+            class="dv-detail ac-hairline-top"
+          >
             <div class="dv-detail-actions">
               <button
-                class="dv-btn dv-btn-small dv-btn-primary"
-                :style="primaryStyle"
+                class="ac-button ac-button--primary ac-button--sm"
+                type="button"
                 @click="$emit('run-now', schedule.scheduleId)"
               >
                 {{ getMessage('sidepanel_daily_run_now') }}
               </button>
               <button
-                class="dv-btn dv-btn-small"
-                :style="ghostStyle"
+                class="ac-button ac-button--ghost ac-button--sm"
+                type="button"
                 @click="$emit('edit', schedule)"
               >
                 {{ getMessage('sidepanel_daily_edit') }}
               </button>
               <button
-                class="dv-btn dv-btn-small"
-                :style="dangerButtonStyle"
+                class="ac-button ac-button--danger ac-button--sm"
+                type="button"
                 @click="$emit('remove', schedule.scheduleId)"
               >
                 {{ getMessage('sidepanel_daily_remove') }}
@@ -130,19 +141,18 @@
 
 <script lang="ts" setup>
 /**
- * 매일 작업 목록 (2026-09-05 사이드패널 2단계 E).
+ * 매일 작업 목록 (2026-09-05 사이드패널 2단계 E, 2026-09-06 토스 스타일).
  *
  * 한 줄에 이름·종류·예약 요약·다음 실행·마지막 결과·켜기 스위치가 보이고, 펼치면 그 예약의
  * 실행 이력이 나온다. 데이터는 전부 상위(App.vue)가 넘겨준다.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { getMessage } from '@/utils/i18n';
 import DailyRunHistory from './DailyRunHistory.vue';
 import {
-  formatNextRun,
   formatRunStatus,
   formatRunTime,
-  runStatusColor,
+  formatScheduleEnabledLine,
   summarizeSchedule,
 } from '../../utils/daily-format';
 import type { ScheduleView } from '../../utils/daily-messages';
@@ -194,47 +204,22 @@ function kindText(schedule: ScheduleView): string {
     : getMessage('sidepanel_daily_kind_flow');
 }
 
-function kindStyle(schedule: ScheduleView) {
-  return schedule.target?.kind === 'shortcut'
-    ? {
-        backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-        color: 'var(--ac-text-muted, #6e6e6e)',
-      }
-    : {
-        backgroundColor: 'var(--ac-accent-subtle, rgba(217, 119, 87, 0.12))',
-        color: 'var(--ac-accent, #d97757)',
-      };
+/** 마지막 실행 결과의 글자색. 성공 파랑·실패 빨강·로그인 필요는 주황. */
+function runStatusClass(status: string | undefined): string {
+  switch (status) {
+    case 'success':
+      return 'ac-text-success';
+    case 'running':
+      return 'ac-text-accent';
+    case 'login_required':
+    case 'skipped_queue':
+    case 'user_took_over_tab':
+    case 'stopped':
+      return 'ac-text-warning';
+    default:
+      return 'ac-text-danger';
+  }
 }
-
-const rootStyle = computed(() => ({ backgroundColor: 'var(--ac-surface, #ffffff)' }));
-const headerStyle = computed(() => ({
-  borderBottom: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-}));
-const textStyle = computed(() => ({ color: 'var(--ac-text, #1a1a1a)' }));
-const mutedStyle = computed(() => ({ color: 'var(--ac-text-muted, #6e6e6e)' }));
-const subtleStyle = computed(() => ({ color: 'var(--ac-text-subtle, #a8a29e)' }));
-const dangerStyle = computed(() => ({ color: 'var(--ac-danger, #ef4444)' }));
-const itemStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface, #ffffff)',
-  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4)',
-  borderRadius: 'var(--ac-radius-card, 12px)',
-}));
-const ghostStyle = computed(() => ({
-  backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-  color: 'var(--ac-text, #1a1a1a)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
-const primaryStyle = computed(() => ({
-  backgroundColor: 'var(--ac-accent, #d97757)',
-  color: 'var(--ac-accent-contrast, #ffffff)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
-const dangerButtonStyle = computed(() => ({
-  backgroundColor: 'var(--ac-danger-subtle, rgba(239, 68, 68, 0.08))',
-  color: 'var(--ac-danger, #ef4444)',
-  borderRadius: 'var(--ac-radius-button, 8px)',
-}));
 </script>
 
 <style scoped>
@@ -242,6 +227,7 @@ const dangerButtonStyle = computed(() => ({
   height: 100%;
   display: flex;
   flex-direction: column;
+  background-color: var(--ac-bg);
 }
 
 .dv-header {
@@ -256,31 +242,26 @@ const dangerButtonStyle = computed(() => ({
 }
 
 .dv-title {
-  font-size: 14px;
-  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .dv-count {
-  font-size: 12px;
   flex: 1;
 }
 
 .dv-note {
   margin: 6px 0 0;
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .dv-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 16px 24px;
+  padding: 0 12px 24px;
 }
 
 .dv-error {
-  font-size: 12px;
-  margin-bottom: 8px;
+  margin: 0 4px 8px;
   word-break: break-word;
 }
 
@@ -289,18 +270,12 @@ const dangerButtonStyle = computed(() => ({
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 40px 12px;
+  padding: 48px 16px;
   text-align: center;
 }
 
-.dv-empty-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
 .dv-empty-hint {
-  font-size: 12px;
-  line-height: 1.5;
+  margin-bottom: 8px;
 }
 
 .dv-list {
@@ -309,22 +284,36 @@ const dangerButtonStyle = computed(() => ({
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dv-item {
-  padding: 12px;
+  padding: 16px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+  min-height: 52px;
 }
 
 .dv-item-main {
   min-width: 0;
+  width: 100%;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.dv-item-main:focus-visible {
+  outline: 2px solid var(--ac-focus-ring);
+  outline-offset: 2px;
 }
 
 .dv-item-head {
@@ -335,21 +324,10 @@ const dangerButtonStyle = computed(() => ({
 }
 
 .dv-name {
-  font-size: 13px;
-  font-weight: 600;
-  word-break: break-word;
-}
-
-.dv-kind {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
+  max-width: 100%;
 }
 
 .dv-line {
-  font-size: 12px;
   word-break: break-word;
 }
 
@@ -357,25 +335,18 @@ const dangerButtonStyle = computed(() => ({
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 
-.dv-switch {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.dv-switch-text {
-  font-size: 11px;
+/* 스위치 시각 크기(44x24)는 그대로 두고, 히트 영역만 세로 최소 32px 로 넓힌다. */
+.dv-item-side .ac-switch {
+  padding: 4px 0;
 }
 
 .dv-detail {
   grid-column: 1 / -1;
   margin-top: 8px;
-  padding-top: 10px;
-  border-top: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  padding-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -385,19 +356,5 @@ const dangerButtonStyle = computed(() => ({
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.dv-btn {
-  border: none;
-  padding: 7px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.dv-btn-small {
-  padding: 5px 10px;
-  font-size: 12px;
 }
 </style>

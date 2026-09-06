@@ -117,4 +117,49 @@ describe('flow-outcomes', () => {
     expect(manualRunOutcomes([{ flowId: 'f1' }])).toEqual([]);
     expect(scheduledRunOutcomes([{ name: 'flow:f1', status: 'success' }], flowIdOf)).toEqual([]);
   });
+
+  describe('마지막으로 끝난 실행 (성공·실패 통틀어, 카드의 "마지막 실행" 줄이 쓴다)', () => {
+    it('가장 최근 것이 성공이면 lastRunOutcome 이 success 다', () => {
+      const summary = mergeFlowOutcomes(
+        [],
+        [{ name: 'flow:f1', status: 'success', startedAt: T11, endedAt: T11 }],
+        flowIdOf,
+      );
+      expect(summary.lastRunAt.f1).toBe(T11);
+      expect(summary.lastRunOutcome.f1).toBe('success');
+    });
+
+    it('나중 결과가 실패면 마지막 성공이 남아 있어도 lastRunOutcome 은 failure 다', () => {
+      const summary = mergeFlowOutcomes(
+        [
+          {
+            flowId: 'f1',
+            startedAt: '2026-09-05T09:00:00.000Z',
+            finishedAt: '2026-09-05T09:00:00.000Z',
+            status: 'succeeded',
+          },
+        ],
+        [{ name: 'flow:f1', status: 'failed', startedAt: T11, endedAt: T11 }],
+        flowIdOf,
+      );
+      expect(summary.lastRunAt.f1).toBe(T11);
+      expect(summary.lastRunOutcome.f1).toBe('failure');
+      expect(summary.lastSuccessAt.f1).toBe(T9);
+    });
+
+    it('진행 중·건너뜀·정상 조기 종료는 lastRunOutcome 을 건드리지 않는다', () => {
+      const summary = summarizeFlowOutcomes([
+        { flowId: 'f1', at: T9, outcome: 'success' },
+        ...scheduledRunOutcomes([{ name: 'flow:f1', status: 'running', startedAt: T11 }], flowIdOf),
+      ]);
+      expect(summary.lastRunAt.f1).toBe(T9);
+      expect(summary.lastRunOutcome.f1).toBe('success');
+    });
+
+    it('실행 기록이 없는 흐름은 키 자체가 없다', () => {
+      const summary = summarizeFlowOutcomes([]);
+      expect(summary.lastRunAt.f1).toBeUndefined();
+      expect(summary.lastRunOutcome.f1).toBeUndefined();
+    });
+  });
 });

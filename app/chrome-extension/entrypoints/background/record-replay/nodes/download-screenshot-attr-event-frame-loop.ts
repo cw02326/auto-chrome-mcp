@@ -100,7 +100,7 @@ export const triggerEventNode: NodeRuntime<any> = {
   validate: (step) => {
     const s: any = step;
     const ok = !!s?.target?.candidates?.length && typeof s?.event === 'string' && s.event;
-    return ok ? { ok } : { ok, errors: ['缺少目标选择器或事件类型'] };
+    return ok ? { ok } : { ok, errors: ['대상 선택자 또는 이벤트 종류가 없습니다'] };
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
@@ -153,7 +153,7 @@ export const setAttributeNode: NodeRuntime<any> = {
   validate: (step) => {
     const s: any = step;
     const ok = !!s?.target?.candidates?.length && typeof s?.name === 'string' && s.name;
-    return ok ? { ok } : { ok, errors: ['需提供目标选择器与属性名'] };
+    return ok ? { ok } : { ok, errors: ['대상 선택자와 속성 이름이 필요합니다'] };
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
@@ -240,7 +240,7 @@ export const loopElementsNode: NodeRuntime<any> = {
       s.selector &&
       typeof s?.subflowId === 'string' &&
       s.subflowId;
-    return ok ? { ok } : { ok, errors: ['需提供 selector 与 subflowId'] };
+    return ok ? { ok } : { ok, errors: ['selector 와 subflowId 가 필요합니다'] };
   },
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);

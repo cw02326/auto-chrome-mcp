@@ -735,7 +735,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         };
       }
 
-      if (savePng === true) {
+      // 2026-09-06 Codex 리뷰: savePng 는 기본값이 true 라, saveToDownloads:true 를 filename 과
+      // 함께 부르면(savePng 를 명시적으로 꺼주지 않는 한) 위의 saveToDownloads 경로와 이 아래
+      // 경로가 **둘 다** 저장을 실행해 다운로드 폴더에 파일이 두 개(하나는 filename 반영,
+      // 하나는 이 도구의 `name` 파라미터로 이름 없는 것) 생겼다. 한 호출은 파일을 하나만
+      // 저장해야 한다 — saveToDownloads 가 이미 저장했으면 이 레거시 경로는 건너뛴다.
+      if (savePng === true && saveToDownloads !== true) {
         // Save PNG file to downloads
         this.logInfo('Saving PNG...');
         try {

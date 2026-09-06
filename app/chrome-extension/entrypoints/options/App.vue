@@ -1,143 +1,226 @@
 <template>
-  <div class="page">
-    <header class="topbar">
-      <h1>{{ m('userscriptsManagerTitle') }}</h1>
-      <div class="switch">
-        <label>
-          <input type="checkbox" v-model="emergencyDisabled" @change="saveEmergency" />
-          <span>{{ m('emergencySwitchLabel') }}</span>
+  <div class="op-page agent-theme">
+    <div class="op-inner">
+      <header class="op-topbar">
+        <h1 class="ac-title">{{ m('options_page_title') }}</h1>
+        <label class="op-emergency">
+          <span class="op-emergency-text">
+            <span class="ac-body">{{ m('emergencySwitchLabel') }}</span>
+            <span class="ac-caption">{{ m('options_emergency_desc') }}</span>
+          </span>
+          <span class="ac-switch">
+            <input
+              type="checkbox"
+              v-model="emergencyDisabled"
+              :aria-label="m('emergencySwitchLabel')"
+              @change="saveEmergency"
+            />
+            <span class="ac-switch-track"></span>
+          </span>
         </label>
-      </div>
-    </header>
+      </header>
 
-    <section class="create">
-      <h2>{{ m('createRunSectionTitle') }}</h2>
-      <div class="grid">
-        <label>
-          {{ m('nameLabel') }}
-          <input v-model="form.name" :placeholder="m('placeholderOptional')" />
-        </label>
-        <label>
-          {{ m('runAtLabel') }}
-          <select v-model="form.runAt">
-            <option value="auto">{{ m('runAtAuto') }}</option>
-            <option value="document_start">{{ m('runAtDocumentStart') }}</option>
-            <option value="document_end">{{ m('runAtDocumentEnd') }}</option>
-            <option value="document_idle">{{ m('runAtDocumentIdle') }}</option>
-          </select>
-        </label>
-        <label>
-          {{ m('worldLabel') }}
-          <select v-model="form.world">
-            <option value="auto">{{ m('worldAuto') }}</option>
-            <option value="ISOLATED">{{ m('worldIsolated') }}</option>
-            <option value="MAIN">{{ m('worldMain') }}</option>
-          </select>
-        </label>
-        <label>
-          {{ m('modeLabel') }}
-          <select v-model="form.mode">
-            <option value="auto">{{ m('modeAuto') }}</option>
-            <option value="persistent">{{ m('modePersistent') }}</option>
-            <option value="css">{{ m('modeCss') }}</option>
-            <option value="once">{{ m('modeOnce') }}</option>
-          </select>
-        </label>
-        <label>
-          {{ m('allFramesLabel') }}
-          <input type="checkbox" v-model="form.allFrames" />
-        </label>
-        <label>
-          {{ m('persistLabel') }}
-          <input type="checkbox" v-model="form.persist" />
-        </label>
-        <label>
-          {{ m('dnrFallbackLabel') }}
-          <input type="checkbox" v-model="form.dnrFallback" />
-        </label>
-      </div>
-      <label>
-        {{ m('matchesInputLabel') }}
-        <input v-model="form.matches" :placeholder="m('placeholderMatchesExample')" />
-      </label>
-      <label>
-        {{ m('excludesInputLabel') }}
-        <input v-model="form.excludes" :placeholder="m('placeholderOptional')" />
-      </label>
-      <label>
-        {{ m('tagsInputLabel') }}
-        <input v-model="form.tags" :placeholder="m('placeholderOptional')" />
-      </label>
-      <label>
-        {{ m('scriptLabel') }}
-        <textarea v-model="form.script" :placeholder="m('placeholderScriptHint')" rows="8" />
-      </label>
-      <div class="row">
-        <button :disabled="submitting" @click="apply('auto')">{{ m('applyButton') }}</button>
-        <button :disabled="submitting" @click="apply('once')">{{ m('runOnceButton') }}</button>
-        <span class="hint" v-if="lastResult">{{ lastResult }}</span>
-      </div>
-    </section>
+      <section class="ac-card op-card">
+        <h2 class="ac-heading">{{ m('createRunSectionTitle') }}</h2>
 
-    <section class="filters">
-      <h2>{{ m('listSectionTitle') }}</h2>
-      <div class="grid">
-        <label>
-          {{ m('queryLabel') }}
-          <input v-model="filters.query" @input="reload()" />
-        </label>
-        <label>
-          {{ m('statusLabel') }}
-          <select v-model="filters.status" @change="reload()">
-            <option value="">{{ m('statusAll') }}</option>
-            <option value="enabled">{{ m('statusEnabled') }}</option>
-            <option value="disabled">{{ m('statusDisabled') }}</option>
-          </select>
-        </label>
-        <label>
-          {{ m('domainLabel') }}
-          <input
-            v-model="filters.domain"
-            @input="reload()"
-            :placeholder="m('placeholderDomainHint')"
-          />
-        </label>
-      </div>
-      <div class="row">
-        <button @click="exportAll">{{ m('exportAllButton') }}</button>
-      </div>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>{{ m('tableHeaderName') }}</th>
-            <th>{{ m('statusLabel') }}</th>
-            <th>{{ m('tableHeaderWorld') }}</th>
-            <th>{{ m('tableHeaderRunAt') }}</th>
-            <th>{{ m('tableHeaderUpdated') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="it in items" :key="it.id">
-            <td>{{ it.name || it.id }}</td>
-            <td>
-              <label>
-                <input type="checkbox" :checked="it.status === 'enabled'" @change="toggle(it)" />
-                {{ it.status }}
-              </label>
-            </td>
-            <td>{{ it.world }}</td>
-            <td>{{ it.runAt }}</td>
-            <td>{{ formatTime(it.updatedAt) }}</td>
-            <td class="actions">
-              <button @click="remove(it)">{{ m('deleteButton') }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+        <div class="op-grid">
+          <label class="op-field">
+            <span class="op-label">{{ m('nameLabel') }}</span>
+            <input class="ac-field" v-model="form.name" :placeholder="m('placeholderOptional')" />
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('runAtLabel') }}</span>
+            <select class="ac-field" v-model="form.runAt">
+              <option value="auto">{{ m('runAtAuto') }}</option>
+              <option value="document_start">{{ m('runAtDocumentStart') }}</option>
+              <option value="document_end">{{ m('runAtDocumentEnd') }}</option>
+              <option value="document_idle">{{ m('runAtDocumentIdle') }}</option>
+            </select>
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('worldLabel') }}</span>
+            <select class="ac-field" v-model="form.world">
+              <option value="auto">{{ m('worldAuto') }}</option>
+              <option value="ISOLATED">{{ m('worldIsolated') }}</option>
+              <option value="MAIN">{{ m('worldMain') }}</option>
+            </select>
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('modeLabel') }}</span>
+            <select class="ac-field" v-model="form.mode">
+              <option value="auto">{{ m('modeAuto') }}</option>
+              <option value="persistent">{{ m('modePersistent') }}</option>
+              <option value="css">{{ m('modeCss') }}</option>
+              <option value="once">{{ m('modeOnce') }}</option>
+            </select>
+          </label>
+        </div>
 
-    <!-- Flow Editor removed: unified to Builder in Popup -->
+        <div class="op-checks">
+          <label class="op-check">
+            <input class="ac-check" type="checkbox" v-model="form.allFrames" />
+            <span class="ac-body">{{ m('allFramesLabel') }}</span>
+          </label>
+          <label class="op-check">
+            <input class="ac-check" type="checkbox" v-model="form.persist" />
+            <span class="ac-body">{{ m('persistLabel') }}</span>
+          </label>
+          <label class="op-check">
+            <input class="ac-check" type="checkbox" v-model="form.dnrFallback" />
+            <span class="ac-body">{{ m('dnrFallbackLabel') }}</span>
+          </label>
+        </div>
+
+        <div class="op-stack">
+          <label class="op-field">
+            <span class="op-label">{{ m('matchesInputLabel') }}</span>
+            <input
+              class="ac-field"
+              v-model="form.matches"
+              :placeholder="m('placeholderMatchesExample')"
+            />
+            <span class="ac-caption">{{ m('options_form_hint') }}</span>
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('excludesInputLabel') }}</span>
+            <input
+              class="ac-field"
+              v-model="form.excludes"
+              :placeholder="m('placeholderOptional')"
+            />
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('tagsInputLabel') }}</span>
+            <input class="ac-field" v-model="form.tags" :placeholder="m('placeholderOptional')" />
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('scriptLabel') }}</span>
+            <textarea
+              class="ac-field ac-field--mono op-script"
+              v-model="form.script"
+              :placeholder="m('placeholderScriptHint')"
+              rows="8"
+            />
+          </label>
+        </div>
+
+        <div class="op-actions">
+          <button
+            type="button"
+            class="ac-button ac-button--primary"
+            :disabled="submitting"
+            @click="apply('auto')"
+          >
+            {{ m('applyButton') }}
+          </button>
+          <button
+            type="button"
+            class="ac-button ac-button--ghost"
+            :disabled="submitting"
+            @click="apply('once')"
+          >
+            {{ m('runOnceButton') }}
+          </button>
+          <span v-if="lastResult" class="ac-caption op-result">{{ lastResult }}</span>
+        </div>
+      </section>
+
+      <section class="ac-card op-card">
+        <h2 class="ac-heading">{{ m('listSectionTitle') }}</h2>
+
+        <div class="op-grid">
+          <label class="op-field">
+            <span class="op-label">{{ m('queryLabel') }}</span>
+            <input class="ac-field" v-model="filters.query" @input="reload()" />
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('statusLabel') }}</span>
+            <select class="ac-field" v-model="filters.status" @change="reload()">
+              <option value="">{{ m('statusAll') }}</option>
+              <option value="enabled">{{ m('statusEnabled') }}</option>
+              <option value="disabled">{{ m('statusDisabled') }}</option>
+            </select>
+          </label>
+          <label class="op-field">
+            <span class="op-label">{{ m('domainLabel') }}</span>
+            <input
+              class="ac-field"
+              v-model="filters.domain"
+              :placeholder="m('placeholderDomainHint')"
+              @input="reload()"
+            />
+          </label>
+        </div>
+
+        <div class="op-actions">
+          <button type="button" class="ac-button ac-button--ghost" @click="exportAll">
+            {{ m('exportAllButton') }}
+          </button>
+        </div>
+
+        <div class="op-table-wrap">
+          <table class="op-table">
+            <thead>
+              <tr>
+                <th class="op-th">{{ m('tableHeaderName') }}</th>
+                <th class="op-th">{{ m('statusLabel') }}</th>
+                <th class="op-th">{{ m('tableHeaderWorld') }}</th>
+                <th class="op-th">{{ m('tableHeaderRunAt') }}</th>
+                <th class="op-th">{{ m('tableHeaderUpdated') }}</th>
+                <th class="op-th"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="it in items" :key="it.id" class="op-tr">
+                <td class="op-td">
+                  <span class="ac-body ac-clip" :title="it.name || it.id">{{
+                    it.name || it.id
+                  }}</span>
+                </td>
+                <td class="op-td">
+                  <span class="op-status">
+                    <span class="ac-switch">
+                      <input
+                        type="checkbox"
+                        :checked="it.status === 'enabled'"
+                        :aria-label="it.name || it.id"
+                        @change="toggle(it)"
+                      />
+                      <span class="ac-switch-track"></span>
+                    </span>
+                    <span
+                      class="ac-badge"
+                      :class="it.status === 'enabled' ? 'ac-badge--accent' : ''"
+                      >{{
+                        it.status === 'enabled' ? m('statusEnabled') : m('statusDisabled')
+                      }}</span
+                    >
+                  </span>
+                </td>
+                <td class="op-td"
+                  ><span class="ac-sub">{{ it.world }}</span></td
+                >
+                <td class="op-td"
+                  ><span class="ac-sub">{{ it.runAt }}</span></td
+                >
+                <td class="op-td">
+                  <span class="ac-sub ac-num">{{ formatTime(it.updatedAt) }}</span>
+                </td>
+                <td class="op-td op-td--right">
+                  <button
+                    type="button"
+                    class="ac-button ac-button--danger ac-button--sm"
+                    @click="remove(it)"
+                  >
+                    {{ m('deleteButton') }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -245,7 +328,7 @@ async function apply(mode: 'auto' | 'once') {
     lastResult.value = (result?.content?.[0]?.text as string) || '';
     await reload();
   } catch (e: any) {
-    lastResult.value = 'Error: ' + (e?.message || String(e));
+    lastResult.value = m('options_userscript_apply_failed', String(e?.message || String(e)));
   } finally {
     submitting.value = false;
   }
@@ -300,98 +383,179 @@ function m(key: string, substitutions?: string | string[]) {
 }
 </script>
 
-<style scoped>
-.page {
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    Segoe UI,
-    Roboto,
-    sans-serif;
-  padding: 16px;
+<style>
+/* 옵션 페이지는 탭 하나를 통째로 쓴다. 바탕이 끝까지 이어지도록 body 여백만 지운다. */
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
-.topbar {
+</style>
+
+<style scoped>
+/* 레이아웃만. 색·글꼴·입력·버튼·스위치는 ui/theme.css 의 .ac-* 가 그린다. */
+.op-page {
+  min-height: 100vh;
+  padding: 24px 16px 48px;
+}
+
+.op-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.op-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
-.create,
-.filters {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 16px;
+
+.op-emergency {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  cursor: pointer;
 }
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-label {
+
+.op-emergency-text {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
-  gap: 4px;
+  gap: 2px;
 }
-input,
-select,
-textarea {
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 8px;
-  font-size: 12px;
+
+.op-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
 }
-textarea {
-  resize: vertical;
+
+.op-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
-.row {
+
+.op-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.op-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 섹션 라벨 */
+.op-label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ac-text-secondary);
+}
+
+.op-script {
+  min-height: 160px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.op-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.op-check {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-}
-button {
-  background: #3b82f6;
-  color: #fff;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 8px;
+  min-height: 32px;
   cursor: pointer;
 }
-button:hover {
-  background: #2563eb;
+
+.op-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.hint {
-  color: #374151;
-  font-size: 12px;
+
+.op-result {
+  word-break: break-word;
 }
-.table {
+
+.op-table-wrap {
+  overflow-x: auto;
+}
+
+.op-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 8px;
 }
-.table th,
-.table td {
-  border-bottom: 1px solid #e5e7eb;
+
+/* 표 머리글도 섹션 라벨과 같은 규격 */
+.op-th {
+  padding: 0 8px 8px;
   text-align: left;
-  padding: 8px;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ac-text-secondary);
+  white-space: nowrap;
+  box-shadow: inset 0 -0.75px 0 0 var(--ac-divider);
 }
-.actions {
+
+.op-tr {
+  transition: background-color var(--ac-motion-fast) ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .op-tr:hover {
+    background-color: var(--ac-surface-hover);
+  }
+}
+
+.op-td {
+  height: 44px;
+  padding: 0 8px;
+  vertical-align: middle;
+  box-shadow: inset 0 -0.75px 0 0 var(--ac-divider);
+}
+
+.op-td--right {
   text-align: right;
 }
-.switch input {
-  margin-right: 6px;
+
+/* 긴 이름은 한 줄 말줄임 (title 속성으로 전체를 볼 수 있다). */
+.op-td .ac-clip {
+  display: block;
+  max-width: 260px;
 }
+
+.op-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 @media (max-width: 960px) {
-  .grid {
+  .op-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
 @media (max-width: 640px) {
-  .grid {
+  .op-grid {
     grid-template-columns: 1fr;
   }
 }

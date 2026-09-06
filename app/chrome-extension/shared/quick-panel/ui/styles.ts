@@ -6,7 +6,7 @@
  * with the sidepanel AgentChat component.
  *
  * Design System:
- * - Source of truth: app/chrome-extension/entrypoints/sidepanel/styles/agent-chat.css
+ * - Source of truth: app/chrome-extension/ui/theme.css
  * - This file extracts a minimal token + utility subset for content script use
  * - Liquid Glass styling follows quick-panel-prd.md V6 spec
  *

@@ -1,13 +1,12 @@
 @import 'tailwindcss';
 
 /*
- * App background and card helpers
+ * App background helpers.
  *
- * 2026-09-06(3단계): 노드 빌더(`entrypoints/builder`)를 지우면서 그 화면 전용이던
- * `.rr-theme` 토큰과 `.rr-topbar`/`.rr-dot-grid` 도 함께 지웠다. 아래 `.btn`/`.card`
- * 계열은 consent/welcome/sidepanel 이 함께 쓰므로 남긴다. 이들이 참조하는 `--rr-*`
- * 변수는 `.rr-theme` 안에서만 정의돼 있었고 빌더 밖에서는 원래부터 정의되지 않았다.
- * 즉 남은 화면들의 표시는 이전과 같다(정의되지 않은 var 는 그 선언을 무효로 만든다).
+ * 2026-09-06(4단계): `.btn`/`.card`/`.mini`/`.input`/`.select`/`.textarea`/`.label`/`.badge`
+ * 계열은 지워진 노드 빌더(`entrypoints/builder`)의 `--rr-*` 토큰만 참조하던 죽은 규칙이라
+ * 삭제했다(grep 결과 사용처 0곳). consent/popup/welcome/sidepanel 은 모두 자체 클래스나
+ * `ac-*` 토큰을 쓴다.
  */
 @layer base {
   html,
@@ -17,92 +16,5 @@
   }
   body {
     @apply bg-slate-50 text-slate-800;
-  }
-}
-
-@layer components {
-  .card {
-    @apply rounded-xl shadow-md border;
-    background: var(--rr-card);
-    border-color: var(--rr-border);
-  }
-  /* Generic buttons used across builder */
-  .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition;
-    background: var(--rr-card);
-    color: var(--rr-text);
-    border: 1px solid var(--rr-border);
-  }
-  .btn:hover {
-    @apply shadow-sm;
-    background: var(--rr-subtle);
-  }
-  .btn[disabled] {
-    @apply opacity-60 cursor-not-allowed;
-  }
-  .btn.primary {
-    color: #fff;
-    background: var(--rr-brand-strong);
-    border-color: var(--rr-brand-strong);
-  }
-  .btn.primary:hover {
-    filter: brightness(1.05);
-  }
-  .btn.ghost {
-    background: transparent;
-    border-color: transparent;
-  }
-
-  .mini {
-    @apply inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-medium;
-    background: var(--rr-card);
-    color: var(--rr-text);
-    border: 1px solid var(--rr-border);
-  }
-  .mini:hover {
-    background: var(--rr-subtle);
-  }
-  .mini.danger {
-    background: color-mix(in oklab, var(--rr-danger) 8%, transparent);
-    border-color: color-mix(in oklab, var(--rr-danger) 24%, var(--rr-border));
-    color: var(--rr-text);
-  }
-
-  .input {
-    @apply w-full px-3 py-2 rounded-lg text-sm;
-    background: var(--rr-card);
-    color: var(--rr-text);
-    border: 1px solid var(--rr-border);
-    outline: none;
-  }
-  .input:focus {
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--rr-brand) 26%, transparent);
-    border-color: var(--rr-brand);
-  }
-  .select {
-    @apply w-full px-3 py-2 rounded-lg text-sm;
-    background: var(--rr-card);
-    color: var(--rr-text);
-    border: 1px solid var(--rr-border);
-    outline: none;
-  }
-  .textarea {
-    @apply w-full rounded-lg text-sm;
-    padding: 10px 12px;
-    background: var(--rr-card);
-    color: var(--rr-text);
-    border: 1px solid var(--rr-border);
-    outline: none;
-  }
-  .label {
-    @apply text-sm;
-    color: var(--rr-muted);
-  }
-  .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
-  }
-  .badge-purple {
-    background: color-mix(in oklab, var(--rr-brand) 14%, transparent);
-    color: var(--rr-brand);
   }
 }

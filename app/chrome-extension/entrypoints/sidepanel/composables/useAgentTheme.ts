@@ -4,39 +4,31 @@
  */
 import { ref, type Ref } from 'vue';
 
-/** Available theme identifiers */
-export type AgentThemeId =
-  | 'warm-editorial'
-  | 'blueprint-architect'
-  | 'zen-journal'
-  | 'neo-pop'
-  | 'dark-console'
-  | 'swiss-grid';
+/**
+ * Available theme identifiers.
+ *
+ * The panel used to ship 7 themes (toss-light, warm-editorial,
+ * blueprint-architect, zen-journal, neo-pop, dark-console, swiss-grid).
+ * All but toss-light were removed 2026-09-06 - there is no theme picker in
+ * the panel, so the other 6 were unreachable dead weight. The type stays
+ * narrowed to the one surviving id; nothing outside this file references
+ * an old id as a literal (checked via grep across entrypoints and tests),
+ * so narrowing it doesn't break any importer.
+ */
+export type AgentThemeId = 'toss-light';
 
 /** Storage key for persisting theme preference */
 const STORAGE_KEY_THEME = 'agentTheme';
 
 /** Default theme when none is set */
-const DEFAULT_THEME: AgentThemeId = 'warm-editorial';
+const DEFAULT_THEME: AgentThemeId = 'toss-light';
 
 /** Valid theme IDs for validation */
-const VALID_THEMES: AgentThemeId[] = [
-  'warm-editorial',
-  'blueprint-architect',
-  'zen-journal',
-  'neo-pop',
-  'dark-console',
-  'swiss-grid',
-];
+const VALID_THEMES: AgentThemeId[] = ['toss-light'];
 
 /** Theme display names for UI */
 export const THEME_LABELS: Record<AgentThemeId, string> = {
-  'warm-editorial': 'Editorial',
-  'blueprint-architect': 'Blueprint',
-  'zen-journal': 'Zen',
-  'neo-pop': 'Neo-Pop',
-  'dark-console': 'Console',
-  'swiss-grid': 'Swiss',
+  'toss-light': 'Toss',
 };
 
 export interface UseAgentTheme {
@@ -59,6 +51,22 @@ export interface UseAgentTheme {
  */
 function isValidTheme(value: unknown): value is AgentThemeId {
   return typeof value === 'string' && VALID_THEMES.includes(value as AgentThemeId);
+}
+
+/**
+ * Is this a stored value we should honour?
+ *
+ * With only `toss-light` left, this is the same check as `isValidTheme` -
+ * any value written by an older build (warm-editorial, blueprint-architect,
+ * zen-journal, neo-pop, dark-console, swiss-grid) or anything else no
+ * longer valid is treated as "never chose one" and falls through to
+ * `DEFAULT_THEME` below, same as a fresh install. A person's storage can
+ * still literally hold an old id (nothing here deletes it) - it's just
+ * never honoured, so the panel always renders toss-light regardless of
+ * what chrome.storage.local has.
+ */
+function isHonouredStoredTheme(value: unknown): value is AgentThemeId {
+  return isValidTheme(value);
 }
 
 /**
@@ -85,7 +93,7 @@ export function useAgentTheme(): UseAgentTheme {
       const result = await chrome.storage.local.get(STORAGE_KEY_THEME);
       const stored = result[STORAGE_KEY_THEME];
 
-      if (isValidTheme(stored)) {
+      if (isHonouredStoredTheme(stored)) {
         theme.value = stored;
       } else {
         // Use preloaded or default
@@ -157,7 +165,7 @@ export async function preloadAgentTheme(): Promise<AgentThemeId> {
     const result = await chrome.storage.local.get(STORAGE_KEY_THEME);
     const stored = result[STORAGE_KEY_THEME];
 
-    if (isValidTheme(stored)) {
+    if (isHonouredStoredTheme(stored)) {
       themeId = stored;
     }
   } catch (error) {

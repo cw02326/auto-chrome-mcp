@@ -1,268 +1,265 @@
 <template>
-  <div class="popup-container agent-theme" :data-agent-theme="agentTheme">
-    <!-- 首页 -->
-    <div v-show="currentView === 'home'" class="home-view">
-      <div class="header">
-        <div class="header-content">
-          <h1 class="header-title">auto-chrome-mcp Chrome Mcp</h1>
-          <!-- 2026-09-05 2단계: 사이드패널의 매일 작업 탭으로 바로 간다 -->
-          <button class="daily-panel-button" @click="openDailySidepanel">
-            {{ getMessage('sidepanel_daily_tab_title') }}
-          </button>
+  <div class="popup-root agent-theme" :data-agent-theme="agentTheme">
+    <!-- 홈 -->
+    <div v-show="currentView === 'home'" class="pv-home">
+      <header class="pv-header">
+        <div class="pv-header-text">
+          <h1 class="ac-title pv-clip">{{ getMessage('popup_title') }}</h1>
+          <p class="ac-caption">{{ getMessage('nativeServerConfigLabel') }}</p>
         </div>
-      </div>
-      <div class="content">
-        <!-- 服务配置卡片 -->
-        <div class="section">
-          <h2 class="section-title">{{ getMessage('nativeServerConfigLabel') }}</h2>
-          <div class="config-card">
-            <div class="status-section">
-              <div class="status-header">
-                <p class="status-label">{{ getMessage('runningStatusLabel') }}</p>
-                <div class="status-switches">
-                  <label
-                    class="force-focus-switch"
-                    :title="
-                      forceFocusEnabled
-                        ? '강제 포커스 ON — MCP 도구 실행 시 Chrome 윈도우가 OS 앞으로 튀어나옴. 탭 활성화는 이 토글과 무관하게 전용 작업 창 안에서만 일어납니다.'
-                        : '강제 포커스 OFF — MCP 도구 실행 시 OS 포커스 가로채지 않음. 탭 활성화는 이 토글과 무관하게 전용 작업 창 안에서만 일어납니다.'
-                    "
-                  >
-                    <input
-                      type="checkbox"
-                      class="force-focus-switch__input"
-                      :checked="forceFocusEnabled"
-                      :aria-label="forceFocusEnabled ? '강제 포커스 끄기' : '강제 포커스 켜기'"
-                      @change="toggleForceFocus"
-                    />
-                    <span class="force-focus-switch__label">강제 포커스</span>
-                    <span
-                      class="force-focus-switch__track"
-                      :class="{ 'force-focus-switch__track--on': forceFocusEnabled }"
-                    >
-                      <span class="force-focus-switch__thumb" />
-                    </span>
-                  </label>
-                  <!-- auto-chrome-mcp fork: 백그라운드 작업 모드 토글 -->
-                  <label
-                    class="force-focus-switch"
-                    title="ON: MCP 도구가 사용자의 탭·포커스를 건드리지 않고 백그라운드 작업 탭에서 작업합니다. OFF: 이전처럼 작업 탭을 앞으로 가져옵니다."
-                  >
-                    <input
-                      type="checkbox"
-                      class="force-focus-switch__input"
-                      :checked="backgroundModeEnabled"
-                      :aria-label="
-                        backgroundModeEnabled ? '백그라운드 작업 끄기' : '백그라운드 작업 켜기'
-                      "
-                      @change="toggleBackgroundMode"
-                    />
-                    <span class="force-focus-switch__label">백그라운드 작업</span>
-                    <span
-                      class="force-focus-switch__track"
-                      :class="{ 'force-focus-switch__track--on': backgroundModeEnabled }"
-                    >
-                      <span class="force-focus-switch__thumb" />
-                    </span>
-                  </label>
-                  <!-- auto-chrome-mcp fork: 전용 MCP 작업 창 토글 -->
-                  <label
-                    class="force-focus-switch"
-                    title="ON(v1.9.0 기본): MCP 작업 탭을 별도 'MCP 작업 창'에 모아 사용자 창과 완전히 분리합니다 — 아래 배치 설정에 따라 화면에 나타나지 않습니다. OFF: 지금 열려 있는 크롬 창에 새 탭을 백그라운드로 만들어 작업합니다."
-                  >
-                    <input
-                      type="checkbox"
-                      class="force-focus-switch__input"
-                      :checked="dedicatedWindowEnabled"
-                      :aria-label="
-                        dedicatedWindowEnabled ? '전용 작업 창 끄기' : '전용 작업 창 켜기'
-                      "
-                      @change="toggleDedicatedWindow"
-                    />
-                    <span class="force-focus-switch__label">전용 작업 창</span>
-                    <span
-                      class="force-focus-switch__track"
-                      :class="{ 'force-focus-switch__track--on': dedicatedWindowEnabled }"
-                    >
-                      <span class="force-focus-switch__thumb" />
-                    </span>
-                  </label>
-                  <!-- auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 -->
-                  <label
-                    class="force-focus-switch"
-                    title="ON(기본): MCP 작업 탭을 초록색 탭 그룹 'MCP' 로 묶어 사용자가 직접 연 탭과 한눈에 구분되게 합니다. 탭을 활성화하거나 창 포커스를 바꾸지 않습니다. OFF: 묶지 않고 그대로 둡니다."
-                  >
-                    <input
-                      type="checkbox"
-                      class="force-focus-switch__input"
-                      :checked="tabGroupEnabled"
-                      :aria-label="
-                        tabGroupEnabled ? '작업 탭 그룹 표시 끄기' : '작업 탭 그룹 표시 켜기'
-                      "
-                      @change="toggleTabGroup"
-                    />
-                    <span class="force-focus-switch__label">작업 탭 그룹 표시</span>
-                    <span
-                      class="force-focus-switch__track"
-                      :class="{ 'force-focus-switch__track--on': tabGroupEnabled }"
-                    >
-                      <span class="force-focus-switch__thumb" />
-                    </span>
-                  </label>
-                </div>
-              </div>
-              <!-- auto-chrome-mcp fork v1.9.0: 전용 작업 창 배치 + 무간섭 권장 설정 -->
-              <div class="no-interference-row">
-                <label class="no-interference-label" for="work-window-placement"
-                  >작업 창 배치</label
-                >
-                <select
-                  id="work-window-placement"
-                  class="no-interference-select"
-                  :value="workWindowPlacement"
-                  :disabled="!dedicatedWindowEnabled"
-                  title="전용 작업 창을 화면에서 어떻게 숨길지 정합니다. 최소화: 작업 표시줄에만 남습니다(기본). 화면 밖: 일반 창으로 만들어 화면 밖으로 밀어 둡니다. 보이게: 예전처럼 보이는 창 — 디버깅용."
-                  @change="onPlacementChange"
-                >
-                  <option value="minimized">최소화 (권장)</option>
-                  <option value="offscreen">화면 밖</option>
-                  <option value="visible">보이게 (디버깅)</option>
-                </select>
-                <button
-                  class="no-interference-reset"
-                  type="button"
-                  title="전용 작업 창 ON + 배치 최소화 + 백그라운드 작업 ON + 강제 포커스 OFF 로 한 번에 되돌립니다."
-                  @click="applyNoInterferenceDefaults"
-                >
-                  무간섭 권장 설정으로 되돌리기
-                </button>
-              </div>
-              <div v-if="noInterferenceNotice" class="no-interference-notice">
-                {{ noInterferenceNotice }}
-              </div>
-              <div class="status-info">
-                <span :class="['status-dot', getStatusClass()]"></span>
-                <span class="status-text">{{ getStatusText() }}</span>
-              </div>
-              <div v-if="serverStatus.lastUpdated" class="status-timestamp">
-                {{ getMessage('lastUpdatedLabel') }}
-                {{ new Date(serverStatus.lastUpdated).toLocaleTimeString() }}
-              </div>
+        <button
+          type="button"
+          class="ac-button ac-button--ghost ac-button--sm"
+          @click="openDailySidepanel"
+        >
+          {{ getMessage('sidepanel_daily_tab_title') }}
+        </button>
+      </header>
+
+      <div class="pv-scroll">
+        <!-- 연결 상태 -->
+        <section class="ac-card pv-card">
+          <div class="pv-status">
+            <span :class="['pv-dot', getStatusClass()]" aria-hidden="true"></span>
+            <div class="pv-status-text">
+              <p class="ac-heading pv-clip">{{ getStatusText() }}</p>
+              <p class="ac-caption pv-clip">{{ connectionMeta }}</p>
             </div>
-
-            <!-- auto-chrome-mcp fork v1.0.12: "MCP 서버 설정" JSON 박스 제거.
-                 Claude prompt 박스가 더 직관적이고, JSON 박스는 사용자가 직접 채워야 하는
-                 placeholder (<npm root -g 출력값>) 가 있어서 그냥 복사하면 안 됨 → 혼란만 가중. -->
-
-            <!-- auto-chrome-mcp fork v1.0.10+: Claude Code 자동 등록 prompt 박스 -->
-            <div v-if="showMcpConfig" class="mcp-config-section">
-              <div class="mcp-config-header">
-                <p class="mcp-config-label">⚡ Claude Code 자동 등록 prompt</p>
-              </div>
-              <p class="claude-prompt-hint">
-                터미널의 <code>claude</code> 에 붙여넣으면 <code>.mcp.json</code> 자동 등록
-              </p>
-              <div class="mcp-config-content">
-                <button
-                  class="copy-config-button copy-config-button--floating"
-                  @click="copyClaudePrompt"
-                >
-                  {{ claudePromptCopyText }}
-                </button>
-                <pre class="mcp-config-json">{{ claudePromptText }}</pre>
-              </div>
-            </div>
-            <div class="port-section">
-              <label for="port" class="port-label">{{ getMessage('connectionPortLabel') }}</label>
-              <input
-                type="text"
-                id="port"
-                :value="nativeServerPort"
-                @input="updatePort"
-                class="port-input"
-              />
-            </div>
-
-            <button class="connect-button" :disabled="isConnecting" @click="testNativeConnection">
-              <BoltIcon />
-              <span>{{
-                isConnecting
-                  ? getMessage('connectingStatus')
-                  : nativeConnectionStatus === 'connected'
-                    ? getMessage('disconnectButton')
-                    : getMessage('connectButton')
-              }}</span>
-            </button>
-
-            <!-- auto-chrome-mcp fork: Force Reconnect 5단계 슈퍼버튼 -->
-            <!-- reconnect 끝나면 popup 의 nativeConnectionStatus 즉시 갱신 -->
-            <ForceReconnect
-              :port="Number(nativeServerPort) || 12320"
-              @reconnected="handleReconnected"
+          </div>
+          <div class="pv-port-row">
+            <label class="pv-sr-only" for="port">{{ getMessage('connectionPortLabel') }}</label>
+            <input
+              id="port"
+              type="text"
+              inputmode="numeric"
+              class="ac-field pv-port-input"
+              :value="nativeServerPort"
+              @input="updatePort"
             />
-
-            <!-- auto-chrome-mcp fork: Diagnostic Report + Self-Test -->
-            <DiagnosticReport :port="Number(nativeServerPort) || 12320" />
+            <button
+              type="button"
+              class="ac-button ac-button--primary"
+              :disabled="isConnecting"
+              @click="testNativeConnection"
+            >
+              <BoltIcon />
+              <span>{{ connectButtonText }}</span>
+            </button>
           </div>
-        </div>
+        </section>
 
-        <!-- v1.0.31+: 사이트 권한 consent gate 토글
-             ON = AI 가 묻지 않고 즉시 사용 / OFF = AI 가 consent 창으로 확인
-             design: docs/plans/2026-05-29-site-permissions-design.md -->
-        <div class="section">
-          <h2 class="section-title">권한 설정</h2>
-          <div class="config-card">
-            <p class="site-perms-hint">
-              AI 가 아래 권한을 사용하려 할 때, 토글이 OFF 면 사용자에게 확인합니다.
-            </p>
-            <div class="site-perms-list">
-              <div
-                v-for="item in SITE_PERMISSION_ITEMS"
-                :key="item.key"
-                class="site-perms-row-wrap"
+        <!-- Claude Code 자동 등록 prompt. 기본은 접힌 상태로 두고 복사만 노출한다. -->
+        <section v-if="showMcpConfig" class="ac-card pv-card">
+          <div class="pv-card-head">
+            <h2 class="ac-heading">{{ getMessage('popup_prompt_title') }}</h2>
+            <p class="ac-caption">{{ getMessage('popup_prompt_hint') }}</p>
+          </div>
+          <div class="pv-row">
+            <button
+              type="button"
+              class="ac-button ac-button--primary pv-grow"
+              @click="copyClaudePrompt"
+            >
+              {{ claudePromptCopyText }}
+            </button>
+            <button
+              type="button"
+              class="ac-button ac-button--quiet"
+              :aria-expanded="showPromptText"
+              @click="showPromptText = !showPromptText"
+            >
+              {{
+                showPromptText ? getMessage('popup_prompt_hide') : getMessage('popup_prompt_show')
+              }}
+            </button>
+          </div>
+          <pre v-if="showPromptText" class="pv-prompt">{{ claudePromptText }}</pre>
+        </section>
+
+        <!-- 동작 설정: 토글 한 줄에 하나 -->
+        <section class="ac-card pv-card">
+          <h2 class="ac-heading">{{ getMessage('popup_settings_title') }}</h2>
+
+          <div class="pv-rows">
+            <label class="pv-toggle-row">
+              <span class="pv-toggle-text">
+                <span class="ac-body">{{ getMessage('popup_toggle_force_focus_label') }}</span>
+                <span class="ac-caption">{{ getMessage('popup_toggle_force_focus_desc') }}</span>
+              </span>
+              <span class="ac-switch">
+                <input
+                  type="checkbox"
+                  :checked="forceFocusEnabled"
+                  :aria-label="getMessage('popup_toggle_force_focus_label')"
+                  @change="toggleForceFocus"
+                />
+                <span class="ac-switch-track"></span>
+              </span>
+            </label>
+
+            <label class="pv-toggle-row">
+              <span class="pv-toggle-text">
+                <span class="ac-body">{{ getMessage('popup_toggle_background_label') }}</span>
+                <span class="ac-caption">{{ getMessage('popup_toggle_background_desc') }}</span>
+              </span>
+              <span class="ac-switch">
+                <input
+                  type="checkbox"
+                  :checked="backgroundModeEnabled"
+                  :aria-label="getMessage('popup_toggle_background_label')"
+                  @change="toggleBackgroundMode"
+                />
+                <span class="ac-switch-track"></span>
+              </span>
+            </label>
+
+            <label class="pv-toggle-row">
+              <span class="pv-toggle-text">
+                <span class="ac-body">{{ getMessage('popup_toggle_dedicated_label') }}</span>
+                <span class="ac-caption">{{ getMessage('popup_toggle_dedicated_desc') }}</span>
+              </span>
+              <span class="ac-switch">
+                <input
+                  type="checkbox"
+                  :checked="dedicatedWindowEnabled"
+                  :aria-label="getMessage('popup_toggle_dedicated_label')"
+                  @change="toggleDedicatedWindow"
+                />
+                <span class="ac-switch-track"></span>
+              </span>
+            </label>
+
+            <label class="pv-toggle-row">
+              <span class="pv-toggle-text">
+                <span class="ac-body">{{ getMessage('popup_toggle_tabgroup_label') }}</span>
+                <span class="ac-caption">{{ getMessage('popup_toggle_tabgroup_desc') }}</span>
+              </span>
+              <span class="ac-switch">
+                <input
+                  type="checkbox"
+                  :checked="tabGroupEnabled"
+                  :aria-label="getMessage('popup_toggle_tabgroup_label')"
+                  @change="toggleTabGroup"
+                />
+                <span class="ac-switch-track"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="pv-field-block">
+            <label class="pv-field-label" for="work-window-placement">
+              <span class="ac-body">{{ getMessage('popup_placement_label') }}</span>
+              <span class="ac-caption">{{ getMessage('popup_placement_desc') }}</span>
+            </label>
+            <select
+              id="work-window-placement"
+              class="ac-field"
+              :value="workWindowPlacement"
+              :disabled="!dedicatedWindowEnabled"
+              @change="onPlacementChange"
+            >
+              <option value="minimized">{{ getMessage('popup_placement_minimized') }}</option>
+              <option value="offscreen">{{ getMessage('popup_placement_offscreen') }}</option>
+              <option value="visible">{{ getMessage('popup_placement_visible') }}</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            class="ac-button ac-button--quiet pv-reset"
+            :title="getMessage('popup_reset_defaults_hint')"
+            @click="applyNoInterferenceDefaults"
+          >
+            {{ getMessage('popup_reset_defaults') }}
+          </button>
+          <p v-if="noInterferenceNotice" class="ac-caption pv-notice" role="status">
+            {{ noInterferenceNotice }}
+          </p>
+        </section>
+
+        <!-- 사이트 권한 consent gate -->
+        <section class="ac-card pv-card">
+          <div class="pv-card-head">
+            <h2 class="ac-heading">{{ getMessage('popup_perms_title') }}</h2>
+            <p class="ac-caption">{{ getMessage('popup_perms_hint') }}</p>
+          </div>
+          <div class="pv-rows">
+            <div v-for="item in SITE_PERMISSION_ITEMS" :key="item.key" class="pv-perm-row">
+              <span class="ac-body pv-clip pv-grow">{{ item.label }}</span>
+              <button
+                type="button"
+                class="ac-icon-button"
+                :title="getMessage('popup_perm_os_open', [item.label])"
+                :aria-label="getMessage('popup_perm_os_open', [item.label])"
+                @click="openOSPermission(item.key)"
               >
-                <label class="site-perms-row">
-                  <span class="site-perms-row__label">
-                    <span class="site-perms-row__icon" aria-hidden="true">{{ item.icon }}</span>
-                    <span>{{ item.label }}</span>
-                  </span>
-                  <span class="site-perms-row__actions">
-                    <button
-                      type="button"
-                      class="site-perms-os-btn"
-                      :title="`OS 시스템 설정에서 ${item.label} 권한 열기`"
-                      :aria-label="`OS 시스템 설정에서 ${item.label} 권한 열기`"
-                      @click.stop.prevent="openOSPermission(item.key)"
-                    >
-                      ⚙
-                    </button>
-                    <span class="force-focus-switch__wrap">
-                      <input
-                        type="checkbox"
-                        class="force-focus-switch__input"
-                        :checked="sitePermissionToggles[item.key]"
-                        :aria-label="`${item.label} 토글`"
-                        @change="toggleSitePermission(item.key)"
-                      />
-                      <span
-                        class="force-focus-switch__track"
-                        :class="{
-                          'force-focus-switch__track--on': sitePermissionToggles[item.key],
-                        }"
-                      >
-                        <span class="force-focus-switch__thumb" />
-                      </span>
-                    </span>
-                  </span>
-                </label>
-              </div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.5" />
+                  <path
+                    d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7L3.4 3.4"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+              <label class="ac-switch">
+                <input
+                  type="checkbox"
+                  :checked="sitePermissionToggles[item.key]"
+                  :aria-label="item.label"
+                  @change="toggleSitePermission(item.key)"
+                />
+                <span class="ac-switch-track"></span>
+              </label>
             </div>
           </div>
-        </div>
+        </section>
+
+        <!-- 복구와 진단 -->
+        <section class="ac-card pv-card">
+          <h2 class="ac-heading">{{ getMessage('popup_tools_title') }}</h2>
+          <div class="pv-row">
+            <button
+              type="button"
+              class="ac-button pv-grow"
+              :class="showReconnect ? 'ac-button--quiet' : 'ac-button--ghost'"
+              :aria-expanded="showReconnect"
+              @click="showReconnect = !showReconnect"
+            >
+              {{ getMessage('popup_fr_button') }}
+            </button>
+            <button
+              type="button"
+              class="ac-button pv-grow"
+              :class="showDiagnostic ? 'ac-button--quiet' : 'ac-button--ghost'"
+              :aria-expanded="showDiagnostic"
+              @click="showDiagnostic = !showDiagnostic"
+            >
+              {{ getMessage('popup_diag_button') }}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="ac-button ac-button--ghost pv-reset"
+            @click="currentView = 'local-model'"
+          >
+            {{ getMessage('popup_local_model_button') }}
+          </button>
+
+          <ForceReconnect
+            :port="Number(nativeServerPort) || 12320"
+            :open="showReconnect"
+            @reconnected="handleReconnected"
+          />
+
+          <DiagnosticReport :port="Number(nativeServerPort) || 12320" :open="showDiagnostic" />
+        </section>
       </div>
     </div>
 
-    <!-- 本地模型二级页面 -->
+    <!-- 로컬 모델 2차 화면 -->
     <LocalModelPage
       v-show="currentView === 'local-model'"
       :semantic-engine-status="semanticEngineStatus"
@@ -301,7 +298,6 @@
         getMessage('clearDataList3'),
       ]"
       :warning="getMessage('clearDataIrreversibleWarning')"
-      icon="⚠️"
       :confirm-text="getMessage('confirmClearButton')"
       :cancel-text="getMessage('cancelButton')"
       :confirming-text="getMessage('clearingStatus')"
@@ -309,8 +305,6 @@
       @confirm="confirmClearAllData"
       @cancel="hideClearDataConfirmation"
     />
-
-    <!-- 侧边栏承担工作流管理；编辑器在独立窗口中打开 -->
   </div>
 </template>
 
@@ -363,113 +357,18 @@ import {
 import { useAgentTheme, type AgentThemeId } from '../sidepanel/composables/useAgentTheme';
 
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import ProgressIndicator from './components/ProgressIndicator.vue';
-import ModelCacheManagement from './components/ModelCacheManagement.vue';
 import LocalModelPage from './components/LocalModelPage.vue';
 import ForceReconnect from './components/ForceReconnect.vue';
 import DiagnosticReport from './components/DiagnosticReport.vue';
-import {
-  DocumentIcon,
-  DatabaseIcon,
-  BoltIcon,
-  TrashIcon,
-  CheckIcon,
-  TabIcon,
-  VectorIcon,
-  RecordIcon,
-  StopIcon,
-  WorkflowIcon,
-  EditIcon,
-  MarkerIcon,
-} from './components/icons';
+// 홈 화면이 직접 쓰는 아이콘은 연결 버튼의 번개 하나뿐이다. 나머지 아이콘은
+// 2차 화면(LocalModelPage)이 자기 파일에서 따로 불러 쓴다.
+import { BoltIcon } from './components/icons';
 
 // AgentChat theme - 从preload中获取，保持与sidepanel一致
 const { theme: agentTheme, initTheme } = useAgentTheme();
 
 // 当前视图状态：首页 or 本地模型页
 const currentView = ref<'home' | 'local-model'>('home');
-
-// Record & Replay state
-const rrRecording = ref(false);
-const rrFlows = ref<
-  Array<{ id: string; name: string; description?: string; meta?: any; variables?: any[] }>
->([]);
-const rrOnlyBound = ref(false);
-const rrSearch = ref('');
-const currentTabUrl = ref<string>('');
-const filteredRrFlows = computed(() => {
-  const base = rrOnlyBound.value ? rrFlows.value.filter(isFlowBoundToCurrent) : rrFlows.value;
-  const q = rrSearch.value.trim().toLowerCase();
-  if (!q) return base;
-  return base.filter((f: any) => {
-    const name = String(f.name || '').toLowerCase();
-    const domain = String(f?.meta?.domain || '').toLowerCase();
-    const tags = ((f?.meta?.tags || []) as any[]).join(',').toLowerCase();
-    return name.includes(q) || domain.includes(q) || tags.includes(q);
-  });
-});
-
-// Flow editor在独立窗口中打开；在popup不再展示繁杂列表
-
-const loadFlows = async () => {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_LIST_FLOWS });
-    if (res && res.success) rrFlows.value = res.flows || [];
-  } catch (e) {
-    /* ignore */
-  }
-};
-
-function isFlowBoundToCurrent(flow: any) {
-  try {
-    const bindings = flow?.meta?.bindings || [];
-    if (!bindings.length) return false;
-    if (!currentTabUrl.value) return true;
-    const url = new URL(currentTabUrl.value);
-    return bindings.some((b: any) => {
-      if (b.type === 'domain') return url.hostname.includes(b.value);
-      if (b.type === 'path') return url.pathname.startsWith(b.value);
-      if (b.type === 'url') return (url.href || '').startsWith(b.value);
-      return false;
-    });
-  } catch {
-    return false;
-  }
-}
-
-// 运行记录与覆盖项在侧边栏页面查看
-/**
- * 녹화 시작 (2026-09-05 사이드패널 1단계 A).
- *
- * 팝업은 버튼을 누르는 순간 닫힐 수 있어 녹화 중 표시를 유지할 자리가 아니다. 사이드패널을
- * 열면서 무엇을 할지를 ?record 로 넘기고, 실제 시작·중지와 녹화 중 표시는 거기서 한다.
- *
- * **지금 보고 있는 탭의 id 를 함께 넘긴다.** 팝업이 닫히고 패널이 뜨는 사이에 활성 탭이
- * 바뀌면(다른 창이 앞으로 오는 등) 패널이 다시 "활성 탭" 을 물었을 때 엉뚱한 탭이 잡힌다.
- */
-const startRecording = async () => {
-  const tabId = await activeTabIdForRecording();
-  await openSidepanelAndClose('workflows', {
-    record: 'start',
-    ...(tabId !== undefined ? { tabId: String(tabId) } : {}),
-  });
-};
-
-const stopRecording = async () => {
-  await openSidepanelAndClose('workflows', { record: 'stop' });
-};
-
-/** 팝업이 눌린 순간의 활성 탭 id. 못 얻으면 패널이 알아서 활성 탭을 찾는다. */
-async function activeTabIdForRecording(): Promise<number | undefined> {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return typeof tab?.id === 'number' ? tab.id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-// 旧的“克隆/发布/定时/覆盖项”在侧边栏或编辑器中处理
 
 const nativeConnectionStatus = ref<'unknown' | 'connected' | 'disconnected'>('unknown');
 const isConnecting = ref(false);
@@ -507,11 +406,10 @@ const sitePermissionToggles = ref<SitePermissionToggles>({
 const SITE_PERMISSION_ITEMS: ReadonlyArray<{
   key: SensitivePermission;
   label: string;
-  icon: string;
 }> = [
-  { key: 'camera', label: '카메라', icon: '📷' },
-  { key: 'microphone', label: '마이크', icon: '🎤' },
-  { key: 'geolocation', label: '위치 정보', icon: '📍' },
+  { key: 'camera', label: getMessage('popup_perm_camera') },
+  { key: 'microphone', label: getMessage('popup_perm_microphone') },
+  { key: 'geolocation', label: getMessage('popup_perm_geolocation') },
 ];
 
 // v1.0.33+: OS 시스템 설정 deep link.
@@ -549,42 +447,49 @@ const showMcpConfig = computed(() => {
 // auto-chrome-mcp fork v1.0.12: "MCP 서버 설정" JSON 박스 제거됨. Claude prompt 박스만 표시.
 // mcpConfigJson / copyMcpConfig / copyButtonText 도 함께 제거.
 
-// auto-chrome-mcp fork v1.0.10: Claude Code 자동 등록 prompt. 사용자가 npm root -g 출력값
-// 직접 채우기 귀찮으니 prompt 한 번 복사 → 터미널의 claude 에 붙여넣기.
+// auto-chrome-mcp fork v1.0.10: Claude Code 자동 등록 prompt. 사용자가 npm root -g 출력값을
+// 직접 채우기 귀찮으니 prompt 한 번 복사해서 터미널의 claude 에 붙여넣게 한다.
+// 본문은 i18n 키 popup_prompt_body 에 있고 포트만 치환한다.
 const claudePromptText = computed(() => {
   const port = serverStatus.value.port || nativeServerPort.value;
-  return (
-    '지금 working dir (이 프로젝트 폴더) 의 .mcp.json 에 우리 chrome MCP ' +
-    '(auto-chrome-mcp) 를 등록해줘. ~/.claude.json 같은 전역 설정에는 ' +
-    '손대지 마.\n\n' +
-    '규칙:\n' +
-    '- 이름: "chrome-mcp-stdio"\n' +
-    '- transport: stdio (HTTP 안 씀)\n' +
-    '- command: "node"\n' +
-    '- args: ["<npm root -g 출력값>/auto-chrome-mcp-bridge/dist/mcp/mcp-server-stdio.js"]\n' +
-    `- env: { "CHROME_PORT": "${port}" }\n\n` +
-    '먼저 `npm root -g` 를 bash 로 실행해서 실제 경로 얻고, 그 다음에 working dir 의 .mcp.json ' +
-    '(없으면 신설) 의 mcpServers.chrome-mcp-stdio 만 추가/갱신해줘. 기존 다른 server 항목은 ' +
-    '보존.\n\n' +
-    '등록이 끝나면 아래 절차도 함께 안내해줘:\n' +
-    '1. Claude Code 를 Ctrl+C 두 번으로 종료 후 다시 실행 (mcp 서버 재로드)\n' +
-    '2. `/mcp` 입력해서 chrome-mcp-stdio 가 connected 상태인지 확인\n' +
-    '3. 확인 후 Esc 로 빠져나오기'
-  );
+  return getMessage('popup_prompt_body', [String(port)]);
 });
 
-const claudePromptCopyText = ref('복사하기');
+// 큰 코드 블록은 기본으로 접어 둔다. 복사만 하고 지나가는 사람이 대부분이다.
+const showPromptText = ref(false);
+
+const claudePromptCopyText = ref(getMessage('popup_prompt_copy'));
 const copyClaudePrompt = async (): Promise<void> => {
   try {
     await navigator.clipboard.writeText(claudePromptText.value);
-    claudePromptCopyText.value = '✅ 복사됨';
+    claudePromptCopyText.value = getMessage('popup_prompt_copied');
     setTimeout(() => {
-      claudePromptCopyText.value = '복사하기';
+      claudePromptCopyText.value = getMessage('popup_prompt_copy');
     }, 2000);
   } catch (e) {
     console.error('Failed to copy claude prompt:', e);
   }
 };
+
+// 복구·진단 패널은 각각 보조 버튼으로 열고 닫는다.
+const showReconnect = ref(false);
+const showDiagnostic = ref(false);
+
+/** 연결 카드의 캡션. 포트와 마지막 확인 시각을 한 줄로 보여 준다. */
+const connectionMeta = computed(() => {
+  const port = String(serverStatus.value.port || nativeServerPort.value);
+  if (!serverStatus.value.lastUpdated) return getMessage('popup_conn_meta_port', [port]);
+  const time = new Date(serverStatus.value.lastUpdated).toLocaleTimeString();
+  return getMessage('popup_conn_meta', [port, time]);
+});
+
+/** 연결 버튼 문구. 상태에 따라 연결·해제·연결 중이 바뀐다. */
+const connectButtonText = computed(() => {
+  if (isConnecting.value) return getMessage('connectingStatus');
+  return nativeConnectionStatus.value === 'connected'
+    ? getMessage('disconnectButton')
+    : getMessage('connectButton');
+});
 
 const currentModel = ref<ModelPreset | null>(null);
 const isModelSwitching = ref(false);
@@ -675,54 +580,9 @@ async function openSidepanelAndClose(tab: string, extra?: Record<string, string>
   }
 }
 
-// Open sidepanel from popup for workflow management
-function openWorkflowSidepanel() {
-  void openSidepanelAndClose('workflows');
-}
-
-// Open sidepanel for element marker management
-function openElementMarkerSidepanel() {
-  openSidepanelAndClose('element-markers');
-}
-
 /** 사이드패널의 매일 작업 탭 (2026-09-05 사이드패널 2단계 E). */
 function openDailySidepanel() {
   void openSidepanelAndClose('daily');
-}
-
-async function toggleWebEditor() {
-  try {
-    await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE });
-  } catch (error) {
-    console.warn('切换网页编辑模式失败:', error);
-  }
-}
-
-async function toggleElementMarker() {
-  try {
-    // 获取当前活动tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      console.warn('无法获取当前tab');
-      return;
-    }
-
-    // 向background发送消息，启动元素标注
-    await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START,
-      tabId: tab.id,
-    });
-  } catch (error) {
-    console.warn('开启元素标注失败:', error);
-  }
-}
-
-async function openWelcomePage() {
-  try {
-    await chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
-  } catch {
-    // ignore
-  }
 }
 
 const getStatusText = () => {
@@ -925,7 +785,9 @@ const initializeSemanticEngine = async () => {
   } catch (error: any) {
     console.error('❌ Failed to send initialization request:', error);
     semanticEngineStatus.value = 'error';
-    semanticEngineInitProgress.value = `Failed to send initialization request: ${error?.message || 'Unknown error'}`;
+    semanticEngineInitProgress.value = getMessage('popup_semantic_engine_init_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     await saveSemanticEngineState();
 
@@ -1056,7 +918,7 @@ const handleReconnected = async (payload: {
 }): Promise<void> => {
   if (!payload.ok) return;
 
-  // 1) popup status 직접 강제 갱신 — 5단계 success 한 시점에 이미 실제 연결됨.
+  // 1) popup status 직접 강제 갱신. 5단계 success 한 시점에 이미 실제 연결됨.
   nativeConnectionStatus.value = 'connected';
   serverStatus.value = {
     ...serverStatus.value,
@@ -1065,7 +927,7 @@ const handleReconnected = async (payload: {
     lastUpdated: Date.now(),
   };
 
-  // 2) background 도 sync — connectNative 트리거 + 자체 polling 으로 stale 정리
+  // 2) background 도 sync. connectNative 트리거 + 자체 polling 으로 stale 정리
   try {
     await chrome.runtime.sendMessage({ type: 'connectNative' });
   } catch {
@@ -1074,7 +936,7 @@ const handleReconnected = async (payload: {
   // 3) background polling 도 한 번 호출 (없으면 다음 popup open 시 갱신)
   await Promise.all([checkNativeConnection(), checkServerStatus()]).catch(() => {});
 
-  // 4) 강제 set 한 값이 background polling 에 의해 잠시 후 덮어쓰이면 다시 강제 — 1초 후 한 번 더
+  // 4) 강제 set 한 값이 background polling 에 잠시 후 덮어쓰이면 1초 뒤 한 번 더 강제한다
   setTimeout(() => {
     if (payload.ok) {
       nativeConnectionStatus.value = 'connected';
@@ -1235,7 +1097,7 @@ const loadPortPreference = async () => {
   }
 };
 
-// auto-chrome-mcp fork: 강제포커스 토글 — load + toggle handler.
+// auto-chrome-mcp fork: 강제포커스 토글의 load + toggle handler.
 const loadForceFocusPreference = async () => {
   try {
     forceFocusEnabled.value = await isForceFocusEnabled();
@@ -1255,7 +1117,7 @@ const toggleForceFocus = async () => {
   }
 };
 
-// auto-chrome-mcp fork: 백그라운드 작업 모드 토글 — load + toggle handler.
+// auto-chrome-mcp fork: 백그라운드 작업 모드 토글의 load + toggle handler.
 const loadBackgroundModePreference = async () => {
   try {
     backgroundModeEnabled.value = await isBackgroundModeEnabled();
@@ -1275,7 +1137,7 @@ const toggleBackgroundMode = async () => {
   }
 };
 
-// auto-chrome-mcp fork: 전용 작업 창 토글 — load + toggle handler.
+// auto-chrome-mcp fork: 전용 작업 창 토글의 load + toggle handler.
 const loadDedicatedWindowPreference = async () => {
   try {
     dedicatedWindowEnabled.value = (await getWorkWindowMode()) === 'dedicated';
@@ -1295,7 +1157,7 @@ const toggleDedicatedWindow = async () => {
   }
 };
 
-// auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 — load + toggle handler.
+// auto-chrome-mcp fork: MCP 작업 탭 그룹 토글의 load + toggle handler.
 const loadTabGroupPreference = async () => {
   try {
     tabGroupEnabled.value = await isMcpTabGroupEnabled();
@@ -1315,7 +1177,7 @@ const toggleTabGroup = async () => {
   }
 };
 
-// auto-chrome-mcp fork v1.9.0: 전용 작업 창 배치 — load + change handler.
+// auto-chrome-mcp fork v1.9.0: 전용 작업 창 배치의 load + change handler.
 const loadWorkWindowPlacement = async () => {
   try {
     workWindowPlacement.value = await getWorkWindowPlacement();
@@ -1352,10 +1214,10 @@ const applyNoInterferenceDefaults = async () => {
     workWindowPlacement.value = DEFAULT_WORK_WINDOW_PLACEMENT;
     backgroundModeEnabled.value = true;
     forceFocusEnabled.value = false;
-    noInterferenceNotice.value = '무간섭 권장 설정을 적용했습니다.';
+    noInterferenceNotice.value = getMessage('popup_reset_done');
   } catch (error) {
     console.error('무간섭 권장 설정 적용 실패:', error);
-    noInterferenceNotice.value = '설정을 저장하지 못했습니다.';
+    noInterferenceNotice.value = getMessage('popup_reset_failed');
   }
   setTimeout(() => {
     noInterferenceNotice.value = '';
@@ -1393,14 +1255,11 @@ const openOSPermission = async (key: SensitivePermission) => {
     if (url) {
       window.location.href = url;
     } else {
-      alert(
-        `이 OS (${info.os}) 에서는 자동 열기 미지원.\n` +
-          `${label} 권한을 시스템 설정에서 직접 켜주세요.`,
-      );
+      alert(getMessage('popup_perm_os_unsupported', [info.os, label]));
     }
   } catch (e) {
     console.error('openOSPermission 실패:', e);
-    alert(`OS 설정 열기 실패. ${label} 권한을 시스템 설정에서 직접 켜주세요.`);
+    alert(getMessage('popup_perm_os_failed', [label]));
   }
 };
 
@@ -1562,11 +1421,13 @@ const confirmClearAllData = async () => {
         hideClearDataConfirmation();
       }, 2000);
     } else {
-      throw new Error(response?.error || 'Failed to clear data');
+      throw new Error(response?.error || getMessage('popup_clear_data_generic_error'));
     }
   } catch (error: any) {
     console.error('❌ Failed to clear all data:', error);
-    clearDataProgress.value = `Failed to clear data: ${error?.message || 'Unknown error'}`;
+    clearDataProgress.value = getMessage('popup_clear_data_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     setTimeout(() => {
       clearDataProgress.value = '';
@@ -1656,11 +1517,13 @@ const switchModel = async (newModel: ModelPreset) => {
         modelSwitchProgress.value = '';
       }, 2000);
     } else {
-      throw new Error(response?.error || 'Model switch failed');
+      throw new Error(response?.error || getMessage('popup_model_switch_generic_error'));
     }
   } catch (error: any) {
     console.error('模型切换失败:', error);
-    modelSwitchProgress.value = `Model switch failed: ${error?.message || 'Unknown error'}`;
+    modelSwitchProgress.value = getMessage('popup_model_switch_failed', [
+      String(error?.message || getMessage('popup_unknown_error')),
+    ]);
 
     modelInitializationStatus.value = 'error';
     isModelDownloading.value = false;
@@ -1703,17 +1566,13 @@ const setupServerStatusListener = () => {
       serverStatus.value = message.payload;
       // v1.0.20: payload 에 nativeConnected 가 함께 와서 polling 기다리지 않고
       // 즉시 connection status 반영. PORT_CONFLICT 후 "connected && !isRunning"
-      // 노란색 깜빡임 차단 — 강제 takeover 면 곧장 빨간색 'disconnected' 로.
+      // 노란색 깜빡임을 막는다. 강제 takeover 면 곧장 빨간색 'disconnected' 로 간다.
       if (message.payload.nativeConnected === false) {
         nativeConnectionStatus.value = 'disconnected';
       } else if (message.payload.nativeConnected === true) {
         nativeConnectionStatus.value = 'connected';
       }
       console.log('Server status updated:', message.payload);
-    }
-    // Flows changed - refresh list (IndexedDB-based notification)
-    if (message.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) {
-      loadFlows();
     }
   };
   chrome.runtime.onMessage.addListener(onMessage);
@@ -1736,29 +1595,22 @@ onMounted(async () => {
   await checkServerStatus();
   await refreshStorageStats();
   await loadCacheStats();
-  await loadFlows();
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentTabUrl.value = tab?.url || '';
-  } catch {}
 
   await checkSemanticEngineStatus();
   setupServerStatusListener();
-  // Auto-refresh workflows list when storage rr_flows changes
   try {
     const onChanged = (changes: any, area: string) => {
       try {
         if (area !== 'local') return;
-        if (Object.prototype.hasOwnProperty.call(changes || {}, 'rr_flows')) loadFlows();
         // auto-chrome-mcp fork: 다른 popup/탭이 force-focus 토글 바꿔도 즉시 반영.
         if (Object.prototype.hasOwnProperty.call(changes || {}, FORCE_FOCUS_STORAGE_KEY)) {
           forceFocusEnabled.value = changes[FORCE_FOCUS_STORAGE_KEY]?.newValue === true;
         }
-        // auto-chrome-mcp fork: 백그라운드 작업 모드도 동일하게 동기화 (기본값 true — false 만 OFF).
+        // auto-chrome-mcp fork: 백그라운드 작업 모드도 동일하게 동기화 (기본값 true, false 만 OFF).
         if (Object.prototype.hasOwnProperty.call(changes || {}, BACKGROUND_MODE_STORAGE_KEY)) {
           backgroundModeEnabled.value = changes[BACKGROUND_MODE_STORAGE_KEY]?.newValue !== false;
         }
-        // auto-chrome-mcp fork: 작업 창 모드도 동일하게 동기화 (기본값 'current' — 'dedicated' 만 ON).
+        // auto-chrome-mcp fork: 작업 창 모드도 동일하게 동기화 (기본값 'current', 'dedicated' 만 ON).
         if (Object.prototype.hasOwnProperty.call(changes || {}, WORK_WINDOW_MODE_STORAGE_KEY)) {
           dedicatedWindowEnabled.value =
             changes[WORK_WINDOW_MODE_STORAGE_KEY]?.newValue === 'dedicated';
@@ -1772,7 +1624,7 @@ onMounted(async () => {
             workWindowPlacement.value = next;
           }
         }
-        // auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 (기본값 true — false 만 OFF).
+        // auto-chrome-mcp fork: MCP 작업 탭 그룹 토글 (기본값 true, false 만 OFF).
         if (Object.prototype.hasOwnProperty.call(changes || {}, MCP_TAB_GROUP_STORAGE_KEY)) {
           tabGroupEnabled.value = changes[MCP_TAB_GROUP_STORAGE_KEY]?.newValue !== false;
         }
@@ -1808,1165 +1660,236 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* auto-chrome-mcp fork v1.9.0: 무간섭 모드 설정 줄 */
-.no-interference-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
+/*
+ * 팝업 레이아웃만 여기에 둔다. 색·글꼴·모서리·버튼·입력·스위치는 전부
+ * `ui/theme.css` 의 `.ac-*` 프리미티브가 그린다. 이 파일에 색을 직접 쓰지 않는다.
+ */
 
-.no-interference-label {
-  font-size: 12px;
-  opacity: 0.85;
-}
-
-.no-interference-select {
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.no-interference-reset {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.no-interference-notice {
-  font-size: 12px;
-  margin-top: 4px;
-  opacity: 0.85;
-}
-
-.popup-container {
-  background: #f1f5f9;
-  border-radius: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+.popup-root {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.header {
-  flex-shrink: 0;
-  padding-left: 20px;
-  padding-right: 12px;
+.pv-home {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
-/* auto-chrome-mcp fork: 강제 포커스 토글 — iOS 스타일 슬라이딩 스위치 */
-.force-focus-switch,
-.force-focus-switch__wrap {
-  display: inline-flex;
+/* 헤더 한 줄: 제목·캡션 왼쪽, 매일 작업 버튼 오른쪽 */
+.pv-header {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  cursor: pointer;
-  user-select: none;
-  position: relative;
+  flex-shrink: 0;
+  padding: 16px 16px 12px;
 }
 
-/* v1.0.31+: site permissions consent gate UI */
-.site-perms-hint {
-  font-size: 12px;
-  color: #64748b;
-  margin: 0 0 10px 0;
+.pv-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.site-perms-list {
+.pv-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+
+.pv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.pv-card-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.site-perms-row {
+.pv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pv-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.pv-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 연결 상태 */
+.pv-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pv-status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pv-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--ac-radius-pill);
+  background-color: var(--ac-text-tertiary);
+}
+
+/*
+ * 상태 점의 색. 클래스 이름은 `getStatusClass()` 가 그대로 돌려주는 값이라
+ * 건드리지 않고, 색만 토큰으로 바꿔 받는다.
+ */
+.pv-dot.bg-emerald-500 {
+  background-color: var(--ac-success);
+}
+
+.pv-dot.bg-yellow-500 {
+  background-color: var(--ac-warning);
+}
+
+.pv-dot.bg-red-500 {
+  background-color: var(--ac-danger);
+}
+
+.pv-dot.bg-gray-500 {
+  background-color: var(--ac-text-tertiary);
+}
+
+.pv-port-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pv-port-input {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pv-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Claude Code 등록 prompt */
+.pv-prompt {
+  max-height: 160px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-surface-muted);
+  color: var(--ac-text-secondary);
+  font-family: var(--ac-font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 설정 토글: 한 줄에 하나, 행 높이 48 */
+.pv-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 4px;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 0;
   cursor: pointer;
 }
 
-.site-perms-row__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #1e293b;
+.pv-toggle-row + .pv-toggle-row {
+  box-shadow: inset 0 0.75px 0 0 var(--ac-divider);
 }
 
-.site-perms-row__icon {
-  font-size: 16px;
-  line-height: 1;
+.pv-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.site-perms-row-wrap {
+.pv-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pv-field-label {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-/* v1.0.33+: 토글 + ⚙ OS deep-link 버튼을 한 줄로 정렬 */
-.site-perms-row__actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.pv-reset {
+  align-self: flex-start;
 }
 
-.site-perms-os-btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
-  font-size: 14px;
-  line-height: 1;
-  color: #64748b;
-  opacity: 0.7;
-  transition:
-    opacity 0.15s ease,
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.site-perms-os-btn:hover {
-  opacity: 1;
-  background: rgba(15, 23, 42, 0.06);
-  color: var(--ac-accent, #d97757);
-}
-
-.site-perms-os-btn:focus-visible {
-  outline: 2px solid var(--ac-accent, #d97757);
-  outline-offset: 1px;
-}
-
-.site-perms-warn {
-  font-size: 11px;
-  color: #b45309;
-  line-height: 1.45;
-  margin: 0 0 4px 28px;
-  word-break: keep-all;
-}
-
-.site-perms-link {
-  font-family: 'Monaco', 'Menlo', monospace;
-  font-size: 10.5px;
-  color: #92400e;
-  text-decoration: underline;
-  cursor: pointer;
-  word-break: break-all;
-}
-
-.site-perms-link:hover {
-  color: var(--ac-accent, #d97757);
-}
-
-.force-focus-switch__label {
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  white-space: nowrap;
-}
-
-.force-focus-switch__track {
-  position: relative;
-  display: inline-block;
-  width: 34px;
-  height: 20px;
-  background: #cbd5e1;
-  border-radius: 999px;
-  transition: background 0.18s ease;
-  flex-shrink: 0;
-}
-
-.force-focus-switch__track--on {
-  background: var(--ac-accent, #d97757);
-}
-
-.force-focus-switch__thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  background: #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
-  transition: transform 0.18s ease;
-}
-
-.force-focus-switch__track--on .force-focus-switch__thumb {
-  transform: translateX(14px);
-}
-
-/* keyboard focus ring on the hidden checkbox */
-.force-focus-switch__input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.force-focus-switch__input:focus-visible ~ .force-focus-switch__track {
-  outline: 2px solid var(--ac-accent, #d97757);
-  outline-offset: 2px;
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #1e293b;
+.pv-notice {
   margin: 0;
 }
 
-/* 2026-09-05 2단계: 매일 작업 탭으로 가는 버튼 */
-.daily-panel-button {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--ac-surface-muted, #f2f0eb);
-  color: var(--ac-text, #1a1a1a);
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  white-space: nowrap;
-}
-
-.daily-panel-button:hover {
-  background: var(--ac-hover-bg, #e5e5e5);
-}
-
-.settings-button {
-  padding: 8px;
-  border-radius: 50%;
-  color: #64748b;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.settings-button:hover {
-  background: #e2e8f0;
-  color: #1e293b;
-}
-
-.content {
-  flex-grow: 1;
-  padding: 8px 24px;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.content::-webkit-scrollbar {
-  display: none;
-}
-.status-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.status-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-  margin-bottom: 8px;
-}
-
-.status-info {
+/* 권한 행 */
+.pv-perm-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
 }
 
-.status-dot {
-  height: 8px;
-  width: 8px;
-  border-radius: 50%;
+.pv-perm-row + .pv-perm-row {
+  box-shadow: inset 0 0.75px 0 0 var(--ac-divider);
 }
 
-.status-dot.bg-emerald-500 {
-  background-color: #10b981;
-}
-
-.status-dot.bg-red-500 {
-  background-color: #ef4444;
-}
-
-.status-dot.bg-yellow-500 {
-  background-color: #eab308;
-}
-
-.status-dot.bg-gray-500 {
-  background-color: #6b7280;
-}
-
-.status-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.model-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-  margin-bottom: 4px;
-}
-
-.model-name {
-  font-weight: 600;
-  color: #7c3aed;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-.stats-card {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  padding: 16px;
-}
-
-.stats-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.stats-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-}
-
-.stats-icon {
-  padding: 8px;
-  border-radius: 8px;
-}
-
-.stats-icon.violet {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-
-.stats-icon.teal {
-  background: #ccfbf1;
-  color: #0d9488;
-}
-
-.stats-icon.blue {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.stats-icon.green {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-.stats-value {
-  font-size: 30px;
-  font-weight: 700;
-  color: #0f172a;
-  margin: 0;
-}
-
-.section {
-  margin-bottom: 24px;
-}
-
-.secondary-button {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.secondary-button:hover:not(:disabled) {
-  background: #e2e8f0;
-  border-color: #94a3b8;
-}
-
-.secondary-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary-button {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.primary-button:hover {
-  background: #2563eb;
-}
-
-.section-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 12px;
-}
-.current-model-card {
-  background: linear-gradient(135deg, #faf5ff, #f3e8ff);
-  border: 1px solid #e9d5ff;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.current-model-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.current-model-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-  margin: 0;
-}
-
-.current-model-badge {
-  background: #8b5cf6;
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.current-model-name {
-  font-size: 16px;
-  font-weight: 700;
-  color: #7c3aed;
-  margin: 0;
-}
-
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.model-card {
-  background: white;
-  border-radius: 12px;
-  padding: 16px;
-  cursor: pointer;
-  border: 1px solid #e5e7eb;
-  transition: all 0.2s ease;
-}
-
-.model-card:hover {
-  border-color: #8b5cf6;
-}
-
-.model-card.selected {
-  border: 2px solid #8b5cf6;
-  background: #faf5ff;
-}
-
-.model-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.model-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.model-info {
-  flex: 1;
-}
-
-.model-name {
-  font-weight: 600;
-  color: #1e293b;
-  margin: 0 0 4px 0;
-}
-
-.model-name.selected-text {
-  color: #7c3aed;
-}
-
-.model-description {
-  font-size: 14px;
-  color: #64748b;
-  margin: 0;
-}
-
-.check-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  background: #8b5cf6;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.model-tags {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-}
-.model-tag {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 9999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.model-tag.performance {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.model-tag.size {
-  background: #ddd6fe;
-  color: #5b21b6;
-}
-
-.model-tag.dimension {
-  background: #e5e7eb;
-  color: #4b5563;
-}
-
-.config-card {
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.semantic-engine-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.semantic-engine-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.semantic-engine-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: #8b5cf6;
-  color: white;
-  font-weight: 600;
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-}
-
-.semantic-engine-button:hover:not(:disabled) {
-  background: #7c3aed;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.semantic-engine-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.status-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  gap: 8px;
-}
-
-/* auto-chrome-mcp fork: 강제 포커스 + 백그라운드 작업 + 전용 작업 창 토글 묶음
-   (3개라 좁으면 flex-wrap 으로 줄바꿈) */
-.status-switches {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.status-timestamp {
-  font-size: 12px;
-  color: #9ca3af;
-  margin-top: 4px;
-}
-
-.mcp-config-section {
-  border-top: 1px solid #f1f5f9;
-}
-
-.mcp-config-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.mcp-config-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-  margin: 0;
-}
-
-.copy-config-button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #64748b;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.copy-config-button:hover {
-  background: #f1f5f9;
-  color: #374151;
-}
-
-.mcp-config-content {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px;
-  overflow-x: auto;
-  position: relative;
-}
-
-/* auto-chrome-mcp fork v1.0.28: 복사 버튼이 prompt 박스 우상단에 떠 있는 형태 */
-.copy-config-button--floating {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  padding: 4px 10px;
-  font-size: 12px;
-  color: #475569;
-  z-index: 2;
-  backdrop-filter: blur(4px);
-}
-
-.copy-config-button--floating:hover {
-  background: #ffffff;
-  color: var(--ac-accent, #d97757);
-  border-color: var(--ac-accent, #d97757);
-}
-
-/* auto-chrome-mcp fork v1.0.10: Claude prompt 박스 부가 hint */
-.claude-prompt-hint {
-  font-size: 11px;
-  color: #64748b;
-  margin: 2px 0 6px 0;
-}
-
-.claude-prompt-hint code {
-  background: #f1f5f9;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-family: 'Monaco', 'Menlo', monospace;
-  font-size: 10px;
-}
-
-.mcp-config-json {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  color: #374151;
-  margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.port-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.port-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #64748b;
-}
-
-.port-input {
-  display: block;
-  width: 100%;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  padding: 12px;
-  font-size: 14px;
-  background: #f8fafc;
-}
-
-.port-input:focus {
-  outline: none;
-  border-color: var(--ac-accent, #d97757);
-  box-shadow: 0 0 0 3px var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
-}
-
-.connect-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, white);
-  font-weight: 600;
-  padding: 12px 16px;
-  border-radius: var(--ac-radius-button, 8px);
-  border: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-}
-
-.connect-button:hover:not(:disabled) {
-  background: var(--ac-accent-hover, #c4664a);
-  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
-}
-
-.connect-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.error-card {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.error-content {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.error-icon {
-  font-size: 20px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.error-details {
-  flex: 1;
-}
-
-.error-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #dc2626;
-  margin: 0 0 4px 0;
-}
-
-.error-message {
-  font-size: 14px;
-  color: #991b1b;
-  margin: 0 0 8px 0;
-  font-weight: 500;
-}
-
-.error-suggestion {
-  font-size: 13px;
-  color: #7f1d1d;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.retry-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: #dc2626;
-  color: white;
-  font-weight: 600;
-  padding: 8px 16px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.retry-button:hover:not(:disabled) {
-  background: #b91c1c;
-}
-
-.retry-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.danger-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: white;
-  border: 1px solid #d1d5db;
-  color: #374151;
-  font-weight: 600;
-  padding: 12px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 16px;
-}
-
-.danger-button:hover:not(:disabled) {
-  border-color: #ef4444;
-  color: #dc2626;
-}
-
-.danger-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Icon sizes - use :deep to apply to child components */
-:deep(.icon-small) {
-  width: 16px;
-  height: 16px;
-}
-
-:deep(.icon-default) {
-  width: 20px;
-  height: 20px;
-}
-
-:deep(.icon-medium) {
-  width: 24px;
-  height: 24px;
-}
-.footer {
-  padding: 16px;
-  margin-top: auto;
-}
-
-.footer-links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.footer-link {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  color: #64748b;
-  font-size: 12px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.footer-link:hover {
-  color: #8b5cf6;
-  background: #e2e8f0;
-}
-
-.footer-link svg {
-  width: 14px;
-  height: 14px;
-}
-
-.footer-text {
-  text-align: center;
-  font-size: 12px;
-  color: #94a3b8;
-  margin: 0;
-}
-
-@media (max-width: 320px) {
-  .popup-container {
-    width: 100%;
-    height: 100vh;
-    border-radius: 0;
-  }
-
-  .footer-links {
-    gap: 8px;
-  }
-
-  .empty {
-    color: #888;
-    font-size: 13px;
-  }
-
-  .header {
-    padding: 24px 20px 12px;
-  }
-
-  .content {
-    padding: 8px 20px;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .config-card {
-    padding: 16px;
-    gap: 12px;
-  }
-
-  .current-model-card {
-    padding: 12px;
-    margin-bottom: 12px;
-  }
-
-  .stats-card {
-    padding: 12px;
-  }
-
-  .stats-value {
-    font-size: 24px;
-  }
-}
-
-/* CSS Tooltip - instant display */
-.has-tooltip {
-  position: relative;
-}
-
-.has-tooltip::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.3;
-  white-space: nowrap;
-  color: var(--ac-text-inverse, #ffffff);
-  background-color: var(--ac-text, #1a1a1a);
-  border-radius: var(--ac-radius-button, 8px);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 80ms ease,
-    visibility 80ms ease;
-  pointer-events: none;
-  z-index: 100;
-}
-
-.has-tooltip::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%);
-  border: 4px solid transparent;
-  border-top-color: var(--ac-text, #1a1a1a);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 80ms ease,
-    visibility 80ms ease;
-  pointer-events: none;
-  z-index: 100;
-}
-
-.has-tooltip:hover::after,
-.has-tooltip:hover::before {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* 首页视图 */
-.home-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-/* 管理入口卡片样式 */
-.entry-card {
-  background: var(--ac-surface, white);
-  border-radius: var(--ac-radius-card, 12px);
-  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
-  overflow: hidden;
-}
-
-.entry-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--ac-border, #e7e5e4);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-  text-align: left;
-}
-
-.entry-item:last-child {
-  border-bottom: none;
-}
-
-.entry-item:hover {
-  background: var(--ac-hover-bg, #f5f5f4);
-}
-
-.entry-icon {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--ac-radius-button, 8px);
-  flex-shrink: 0;
-}
-
-.entry-icon.agent {
-  background: rgba(217, 119, 87, 0.12);
-  color: var(--ac-accent, #d97757);
-}
-
-.entry-icon.workflow {
-  background: rgba(37, 99, 235, 0.12);
-  color: #2563eb;
-}
-
-.entry-icon.marker {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-}
-
-.entry-icon.model {
-  background: rgba(139, 92, 246, 0.12);
-  color: #8b5cf6;
-}
-
-.entry-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.entry-title {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ac-text, #1a1a1a);
-  line-height: 1.3;
-}
-
-.entry-desc {
-  display: block;
-  font-size: 12px;
-  color: var(--ac-text-subtle, #a8a29e);
-  line-height: 1.3;
-  margin-top: 2px;
-}
-
-.entry-arrow {
-  color: var(--ac-text-subtle, #a8a29e);
-  flex-shrink: 0;
-}
-
-.toast-icon {
+/*
+ * 아이콘 컴포넌트는 viewBox 만 갖고 있어 크기를 여기서 정한다.
+ * 버튼 안 20, 행 안 16 (가독성 규칙의 아이콘 크기).
+ */
+.ac-button svg {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  color: var(--ac-accent, #d97757);
 }
 
-/* Toast transition */
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.25s ease;
-}
-
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(12px);
+.ac-icon-button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 </style>

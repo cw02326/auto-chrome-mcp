@@ -162,6 +162,47 @@ export function formatRunTime(at: number | null | undefined, now: number = Date.
   return startOfDay(at) === startOfDay(now) ? formatClock(at) : formatDateTime(at);
 }
 
+/**
+ * 흐름 카드의 "마지막 실행" 시각. 오늘·어제는 그렇게 말하고, 그보다 멀면 날짜까지 적는다.
+ *
+ * `formatRunTime` 과 값이 다르다 - 저건 오늘이 아니면 바로 날짜로 건너뛴다. 카드는 어제를
+ * "어제" 로 짚어 줘야 초보자가 "언제 돈 건지" 를 계산하지 않는다(2026-09-06 사용자 피드백).
+ */
+export function formatCardRunClock(
+  at: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) return '';
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(at)) / 86400000);
+  if (dayDiff === 0) return t('sidepanel_card_day_today', [formatClock(at)]);
+  if (dayDiff === 1) return t('sidepanel_card_day_yesterday', [formatClock(at)]);
+  return formatDateTime(at);
+}
+
+/** 흐름 카드의 "마지막 실행" 결과. `lastRunOutcome`/`lastRunAt` (utils/flow-outcomes.ts) 이 재료다. */
+export type CardRunOutcome = 'success' | 'failure';
+
+/**
+ * "마지막 실행" 줄 전체. 실행 기록이 없으면 안내 문구, 있으면 "성공 · 오늘 00:12" 형태.
+ *
+ * 성공·실패는 색으로만 구분하지 않는다 - 글자에 "성공"/"실패" 가 그대로 들어간다.
+ */
+export function formatCardLastRunLine(
+  outcome: CardRunOutcome | null | undefined,
+  at: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (!outcome || typeof at !== 'number' || !Number.isFinite(at) || at <= 0) {
+    return t('sidepanel_card_last_run_none');
+  }
+  const clock = formatCardRunClock(at, now, t);
+  const key =
+    outcome === 'success' ? 'sidepanel_card_last_run_success' : 'sidepanel_card_last_run_failed';
+  return t(key, [clock]);
+}
+
 /** 상태 문구. 모르는 값은 그대로 보여준다(감추면 원인을 못 찾는다). */
 export function formatRunStatus(status: string | undefined, t: Translate = getMessage): string {
   if (!status) return '';
@@ -169,21 +210,43 @@ export function formatRunStatus(status: string | undefined, t: Translate = getMe
   return key ? t(key) : status;
 }
 
-/** 상태별 색. 성공은 초록, 진행 중은 파랑, 로그인 필요·건너뜀은 주의색, 나머지는 빨강. */
+/**
+ * 상태별 색. 성공은 초록, 진행 중은 파랑, 로그인 필요·건너뜀은 주의색, 나머지는 빨강.
+ *
+ * 토큰 이름만 돌려준다 - 하드코드 폴백(`var(--x, #hex)`)을 쓰면 토큰이 없어져도(오타 포함)
+ * 화면이 조용히 옛 색으로 버텨서 문제를 못 알아챈다. 토큰은 `ui/theme.css` 에 있다.
+ */
 export function runStatusColor(status: string | undefined): string {
   switch (status) {
     case 'success':
-      return 'var(--ac-success, #16a34a)';
+      return 'var(--ac-success)';
     case 'running':
-      return 'var(--ac-primary, #3b82f6)';
+      return 'var(--ac-accent)';
     case 'login_required':
     case 'skipped_queue':
     case 'user_took_over_tab':
     case 'stopped':
-      return 'var(--ac-warning, #b45309)';
+      return 'var(--ac-warning)';
     default:
-      return 'var(--ac-danger, #ef4444)';
+      return 'var(--ac-danger)';
   }
+}
+
+/**
+ * 예약 한 줄의 켜짐 상태 문구. 꺼져 있으면 "꺼짐", 켜져 있으면 다음 실행 시각.
+ *
+ * 화면(DailyView.vue)의 v-if/v-else 두 갈래를 여기 한 함수로 모아 테스트로 고정한다
+ * (2026-09-06 실기기 확인: 펼친 줄에서 이 분기가 뒤집혀 enabled:true 인데도 "꺼짐" 이
+ * 나온 적이 있었다).
+ */
+export function formatScheduleEnabledLine(
+  enabled: boolean,
+  nextAt: number | null | undefined,
+  now: number = Date.now(),
+  t: Translate = getMessage,
+): string {
+  if (!enabled) return t('sidepanel_daily_paused');
+  return t('sidepanel_daily_next_run', [formatNextRun(nextAt, now, t)]);
 }
 
 /** 걸린 시간. 초 단위로 한 자리까지. */

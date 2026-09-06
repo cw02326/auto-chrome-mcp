@@ -1,25 +1,25 @@
 /**
  * Action Type System for Record & Replay
- * 商业级录制回放的核心类型定义
+ * 녹화·재생의 핵심 타입 정의
  *
- * 设计原则：
- * - 类型安全，无 any
- * - 支持所有操作类型
- * - 支持重试、超时、错误处理策略
- * - 支持选择器候选列表和稳定性评分
- * - 支持变量系统
- * - 符合 SOLID 原则（接口可通过声明合并扩展）
+ * 설계 원칙:
+ * - 타입 안전, any 없음
+ * - 모든 동작 타입 지원
+ * - 재시도·시간 제한·오류 처리 정책 지원
+ * - 선택자 후보 목록과 안정성 점수 지원
+ * - 변수 시스템 지원
+ * - SOLID 원칙(인터페이스는 선언 병합으로 확장)
  */
 
 // ================================
-// 基础类型
+// 기본 타입
 // ================================
 
 export type Milliseconds = number;
 export type ISODateTimeString = string;
 export type NonEmptyArray<T> = [T, ...T[]];
 
-// JSON 类型
+// JSON 타입
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
 export interface JsonObject {
@@ -27,7 +27,7 @@ export interface JsonObject {
 }
 export type JsonArray = JsonValue[];
 
-// ID 类型
+// ID 타입
 export type FlowId = string;
 export type ActionId = string;
 export type SubflowId = string;
@@ -48,7 +48,7 @@ export const EDGE_LABELS = {
 export type EdgeLabel = string;
 
 // ================================
-// 错误处理
+// 오류 처리
 // ================================
 
 export type ActionErrorCode =
@@ -72,29 +72,29 @@ export interface ActionError {
 }
 
 // ================================
-// 执行策略
+// 실행 정책
 // ================================
 
 export interface TimeoutPolicy {
   ms: Milliseconds;
-  /** 'attempt' = 每次尝试独立计时, 'action' = 整个 action 总计时 */
+  /** 'attempt' = 시도마다 따로 잰다, 'action' = action 전체를 한 번에 잰다 */
   scope?: 'attempt' | 'action';
 }
 
 export type BackoffKind = 'none' | 'exp' | 'linear';
 
 export interface RetryPolicy {
-  /** 重试次数（不含首次尝试） */
+  /** 재시도 횟수(첫 시도는 빼고) */
   retries: number;
-  /** 重试间隔 */
+  /** 재시도 간격 */
   intervalMs: Milliseconds;
-  /** 退避策略 */
+  /** 백오프 정책 */
   backoff?: BackoffKind;
-  /** 最大间隔（用于 exp/linear） */
+  /** 최대 간격(exp/linear 에 쓴다) */
   maxIntervalMs?: Milliseconds;
-  /** 抖动策略 */
+  /** 지터 정책 */
   jitter?: 'none' | 'full';
-  /** 仅在这些错误码时重试 */
+  /** 이 오류 코드일 때만 재시도 */
   retryOn?: ReadonlyArray<ActionErrorCode>;
 }
 
@@ -118,7 +118,7 @@ export interface ActionPolicy {
 }
 
 // ================================
-// 变量系统
+// 변수 시스템
 // ================================
 
 export interface VariableDefinitionBase {
@@ -183,7 +183,7 @@ export interface VariablePointer {
 }
 
 // ================================
-// 表达式和模板
+// 식과 템플릿
 // ================================
 
 export type ExpressionLanguage = 'js' | 'rr';
@@ -226,7 +226,7 @@ export type DataPath = string; // dot/bracket path: e.g. "data.items[0].id"
 export type Assignments = Record<VariableName, DataPath>;
 
 // ================================
-// 条件表达式
+// 조건식
 // ================================
 
 export type CompareOp =
@@ -260,13 +260,13 @@ export type Condition =
   | { kind: 'or'; conditions: NonEmptyArray<Condition> };
 
 // ================================
-// 选择器系统
+// 선택자 시스템
 // ================================
 
 export type SelectorCandidateSource = 'recorded' | 'user' | 'generated';
 
 export interface SelectorStability {
-  /** 稳定性评分 0-1 */
+  /** 안정성 점수 0-1 */
   score: number;
   signals?: {
     usesId?: boolean;
@@ -320,7 +320,7 @@ export interface ElementTargetBase {
 
 export type ElementTarget =
   | (ElementTargetBase & {
-      /** 临时引用（快速路径） */
+      /** 임시 참조(빠른 경로) */
       ref: string;
       candidates?: ReadonlyArray<SelectorCandidate>;
     })
@@ -330,12 +330,12 @@ export type ElementTarget =
     });
 
 // ================================
-// Action 参数定义
+// Action 파라미터 정의
 // ================================
 
 export type BrowserWorld = 'MAIN' | 'ISOLATED';
 
-// --- 页面交互 ---
+// --- 페이지 조작 ---
 
 export interface ClickParams {
   target: ElementTarget;
@@ -382,14 +382,14 @@ export interface DragParams {
   path?: ReadonlyArray<Point>;
 }
 
-// --- 导航 ---
+// --- 이동 ---
 
 export interface NavigateParams {
   url: Resolvable<string>;
   refresh?: boolean;
 }
 
-// --- 等待和断言 ---
+// --- 대기와 단언 ---
 
 export type WaitCondition =
   | { kind: 'sleep'; sleep: Resolvable<Milliseconds> }
@@ -421,7 +421,7 @@ export interface AssertParams {
   failStrategy?: AssertFailStrategy;
 }
 
-// --- 数据和脚本 ---
+// --- 데이터와 스크립트 ---
 
 export type ExtractParams =
   | {
@@ -480,7 +480,7 @@ export interface HttpParams {
   assign?: Assignments;
 }
 
-// --- DOM 工具 ---
+// --- DOM 도구 ---
 
 export interface TriggerEventParams {
   target: ElementTarget;
@@ -507,7 +507,7 @@ export interface LoopElementsParams {
   subflowId: SubflowId;
 }
 
-// --- 标签页管理 ---
+// --- 탭 관리 ---
 
 export interface OpenTabParams {
   url?: Resolvable<string>;
@@ -536,7 +536,7 @@ export interface HandleDownloadParams {
   saveAs?: VariableName;
 }
 
-// --- 控制流 ---
+// --- 제어 흐름 ---
 
 export interface ExecuteFlowParams {
   flowId: FlowId;
@@ -580,7 +580,7 @@ export interface DelayParams {
   sleep: Resolvable<Milliseconds>;
 }
 
-// --- 触发器 ---
+// --- 트리거 ---
 
 export type TriggerUrlRuleKind = 'url' | 'domain' | 'path';
 
@@ -596,15 +596,9 @@ export interface TriggerUrlConfig {
 export interface TriggerModeConfig {
   manual?: boolean;
   url?: boolean;
-  contextMenu?: boolean;
   command?: boolean;
   dom?: boolean;
   schedule?: boolean;
-}
-
-export interface TriggerContextMenuConfig {
-  title?: Resolvable<string>;
-  enabled?: boolean;
 }
 
 export interface TriggerCommandConfig {
@@ -634,26 +628,25 @@ export interface TriggerParams {
   description?: Resolvable<string>;
   modes?: TriggerModeConfig;
   url?: TriggerUrlConfig;
-  contextMenu?: TriggerContextMenuConfig;
   command?: TriggerCommandConfig;
   dom?: TriggerDomConfig;
   schedules?: ReadonlyArray<TriggerSchedule>;
 }
 
 // ================================
-// Action 核心定义
+// Action 핵심 정의
 // ================================
 
 /**
- * ActionParamsByType 使用 interface 声明
- * 允许外部模块通过声明合并扩展 Action 类型（符合 OCP 原则）
+ * ActionParamsByType 은 interface 로 선언한다
+ * 외부 모듈이 선언 병합으로 Action 타입을 넓힐 수 있다(OCP 원칙)
  */
 export interface ActionParamsByType {
-  // UI/构建时
+  // UI/빌드 시점
   trigger: TriggerParams;
   delay: DelayParams;
 
-  // 页面交互
+  // 페이지 조작
   click: ClickParams;
   dblclick: ClickParams;
   fill: FillParams;
@@ -661,31 +654,31 @@ export interface ActionParamsByType {
   scroll: ScrollParams;
   drag: DragParams;
 
-  // 同步和验证
+  // 동기화와 검증
   wait: WaitParams;
   assert: AssertParams;
 
-  // 数据和脚本
+  // 데이터와 스크립트
   extract: ExtractParams;
   script: ScriptParams;
   http: HttpParams;
   screenshot: ScreenshotParams;
 
-  // DOM 工具
+  // DOM 도구
   triggerEvent: TriggerEventParams;
   setAttribute: SetAttributeParams;
 
-  // 帧和循环
+  // 프레임과 반복
   switchFrame: SwitchFrameParams;
   loopElements: LoopElementsParams;
 
-  // 控制流
+  // 제어 흐름
   if: IfParams;
   foreach: ForeachParams;
   while: WhileParams;
   executeFlow: ExecuteFlowParams;
 
-  // 标签页
+  // 탭
   navigate: NavigateParams;
   openTab: OpenTabParams;
   switchTab: SwitchTabParams;
@@ -715,7 +708,7 @@ export type ExecutableActionType = Exclude<ActionType, 'trigger'>;
 export type ExecutableAction<T extends ExecutableActionType = ExecutableActionType> = Action<T>;
 
 // ================================
-// Action 输出
+// Action 출력
 // ================================
 
 export interface HttpResponse {
@@ -736,7 +729,7 @@ export interface DownloadInfo {
 }
 
 /**
- * Action 输出类型映射（可通过声明合并扩展）
+ * Action 출력 타입 매핑(선언 병합으로 확장 가능)
  */
 export interface ActionOutputsByType {
   screenshot: { base64Data: string };
@@ -752,7 +745,7 @@ export type ActionOutput<T extends ActionType> = T extends keyof ActionOutputsBy
   : undefined;
 
 // ================================
-// 执行接口
+// 실행 인터페이스
 // ================================
 
 export type ValidationResult = { ok: true } | { ok: false; errors: NonEmptyArray<string> };
@@ -822,9 +815,9 @@ export interface ActionExecutionContext {
    * every tool call a handler makes so long waits stop with the run.
    */
   deadlineAt?: number;
-  /** 日志记录函数 */
+  /** 로그 기록 함수 */
   log: (message: string, level?: 'info' | 'warn' | 'error') => void;
-  /** 截图函数 */
+  /** 스크린샷 함수 */
   captureScreenshot?: () => Promise<string>;
   /**
    * Optional structured log sink for replay UIs (legacy RunLogger integration).
@@ -857,11 +850,11 @@ export interface ActionExecutionResult<T extends ActionType = ActionType> {
   status: 'success' | 'failed' | 'skipped' | 'paused';
   output?: ActionOutput<T>;
   error?: ActionError;
-  /** 下一个边的 label（用于条件分支） */
+  /** 다음 간선의 label(조건 분기에 쓴다) */
   nextLabel?: EdgeLabel;
-  /** 控制流指令（foreach/while） */
+  /** 제어 흐름 지시(foreach/while) */
   control?: ControlDirective;
-  /** 执行耗时 */
+  /** 실행에 걸린 시간 */
   durationMs?: Milliseconds;
   /**
    * New tab ID after tab operations (openTab/switchTab).
@@ -871,20 +864,20 @@ export interface ActionExecutionResult<T extends ActionType = ActionType> {
 }
 
 /**
- * Action 执行器接口
+ * Action 실행기 인터페이스
  */
 export interface ActionHandler<T extends ExecutableActionType = ExecutableActionType> {
   type: T;
-  /** 验证 action 配置 */
+  /** action 설정 검증 */
   validate?: (action: Action<T>) => ValidationResult;
-  /** 执行 action */
+  /** action 실행 */
   run: (ctx: ActionExecutionContext, action: Action<T>) => Promise<ActionExecutionResult<T>>;
-  /** 生成 action 描述（用于 UI 显示） */
+  /** action 설명 생성(UI 표시용) */
   describe?: (action: Action<T>) => string;
 }
 
 // ================================
-// Flow 图结构
+// Flow 그래프 구조
 // ================================
 
 export interface ActionEdge {
@@ -917,11 +910,11 @@ export interface Flow {
   meta: FlowMeta;
   variables?: ReadonlyArray<VariableDefinition>;
 
-  /** DAG 节点 */
+  /** DAG 노드 */
   nodes: ReadonlyArray<AnyAction>;
-  /** DAG 边 */
+  /** DAG 간선 */
   edges: ReadonlyArray<ActionEdge>;
-  /** 子流程（用于 foreach/while/loopElements） */
+  /** 하위 흐름(foreach/while/loopElements 에 쓴다) */
   subflows?: Record<
     SubflowId,
     { nodes: ReadonlyArray<AnyAction>; edges: ReadonlyArray<ActionEdge> }

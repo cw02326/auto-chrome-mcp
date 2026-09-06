@@ -9,7 +9,7 @@ import { resolveRunTab, runToolArgs } from '../engine/tab-context';
 export const fillNode: NodeRuntime<StepFill> = {
   validate: (step) => {
     const ok = !!(step as any).target?.candidates?.length && 'value' in (step as any);
-    return ok ? { ok } : { ok, errors: ['缺少目标选择器候选或输入值'] };
+    return ok ? { ok } : { ok, errors: ['대상 선택자 후보 또는 입력값이 없습니다'] };
   },
   run: async (ctx: ExecCtx, step: StepFill) => {
     const s: any = step;
