@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] 토스증권 스타일 UI·우클릭 메뉴 한국어·사용설명서 (2026-09-06, PR #4 + 03c4028)
+
+스키마 변경이 없어 브리지 재발행 없이 확장 리로드만으로 적용된다.
+
+### Added
+
+- **초보자용 그림 사용설명서** `docs/manual/`(HTML + 캡처 15장 + PDF 17쪽). 화면 위 번호와 옆 설명이 짝을 이룬다.
+- **확장 아이콘 우클릭 메뉴(한국어)**: 사이드패널 열기, 매일 작업, 이 탭에서 녹화 시작/중지, 요소 마킹, 웹 에디터 켜기/끄기,
+  빠른 패널, 유저스크립트 관리, 강제 재연결. 페이지 우클릭은 "Auto Chrome MCP" 부모 하나 아래 3개. 메뉴는
+  `background/context-menus(-spec).ts` 한 모듈이 소유하고 기동 시 전부 지운 뒤 다시 만든다(옛 V3 잔여 메뉴 정리).
+  설계 `docs/plans/2026-09-06-context-menu-design.md`.
+- 사이드패널 흐름 카드에 라벨+값 목록(상태·사이트·마지막 실행·다음 예약·설명)과 글자 있는 버튼(실행·예약·편집).
+- 팝업에 "로컬 모델 관리" 진입 버튼 복구.
+
+### Changed
+
+- **사이드패널·팝업·옵션 페이지를 tossinvest.com 실측 토큰으로 통일.** `ui/theme.css` 하나를 세 페이지가 공유
+  (`#f6f7f9` 바탕, 흰 무테 카드 radius 16, `#3182f6` 강조, 본문 `rgba(26,31,41,0.89)`, 8px 간격), Pretendard Variable
+  번들(OFL), 옛 테마 6종 삭제. 설계와 실측 표는 `docs/plans/2026-09-06-sidepanel-toss-style-design.md`.
+- 가독성·접근성: 12px 미만 글자 0, 캡션·경고 대비 토큰(4.5:1 이상), 터치 영역 32px 이상, 상단 탭 바 ARIA·방향키,
+  대화상자 focus trap·Escape·포커스 복귀(`ui/useDialogA11y.ts`), 모든 컨트롤 `:focus-visible`, 필터 줄 한 줄 고정,
+  녹화 안내 두 줄. 팝업 스타일 1163줄 → 약 200줄, 카드 5장, Claude Code 등록 prompt 기본 접힘, 토글 한 줄 하나.
+- 배경 코드의 중국어 리터럴 1006자 → 0. record-replay 의 contextMenu 트리거 경로 삭제.
+
+### Fixed
+
+- 매일 작업 펼침 줄이 켜진 예약을 "꺼짐"으로 표시하던 문제. 실행 중 상태 색이 존재하지 않는 토큰을 참조하던 문제.
+- `chrome_screenshot` 이 `savePng`(기본 true)와 `saveToDownloads` 를 함께 받으면 파일을 두 번 저장하던 문제.
+
 ## [v1.13.0] 사이드패널 녹화·발행·매일 작업 한 화면, 흐름 예약 통일, 죽은 코드 정리 (2026-09-06)
 
 확장과 브리지를 함께 1.13.0 으로 올린다. `chrome_shortcut` 의 `flowId` 파라미터는 브리지 갱신 뒤
