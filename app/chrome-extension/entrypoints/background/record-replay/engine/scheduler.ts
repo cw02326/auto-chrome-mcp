@@ -31,6 +31,7 @@ import {
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
 import { RunTabError, resolveRunTab, runToolArgs, type RunTabContext } from './tab-context';
+import { assertFlowRunnable } from './flow-compat';
 import { RunAbortedError } from '@/utils/tool-watchdog';
 
 export interface RunOptions {
@@ -1093,6 +1094,10 @@ export async function runFlow(
   tab: RunTabContext,
   options: RunOptions = {},
 ): Promise<RunResult> {
+  // 구버전 실행 차단의 마지막 관문 (PR B0, 설계 2.8). 진입점마다 먼저 확인해 부작용 없이
+  // 거절하지만, 새 진입점이 그 확인을 빠뜨려도 여기서는 반드시 막힌다. 실행기가 모르는
+  // 기능을 쓰는 흐름은 한 단계도 실행되지 않는다.
+  assertFlowRunnable(flow);
   const orchestrator = new ExecutionOrchestrator(flow, tab, options);
   return await orchestrator.run();
 }

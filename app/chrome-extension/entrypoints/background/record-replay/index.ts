@@ -20,6 +20,9 @@ import { importFlowsFromJson, previewImportFlows } from './flow-store';
 import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
+// 구버전 실행 차단 게이트 (PR B0, 설계 2.8). 사이드패널 Run 과 자동 트리거가 부작용 없이
+// 거절하도록, 탭을 고르기 전에 이 판정을 지난다.
+import { checkFlowRunnable } from './engine/flow-compat';
 import { queryEntryPointTab, runTabFromId, type RunTabContext } from './engine/tab-context';
 import { RecorderManager } from './recording/recorder-manager';
 import { recordingSession } from './recording/session-manager';
@@ -126,6 +129,13 @@ async function runFlowFromTrigger(
   trigger: any,
   source: { tabId?: number; windowId?: number; url?: string },
 ): Promise<void> {
+  // 구버전 실행 차단 게이트 (PR B0). 자동 진입점은 탭을 새로 여는 것부터 시작하므로,
+  // 거절은 그 앞에서 끝낸다. 사용자가 보고 있지 않은 실행이라 경고 로그만 남긴다.
+  const compat = checkFlowRunnable(flow);
+  if (!compat.ok) {
+    console.warn('[record-replay] 자동 실행을 건너뜁니다:', compat.error);
+    return;
+  }
   let target: AutoRunTab;
   if (wantsTriggeringTab(flow, trigger) && typeof source.tabId === 'number') {
     target = { tab: runTabFromId(source.tabId, 'explicit', source.windowId, AUTO_RUN_SESSION) };
@@ -289,6 +299,10 @@ export function initRecordReplayListeners() {
           getFlow(message.flowId)
             .then(async (flow) => {
               if (!flow) return sendResponse({ success: false, error: 'flow not found' });
+              // 구버전 실행 차단 게이트 (PR B0). 사이드패널 Run 진입점. 탭을 고르기 전에
+              // 판정해서, 거절이 탭을 건드리지 않게 한다.
+              const compat = checkFlowRunnable(flow);
+              if (!compat.ok) return sendResponse({ success: false, error: compat.error });
               // Entry point: the user pressed Run in the side panel while looking
               // at the page they want automated, so the tab is resolved once here
               // and pinned. The engine never asks again.
@@ -430,6 +444,12 @@ export function initRecordReplayListeners() {
       if (!t || t.enabled === false) return;
       const flow = await getFlow(t.flowId);
       if (!flow) return;
+      // 구버전 실행 차단 게이트 (PR B0). 단축키 진입점.
+      const compat = checkFlowRunnable(flow);
+      if (!compat.ok) {
+        console.warn('[record-replay] 단축키 실행을 건너뜁니다:', compat.error);
+        return;
+      }
       // The shortcut fires on the tab the user is on; pin that one.
       const runTab =
         typeof tab?.id === 'number'

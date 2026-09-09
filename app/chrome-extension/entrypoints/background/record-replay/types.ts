@@ -134,6 +134,21 @@ export interface Flow {
      * 엉뚱한 이름이 채워졌다. 녹화 시작 시점의 제목을 흐름에 함께 남긴다.
      */
     startTitle?: string;
+    /**
+     * 이 흐름을 돌리려면 실행기가 가지고 있어야 하는 기능 이름 목록 (PR B0, 설계 2.8).
+     *
+     * 선택 필드다. 지금까지 저장된 흐름에는 없고, 없으면 언제나 실행 가능하다. 값이 있으면
+     * `engine/flow-compat.ts` 의 `ENGINE_FEATURES` 와 대조해 모르는 기능이 있을 때 실행을
+     * 시작하지 않는다. 구버전 실행기가 `tabRef` 같은 새 필드를 "인자 없음" 으로 오해해
+     * 엉뚱한 탭을 닫는 것을 막는 장치다.
+     */
+    features?: string[];
+    /**
+     * 이 흐름을 실행할 수 있는 최소 확장 버전 (`1.14.0` 꼴). 선택 필드.
+     *
+     * `features` 와 함께 쓴다. 둘 중 하나라도 지금 확장을 넘어서면 실행이 거절된다.
+     */
+    minEngine?: string;
     domain?: string;
     tags?: string[];
     bindings?: Array<{ type: 'domain' | 'path' | 'url'; value: string }>;
