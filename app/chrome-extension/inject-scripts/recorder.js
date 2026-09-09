@@ -244,6 +244,7 @@
   // ================================================================
   // 접힌 상태에서도 "녹화 끝내기" 는 알약 안에 남아 한 번에 누를 수 있어야 한다.
   const RR_HOST_ID = '__rr_rec_overlay';
+  const RR_UI_BUILD = '2026-09-09.2';
   const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
   const DEFAULT_CORNER = 'top-right';
   const CORNER_STORAGE_KEY = 'rr_toolbar_corner';
@@ -297,9 +298,12 @@
     }
     /* 끌어 옮기는 동안에는 가리는 부분을 확인할 수 있게 더 비친다. */
     .rr-panel.rr-dragging { background: rgba(255, 255, 255, 0.72); }
-    .rr-status-row { cursor: grab; }
-    .rr-panel.rr-dragging { transition: none; }
-    .rr-panel.rr-dragging .rr-status-row { cursor: grabbing; }
+    .rr-panel { cursor: grab; }
+    .rr-panel button,
+    .rr-panel input,
+    .rr-panel label { cursor: pointer; }
+    .rr-timeline { cursor: auto; }
+    .rr-panel.rr-dragging { transition: none; cursor: grabbing; }
     .rr-status-row:focus-visible {
       outline: 2px solid #3182f6;
       outline-offset: 2px;
@@ -470,8 +474,19 @@
       try {
         handle.addEventListener('pointerdown', (e) => {
           if (e.button !== undefined && e.button !== 0) return;
+          // 버튼, 체크박스, 단계 목록에서 시작한 것은 끌기가 아니다.
+          // 그 밖의 빈 곳은 어디를 잡아도 막대를 옮길 수 있다.
+          const t = e.target;
+          if (t && typeof t.closest === 'function') {
+            if (t.closest('button, input, label, a, .rr-timeline')) return;
+          }
           const host = this._host;
           if (!host) return;
+          // 막대 어디를 눌러도 방향키가 바로 먹도록 키보드 대상에 초점을 준다.
+          try {
+            const row = this._els.statusRow;
+            if (row && typeof row.focus === 'function') row.focus({ preventScroll: true });
+          } catch {}
           const rect = host.getBoundingClientRect();
           this._dragState = {
             moved: false,
@@ -659,6 +674,8 @@
 
       const host = document.createElement('div');
       host.id = RR_HOST_ID;
+      // 어떤 판이 주입돼 있는지 확인할 수 있게 남긴다(문제 확인용).
+      host.setAttribute('data-rr-ui', RR_UI_BUILD);
       Object.assign(host.style, {
         all: 'initial',
         position: 'fixed',
@@ -705,13 +722,14 @@
       statusRow.appendChild(badgeText);
       statusRow.appendChild(timeText);
       statusRow.appendChild(countText);
+      this._els.statusRow = statusRow;
       this._els.dot = dot;
       this._els.badgeText = badgeText;
       this._els.timeText = timeText;
       this._els.countText = countText;
       statusRow.setAttribute('title', t('recorder_move_hint'));
       statusRow.setAttribute('aria-label', t('recorder_move_hint'));
-      this._bindDrag(statusRow);
+      this._bindDrag(panel);
       this._bindKeyboardMove(statusRow);
       // 버튼에 초점이 있을 때도 방향키로 옮길 수 있게 패널에도 건다(패널 자체는 초점 대상이 아니다).
       this._bindKeyboardMove(panel, { focusable: false });
