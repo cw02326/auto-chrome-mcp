@@ -2786,5 +2786,28 @@
   "recorder_session_untitled": {
     "message": "이름 없는 녹화",
     "description": "녹화 세션 기본 이름"
+  },
+  "recorder_step_navigate": {
+    "message": "이동: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_key": {
+    "message": "키 입력: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_close_tab": {
+    "message": "탭 닫기"
+  },
+  "recorder_move_hint": {
+    "message": "끌어서 옆으로 옮기기. 이 줄을 누른 뒤 방향키를 눌러도 옮길 수 있습니다.",
+    "description": "Toolbar move hint (title/aria-label)"
   }
 }

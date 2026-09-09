@@ -2786,5 +2786,28 @@
   "recorder_session_untitled": {
     "message": "Untitled recording",
     "description": "Default name for a recording session"
+  },
+  "recorder_step_navigate": {
+    "message": "Go to: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_key": {
+    "message": "Key: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_close_tab": {
+    "message": "Close tab"
+  },
+  "recorder_move_hint": {
+    "message": "Drag to move. You can also focus this row and use the arrow keys.",
+    "description": "Toolbar move hint (title/aria-label)"
   }
 }

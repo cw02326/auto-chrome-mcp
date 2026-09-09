@@ -201,6 +201,10 @@
     recorder_step_url_contains: '주소에 포함 $1',
     recorder_step_switch_frame: '페이지 안 작은 화면으로 이동',
     recorder_step_wait: '기다리기: $1',
+    recorder_move_hint: '끌어서 옆으로 옮기기. 이 줄을 누른 뒤 방향키를 눌러도 옮길 수 있습니다.',
+    recorder_step_navigate: '이동: $1',
+    recorder_step_key: '키 입력: $1',
+    recorder_step_close_tab: '탭 닫기',
     recorder_step_generic: '단계',
     recorder_step_target_document: '문서 전체',
     recorder_session_untitled: '이름 없는 녹화',
@@ -277,6 +281,11 @@
     }
     @media (max-width: 480px) {
       .rr-panel { width: calc(100vw - 20px); }
+    }
+    .rr-status-row:focus-visible {
+      outline: 2px solid #3182f6;
+      outline-offset: 2px;
+      border-radius: 6px;
     }
     .rr-panel.rr-collapsed {
       display: inline-flex;
@@ -521,11 +530,12 @@
       } catch {}
     }
 
-    _bindKeyboardMove(el) {
+    _bindKeyboardMove(el, opts = {}) {
       try {
-        el.setAttribute('tabindex', '0');
+        if (opts.focusable !== false) el.setAttribute('tabindex', '0');
         el.addEventListener('keydown', (e) => {
-          if (!e.altKey) return;
+          // 막대에 초점이 있을 때는 방향키만으로 옮긴다. alt 조합도 그대로 받는다.
+          // 초점이 페이지에 있을 때는 아무것도 하지 않는다(브라우저 뒤로 가기 등을 뺏지 않는다).
           const dirMap = {
             ArrowUp: 'top',
             ArrowDown: 'bottom',
@@ -608,8 +618,12 @@
       this._els.badgeText = badgeText;
       this._els.timeText = timeText;
       this._els.countText = countText;
+      statusRow.setAttribute('title', t('recorder_move_hint'));
+      statusRow.setAttribute('aria-label', t('recorder_move_hint'));
       this._bindDrag(statusRow);
       this._bindKeyboardMove(statusRow);
+      // 버튼에 초점이 있을 때도 방향키로 옮길 수 있게 패널에도 건다(패널 자체는 초점 대상이 아니다).
+      this._bindKeyboardMove(panel, { focusable: false });
 
       // 옵션 줄: 체크박스 두 개
       const optionsRow = document.createElement('div');
@@ -927,7 +941,10 @@
           return `${t('recorder_step_switch_frame')}: ${urlPart}`;
         }
         if (type === 'waitFor') return t('recorder_step_wait', [sel || step.until || '']);
-        return `${type}`;
+        if (type === 'navigate') return t('recorder_step_navigate', [step.url || '']);
+        if (type === 'key') return t('recorder_step_key', [step.keys || '']);
+        if (type === 'closeTab') return t('recorder_step_close_tab');
+        return t('recorder_step_generic');
       } catch (_) {
         return t('recorder_step_generic');
       }
