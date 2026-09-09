@@ -2636,5 +2636,155 @@
         "content": "$1"
       }
     }
+  },
+  "recorder_badge_recording": {
+    "message": "녹화 중",
+    "description": "녹화 도구 막대 배지: 녹화 중"
+  },
+  "recorder_badge_paused": {
+    "message": "잠시 멈춤",
+    "description": "녹화 도구 막대 배지: 일시정지 중"
+  },
+  "recorder_badge_steps": {
+    "message": "$COUNT$단계",
+    "description": "녹화 도구 막대: 지금까지 기록된 단계 수",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_opt_hide_values": {
+    "message": "입력한 글자 가리기",
+    "description": "녹화 도구 막대 체크박스: 입력값 숨기기"
+  },
+  "recorder_opt_highlight": {
+    "message": "클릭할 곳 표시",
+    "description": "녹화 도구 막대 체크박스: 마우스가 가리키는 요소 하이라이트"
+  },
+  "recorder_btn_collapse": {
+    "message": "접기",
+    "description": "녹화 도구 막대 버튼: 막대를 알약 모양으로 접기"
+  },
+  "recorder_btn_expand": {
+    "message": "펼치기",
+    "description": "녹화 도구 막대 버튼: 접힌 막대를 펼치기"
+  },
+  "recorder_btn_pause": {
+    "message": "일시정지",
+    "description": "녹화 도구 막대 버튼: 녹화 일시정지"
+  },
+  "recorder_btn_resume": {
+    "message": "이어서 녹화",
+    "description": "녹화 도구 막대 버튼: 일시정지 해제"
+  },
+  "recorder_btn_stop": {
+    "message": "녹화 끝내기",
+    "description": "녹화 도구 막대 버튼: 녹화 종료"
+  },
+  "recorder_timeline_title": {
+    "message": "녹화된 단계",
+    "description": "녹화 도구 막대 타임라인 제목"
+  },
+  "recorder_step_unknown": {
+    "message": "알 수 없는 단계",
+    "description": "타임라인 항목: 형식을 알 수 없는 단계"
+  },
+  "recorder_step_click": {
+    "message": "클릭: $SELECTOR$",
+    "description": "타임라인 항목: 클릭 단계",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_dblclick": {
+    "message": "두 번 클릭: $SELECTOR$",
+    "description": "타임라인 항목: 더블클릭 단계",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_fill": {
+    "message": "입력: $SELECTOR$",
+    "description": "타임라인 항목: 입력 단계(입력값은 표시하지 않음)",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_scroll": {
+    "message": "스크롤($MODE$): y=$Y$, x=$X$",
+    "description": "타임라인 항목: 스크롤 단계",
+    "placeholders": {
+      "mode": {
+        "content": "$1"
+      },
+      "y": {
+        "content": "$2"
+      },
+      "x": {
+        "content": "$3"
+      }
+    }
+  },
+  "recorder_scroll_container": {
+    "message": "목록 안",
+    "description": "스크롤 단계의 대상: 특정 목록·컨테이너 안"
+  },
+  "recorder_scroll_page": {
+    "message": "페이지",
+    "description": "스크롤 단계의 대상: 페이지 전체"
+  },
+  "recorder_step_open_tab": {
+    "message": "새 탭 열기: $URL$",
+    "description": "타임라인 항목: 새 탭 열기 단계",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_switch_tab": {
+    "message": "다른 탭으로 이동",
+    "description": "타임라인 항목: 탭 전환 단계 라벨"
+  },
+  "recorder_step_url_contains": {
+    "message": "주소에 포함 $URL$",
+    "description": "타임라인 항목: 전환 대상 탭·프레임의 주소 조건",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_switch_frame": {
+    "message": "페이지 안 작은 화면으로 이동",
+    "description": "타임라인 항목: iframe 전환 단계 라벨"
+  },
+  "recorder_step_wait": {
+    "message": "기다리기: $TARGET$",
+    "description": "타임라인 항목: 대기 단계",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_generic": {
+    "message": "단계",
+    "description": "타임라인 항목: 형식을 표시할 수 없을 때의 대체 문구"
+  },
+  "recorder_step_target_document": {
+    "message": "문서 전체",
+    "description": "타임라인 항목: 특정 요소가 아니라 문서 전체가 대상일 때"
+  },
+  "recorder_session_untitled": {
+    "message": "이름 없는 녹화",
+    "description": "녹화 세션 기본 이름"
   }
 }

@@ -174,8 +174,208 @@
   };
 
   // ================================================================
+  // 1.5) i18n: chrome.i18n.getMessage 우선, 실패 시 한국어 폴백 사전
+  // ================================================================
+  // 폴백 문자열도 $1, $2 치환을 지원한다(치환 없는 문자열은 그대로 반환).
+  const FALLBACK_KO = {
+    recorder_badge_recording: '녹화 중',
+    recorder_badge_paused: '잠시 멈춤',
+    recorder_badge_steps: '$1단계',
+    recorder_opt_hide_values: '입력한 글자 가리기',
+    recorder_opt_highlight: '클릭할 곳 표시',
+    recorder_btn_collapse: '접기',
+    recorder_btn_expand: '펼치기',
+    recorder_btn_pause: '일시정지',
+    recorder_btn_resume: '이어서 녹화',
+    recorder_btn_stop: '녹화 끝내기',
+    recorder_timeline_title: '녹화된 단계',
+    recorder_step_unknown: '알 수 없는 단계',
+    recorder_step_click: '클릭: $1',
+    recorder_step_dblclick: '두 번 클릭: $1',
+    recorder_step_fill: '입력: $1',
+    recorder_step_scroll: '스크롤($1): y=$2, x=$3',
+    recorder_scroll_container: '목록 안',
+    recorder_scroll_page: '페이지',
+    recorder_step_open_tab: '새 탭 열기: $1',
+    recorder_step_switch_tab: '다른 탭으로 이동',
+    recorder_step_url_contains: '주소에 포함 $1',
+    recorder_step_switch_frame: '페이지 안 작은 화면으로 이동',
+    recorder_step_wait: '기다리기: $1',
+    recorder_step_generic: '단계',
+    recorder_step_target_document: '문서 전체',
+    recorder_session_untitled: '이름 없는 녹화',
+  };
+
+  /**
+   * 문구 조회 헬퍼. chrome.i18n.getMessage 를 우선 쓰고, 실패하거나 빈 문자열이면
+   * 한국어 폴백 사전을 쓴다. chrome 객체 자체가 없는 환경(테스트 등)에서도 예외를
+   * 던지지 않는다.
+   * @param {string} key
+   * @param {Array<string|number>|string|number} [subs] 치환값. $1, $2 순서로 들어간다.
+   * @returns {string}
+   */
+  function t(key, subs) {
+    const substitutions =
+      subs === undefined || subs === null ? undefined : Array.isArray(subs) ? subs : [subs];
+    try {
+      const g = typeof globalThis !== 'undefined' ? globalThis.chrome : undefined;
+      if (g && g.i18n && typeof g.i18n.getMessage === 'function') {
+        const msg = g.i18n.getMessage(key, substitutions);
+        if (typeof msg === 'string' && msg.length > 0) return msg;
+      }
+    } catch {
+      // chrome 이 없거나 getMessage 가 실패해도 폴백으로 내려간다
+    }
+    const fallback = FALLBACK_KO[key];
+    if (typeof fallback !== 'string') return key;
+    if (!substitutions || substitutions.length === 0) return fallback;
+    return fallback.replace(/\$(\d+)/g, (whole, n) => {
+      const idx = parseInt(n, 10) - 1;
+      return idx >= 0 && idx < substitutions.length ? String(substitutions[idx]) : whole;
+    });
+  }
+
+  // ================================================================
   // 2) UI CLASS (injected via constructor)
   // ================================================================
+  // 접힌 상태에서도 "녹화 끝내기" 는 알약 안에 남아 한 번에 누를 수 있어야 한다.
+  const RR_HOST_ID = '__rr_rec_overlay';
+  const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+  const DEFAULT_CORNER = 'top-right';
+  const CORNER_STORAGE_KEY = 'rr_toolbar_corner';
+  const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+  function formatElapsed(ms) {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const mm = Math.floor(totalSec / 60);
+    const ss = totalSec % 60;
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+
+  const TOOLBAR_CSS = `
+    .rr-wrap {
+      all: initial;
+      display: block;
+      font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif;
+      color: #191f28;
+      font-size: 13px;
+      line-height: 1.4;
+      direction: ltr;
+    }
+    .rr-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #ffffff;
+      color: #191f28;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+      padding: 10px 12px;
+      width: 360px;
+      max-width: calc(100vw - 20px);
+      box-sizing: border-box;
+    }
+    @media (max-width: 480px) {
+      .rr-panel { width: calc(100vw - 20px); }
+    }
+    .rr-panel.rr-collapsed {
+      display: inline-flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 6px 12px;
+      width: auto;
+      max-width: calc(100vw - 20px);
+    }
+    .rr-controls { display: flex; flex-direction: column; gap: 8px; order: 1; }
+    .rr-panel.rr-collapsed .rr-controls {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    .rr-timeline { order: 2; }
+    .rr-wrap.rr-anchor-bottom .rr-controls { order: 2; }
+    .rr-wrap.rr-anchor-bottom .rr-timeline { order: 1; }
+    .rr-status-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+    .rr-status-row:active { cursor: grabbing; }
+    .rr-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef3341;
+      flex: none;
+      animation: rr-blink 1s step-start infinite;
+    }
+    .rr-dot.rr-paused { background: #c3c8d1; animation: none; }
+    @media ${REDUCED_MOTION_QUERY} {
+      .rr-dot { animation: none; }
+    }
+    @keyframes rr-blink {
+      50% { opacity: 0.25; }
+    }
+    .rr-badge-text { font-weight: 600; font-size: 13px; white-space: nowrap; }
+    .rr-time-text, .rr-count-text { font-size: 12px; color: #4e5968; white-space: nowrap; }
+    .rr-options-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .rr-opt-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .rr-buttons-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .rr-panel.rr-collapsed .rr-buttons-row { justify-content: flex-start; flex-wrap: nowrap; }
+    .rr-btn {
+      border: none;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .rr-btn-neutral { background: #f6f7f9; color: #191f28; }
+    .rr-btn-neutral:hover { background: #e9ebee; }
+    .rr-btn-primary { background: #3182f6; color: #ffffff; }
+    .rr-btn-primary:hover { background: #2272eb; }
+    .rr-btn-danger { background: #ef3341; color: #ffffff; }
+    .rr-btn-danger:hover { background: #de2b39; }
+    .rr-timeline {
+      background: #ffffff;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .rr-timeline-title { font-size: 12px; color: #4e5968; margin-bottom: 4px; }
+    .rr-timeline-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .rr-timeline-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 4px 0;
+      border-bottom: 1px solid #f2f4f6;
+      font-size: 12px;
+    }
+    .rr-timeline-item:last-child { border-bottom: none; }
+    .rr-timeline-idx { min-width: 18px; text-align: right; color: #8b95a1; flex: none; }
+    .rr-timeline-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rr-hidden { display: none !important; }
+  `;
+
   class UI {
     constructor(recorder) {
       this.recorder = recorder;
@@ -185,74 +385,294 @@
       this._count = 0;
       this._timelineBox = null;
       this._collapsed = false;
+      this._host = null;
+      this._shadow = null;
+      this._observer = null;
+      this._reattachAttempts = 0;
+      this._corner = DEFAULT_CORNER;
+      this._startedAt = 0;
+      this._tickTimer = null;
+      this._dragState = null;
+      this._els = {};
     }
+
+    // 페이지가 host 를 지워도 최대 3회까지 다시 붙인다(1.4).
+    _watchHostRemoval() {
+      try {
+        if (this._observer) this._observer.disconnect();
+        this._observer = new MutationObserver(() => {
+          if (!this._host) return;
+          if (document.documentElement.contains(this._host)) return;
+          if (this._reattachAttempts >= 3) {
+            this._observer && this._observer.disconnect();
+            this._observer = null;
+            return;
+          }
+          this._reattachAttempts += 1;
+          try {
+            document.documentElement.appendChild(this._host);
+          } catch {}
+        });
+        this._observer.observe(document.documentElement, { childList: true });
+      } catch {}
+    }
+
+    _createStyleSheet(root) {
+      // 3단계: CSSStyleSheet -> replaceSync -> adoptedStyleSheets. 하나라도 실패하면 <style> 폴백.
+      try {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(TOOLBAR_CSS);
+        root.adoptedStyleSheets = [sheet];
+        return;
+      } catch {}
+      try {
+        const styleEl = document.createElement('style');
+        styleEl.textContent = TOOLBAR_CSS;
+        root.appendChild(styleEl);
+      } catch {}
+    }
+
+    _applyCornerStyle(corner) {
+      const host = this._host;
+      if (!host) return;
+      const [vert, horiz] = corner.split('-');
+      host.style.top = vert === 'top' ? '10px' : '';
+      host.style.bottom = vert === 'bottom' ? '10px' : '';
+      host.style.left = horiz === 'left' ? '10px' : '';
+      host.style.right = horiz === 'right' ? '10px' : '';
+      if (this._els.wrap) {
+        this._els.wrap.classList.toggle('rr-anchor-bottom', vert === 'bottom');
+      }
+    }
+
+    _setCorner(corner, opts = {}) {
+      if (CORNERS.indexOf(corner) === -1) return;
+      this._corner = corner;
+      this._applyCornerStyle(corner);
+      if (opts.persist !== false) {
+        try {
+          if (globalThis.chrome && globalThis.chrome.storage && globalThis.chrome.storage.local) {
+            globalThis.chrome.storage.local.set({ [CORNER_STORAGE_KEY]: corner });
+          }
+        } catch {}
+      }
+    }
+
+    _loadStoredCorner() {
+      try {
+        const g = globalThis.chrome;
+        if (!g || !g.storage || !g.storage.local || typeof g.storage.local.get !== 'function') {
+          return;
+        }
+        const result = g.storage.local.get(CORNER_STORAGE_KEY, (res) => {
+          try {
+            const stored = res && res[CORNER_STORAGE_KEY];
+            if (typeof stored === 'string' && CORNERS.indexOf(stored) !== -1) {
+              this._setCorner(stored, { persist: false });
+            }
+          } catch {}
+        });
+        // MV3 promise-style storage: get() may also return a Promise
+        if (result && typeof result.then === 'function') {
+          result
+            .then((res) => {
+              const stored = res && res[CORNER_STORAGE_KEY];
+              if (typeof stored === 'string' && CORNERS.indexOf(stored) !== -1) {
+                this._setCorner(stored, { persist: false });
+              }
+            })
+            .catch(() => {});
+        }
+      } catch {}
+    }
+
+    _bindDrag(handle) {
+      try {
+        handle.addEventListener('pointerdown', (e) => {
+          if (e.button !== undefined && e.button !== 0) return;
+          this._dragState = { moved: false };
+          try {
+            handle.setPointerCapture(e.pointerId);
+          } catch {}
+        });
+        handle.addEventListener('pointermove', (e) => {
+          if (!this._dragState) return;
+          this._dragState.moved = true;
+          this._dragState.lastX = e.clientX;
+          this._dragState.lastY = e.clientY;
+        });
+        const finish = (e) => {
+          if (!this._dragState) return;
+          const state = this._dragState;
+          this._dragState = null;
+          if (!state.moved) return;
+          const x = typeof e.clientX === 'number' ? e.clientX : state.lastX;
+          const y = typeof e.clientY === 'number' ? e.clientY : state.lastY;
+          if (typeof x !== 'number' || typeof y !== 'number') return;
+          const cx = window.innerWidth / 2;
+          const cy = window.innerHeight / 2;
+          const corner = `${y < cy ? 'top' : 'bottom'}-${x < cx ? 'left' : 'right'}`;
+          this._setCorner(corner);
+        };
+        handle.addEventListener('pointerup', finish);
+        handle.addEventListener('pointercancel', () => {
+          this._dragState = null;
+        });
+      } catch {}
+    }
+
+    _bindKeyboardMove(el) {
+      try {
+        el.setAttribute('tabindex', '0');
+        el.addEventListener('keydown', (e) => {
+          if (!e.altKey) return;
+          const dirMap = {
+            ArrowUp: 'top',
+            ArrowDown: 'bottom',
+            ArrowLeft: 'left',
+            ArrowRight: 'right',
+          };
+          const part = dirMap[e.key];
+          if (!part) return;
+          e.preventDefault();
+          const [vert, horiz] = this._corner.split('-');
+          const nextVert = part === 'top' || part === 'bottom' ? part : vert;
+          const nextHoriz = part === 'left' || part === 'right' ? part : horiz;
+          this._setCorner(`${nextVert}-${nextHoriz}`);
+        });
+      } catch {}
+    }
+
+    _makeButton(className, initialText) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `rr-btn ${className}`;
+      btn.textContent = initialText;
+      return btn;
+    }
+
     ensure() {
       const rec = this.recorder;
       if (window !== window.top) return;
-      let root = document.getElementById('__rr_rec_overlay');
-      if (root) return;
-      root = document.createElement('div');
-      root.id = '__rr_rec_overlay';
-      Object.assign(root.style, {
+      if (this._host && document.documentElement.contains(this._host)) return;
+
+      const host = document.createElement('div');
+      host.id = RR_HOST_ID;
+      Object.assign(host.style, {
+        all: 'initial',
         position: 'fixed',
-        top: '10px',
-        right: '10px',
-        zIndex: 2147483646,
-        fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial',
+        zIndex: '2147483646',
       });
-      root.innerHTML = `
-        <div id="__rr_rec_panel" style="background: rgba(220,38,38,0.95); color: #fff; padding:8px 10px; border-radius:8px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 16px rgba(0,0,0,0.2);">
-          <span id="__rr_badge" style="font-weight:600;">录制中</span>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
-            <input id="__rr_hide_values" type="checkbox" style="vertical-align:middle;" />隐藏输入值
-          </label>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
-            <input id="__rr_enable_highlight" type="checkbox" style="vertical-align:middle;" />高亮
-          </label>
-          <button id="__rr_toggle_timeline" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:12px;">折叠</button>
-          <button id="__rr_pause" style="background:#fff; color:#111; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">暂停</button>
-          <button id="__rr_stop" style="background:#111; color:#fff; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">停止</button>
-        </div>`;
-      document.documentElement.appendChild(root);
-      // Build timeline container just below the panel
-      const timeline = document.createElement('div');
-      timeline.id = '__rr_rec_timeline';
-      Object.assign(timeline.style, {
-        marginTop: '8px',
-        width: '360px',
-        maxHeight: '220px',
-        overflow: 'auto',
-        background: 'rgba(17,24,39,0.85)',
-        color: '#F9FAFB',
-        border: '1px solid rgba(255,255,255,0.2)',
-        borderRadius: '8px',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-        padding: '8px 10px',
-        fontSize: '12px',
-        lineHeight: '1.4',
-      });
-      const header = document.createElement('div');
-      header.textContent = '已录制步骤';
-      header.style.opacity = '0.8';
-      header.style.marginBottom = '4px';
+      this._host = host;
+      this._reattachAttempts = 0;
+
+      let shadow;
+      try {
+        shadow = host.attachShadow({ mode: 'closed' });
+      } catch {
+        // Shadow DOM 을 못 만드는 극히 드문 환경: host 를 그대로 루트로 쓴다(격리는 포기).
+        shadow = host;
+      }
+      this._shadow = shadow;
+      this._createStyleSheet(shadow);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'rr-wrap';
+      this._els.wrap = wrap;
+
+      const panel = document.createElement('div');
+      panel.className = 'rr-panel';
+      this._els.panel = panel;
+
+      const controls = document.createElement('div');
+      controls.className = 'rr-controls';
+
+      // 상태 줄: 점 + 배지 + 경과 시간 + 단계 수
+      const statusRow = document.createElement('div');
+      statusRow.className = 'rr-status-row';
+      const dot = document.createElement('span');
+      dot.className = 'rr-dot';
+      const badgeText = document.createElement('span');
+      badgeText.className = 'rr-badge-text';
+      const timeText = document.createElement('span');
+      timeText.className = 'rr-time-text';
+      timeText.textContent = '00:00';
+      const countText = document.createElement('span');
+      countText.className = 'rr-count-text';
+      countText.textContent = t('recorder_badge_steps', [0]);
+      statusRow.appendChild(dot);
+      statusRow.appendChild(badgeText);
+      statusRow.appendChild(timeText);
+      statusRow.appendChild(countText);
+      this._els.dot = dot;
+      this._els.badgeText = badgeText;
+      this._els.timeText = timeText;
+      this._els.countText = countText;
+      this._bindDrag(statusRow);
+      this._bindKeyboardMove(statusRow);
+
+      // 옵션 줄: 체크박스 두 개
+      const optionsRow = document.createElement('div');
+      optionsRow.className = 'rr-options-row';
+      const hideLabel = document.createElement('label');
+      hideLabel.className = 'rr-opt-label';
+      const hideChk = document.createElement('input');
+      hideChk.type = 'checkbox';
+      hideChk.id = '__rr_hide_values';
+      const hideText = document.createElement('span');
+      hideText.textContent = t('recorder_opt_hide_values');
+      hideLabel.appendChild(hideChk);
+      hideLabel.appendChild(hideText);
+      const highlightLabel = document.createElement('label');
+      highlightLabel.className = 'rr-opt-label';
+      const highlightChk = document.createElement('input');
+      highlightChk.type = 'checkbox';
+      highlightChk.id = '__rr_enable_highlight';
+      const highlightText = document.createElement('span');
+      highlightText.textContent = t('recorder_opt_highlight');
+      highlightLabel.appendChild(highlightChk);
+      highlightLabel.appendChild(highlightText);
+      optionsRow.appendChild(hideLabel);
+      optionsRow.appendChild(highlightLabel);
+      this._els.optionsRow = optionsRow;
+
+      // 버튼 줄
+      const buttonsRow = document.createElement('div');
+      buttonsRow.className = 'rr-buttons-row';
+      const btnToggle = this._makeButton('rr-btn-neutral', t('recorder_btn_collapse'));
+      const btnPause = this._makeButton('rr-btn-neutral', t('recorder_btn_pause'));
+      const btnStop = this._makeButton('rr-btn-danger', t('recorder_btn_stop'));
+      buttonsRow.appendChild(btnToggle);
+      buttonsRow.appendChild(btnPause);
+      buttonsRow.appendChild(btnStop);
+      this._els.btnToggle = btnToggle;
+      this._els.btnPause = btnPause;
+      this._els.btnStop = btnStop;
+
+      controls.appendChild(statusRow);
+      controls.appendChild(optionsRow);
+      controls.appendChild(buttonsRow);
+
+      // 타임라인
+      const timelineBox = document.createElement('div');
+      timelineBox.className = 'rr-timeline';
+      const timelineTitle = document.createElement('div');
+      timelineTitle.className = 'rr-timeline-title';
+      timelineTitle.textContent = t('recorder_timeline_title');
       const list = document.createElement('ol');
-      list.id = '__rr_rec_timeline_list';
-      list.style.listStyle = 'none';
-      list.style.margin = '0';
-      list.style.padding = '0';
-      list.style.display = 'flex';
-      list.style.flexDirection = 'column';
-      list.style.gap = '4px';
-      timeline.appendChild(header);
-      timeline.appendChild(list);
-      root.appendChild(timeline);
+      list.className = 'rr-timeline-list';
+      timelineBox.appendChild(timelineTitle);
+      timelineBox.appendChild(list);
       this._timeline = list;
-      this._timelineBox = timeline;
-      const btnPause = root.querySelector('#__rr_pause');
-      const btnStop = root.querySelector('#__rr_stop');
-      const hideChk = root.querySelector('#__rr_hide_values');
-      const highlightChk = root.querySelector('#__rr_enable_highlight');
-      const btnToggle = root.querySelector('#__rr_toggle_timeline');
+      this._timelineBox = timelineBox;
+
+      panel.appendChild(controls);
+      panel.appendChild(timelineBox);
+      wrap.appendChild(panel);
+      shadow.appendChild(wrap);
+      document.documentElement.appendChild(host);
+      this._watchHostRemoval();
+
       hideChk.checked = !!rec.hideInputValues;
       hideChk.addEventListener('change', () => (rec.hideInputValues = hideChk.checked));
       highlightChk.checked = !!rec.highlightEnabled;
@@ -260,14 +680,9 @@
         rec.highlightEnabled = !!highlightChk.checked;
         rec._updateHoverListener();
       });
-      if (btnToggle) {
-        btnToggle.addEventListener('click', () => {
-          this._collapsed = !this._collapsed;
-          if (this._timelineBox)
-            this._timelineBox.style.display = this._collapsed ? 'none' : 'block';
-          btnToggle.textContent = this._collapsed ? '展开' : '折叠';
-        });
-      }
+      btnToggle.addEventListener('click', () => {
+        this._setCollapsed(!this._collapsed);
+      });
       btnPause.addEventListener('click', () => {
         if (!rec.isPaused) rec.pause();
         else rec.resume();
@@ -275,6 +690,7 @@
       btnStop.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'rr_stop_recording' });
       });
+
       this._box = document.createElement('div');
       Object.assign(this._box.style, {
         position: 'fixed',
@@ -287,50 +703,113 @@
       document.documentElement.appendChild(this._box);
       if (rec.highlightEnabled)
         document.addEventListener('mousemove', rec._onMouseMove, { capture: true, passive: true });
+
+      this._applyCornerStyle(this._corner);
+      this._loadStoredCorner();
+      this._setCollapsed(false);
+      this._startTicking();
       this.updateStatus();
     }
-    remove() {
-      if (window === window.top) {
-        const root = document.getElementById('__rr_rec_overlay');
-        if (root) root.remove();
-        if (this._box) this._box.remove();
-        this._timeline = null;
-        this._timelineBox = null;
+
+    _setCollapsed(collapsed) {
+      this._collapsed = !!collapsed;
+      const panel = this._els.panel;
+      if (panel) panel.classList.toggle('rr-collapsed', this._collapsed);
+      if (this._els.optionsRow) this._els.optionsRow.classList.toggle('rr-hidden', this._collapsed);
+      if (this._els.btnPause) this._els.btnPause.classList.toggle('rr-hidden', this._collapsed);
+      if (this._timelineBox) this._timelineBox.classList.toggle('rr-hidden', this._collapsed);
+      if (this._els.btnToggle) {
+        this._els.btnToggle.textContent = this._collapsed
+          ? t('recorder_btn_expand')
+          : t('recorder_btn_collapse');
       }
     }
-    updateStatus() {
-      const badge = document.getElementById('__rr_badge');
-      const pauseBtn = document.getElementById('__rr_pause');
-      if (badge) badge.textContent = this.recorder.isPaused ? '已暂停' : '录制中';
-      if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? '继续' : '暂停';
+
+    // 배경이 보내는 startedAt 으로 로컬 1초 타이머를 돌린다(배경은 매초 쏘지 않는다, 1.5).
+    setStartedAt(startedAt) {
+      const ts = typeof startedAt === 'number' && startedAt > 0 ? startedAt : Date.now();
+      if (this._startedAt === ts) return;
+      this._startedAt = ts;
+      this._tick();
+    }
+
+    setStepCount(count) {
+      const n = typeof count === 'number' && count >= 0 ? count : 0;
+      if (this._els.countText) this._els.countText.textContent = t('recorder_badge_steps', [n]);
+    }
+
+    _tick() {
+      if (!this._els.timeText) return;
+      const base = this._startedAt || Date.now();
+      this._els.timeText.textContent = formatElapsed(Date.now() - base);
+    }
+
+    _startTicking() {
+      this._stopTicking();
+      if (!this._startedAt) this._startedAt = Date.now();
+      this._tick();
+      this._tickTimer = setInterval(() => this._tick(), 1000);
+    }
+
+    _stopTicking() {
+      if (this._tickTimer) {
+        clearInterval(this._tickTimer);
+        this._tickTimer = null;
+      }
+    }
+
+    remove() {
+      if (window === window.top) {
+        this._stopTicking();
+        if (this._observer) {
+          this._observer.disconnect();
+          this._observer = null;
+        }
+        if (this._host) this._host.remove();
+        if (this._box) this._box.remove();
+        this._host = null;
+        this._shadow = null;
+        this._timeline = null;
+        this._timelineBox = null;
+        this._els = {};
+        this._startedAt = 0;
+      }
+    }
+
+    // pausedOverride 는 배경 브로드캐스트(status 필드)로 다른 탭의 표시만 맞출 때 쓴다.
+    // 이 탭 자신의 리스너 부착 여부(rec.isPaused)는 건드리지 않는다.
+    updateStatus(pausedOverride) {
+      const paused = typeof pausedOverride === 'boolean' ? pausedOverride : this.recorder.isPaused;
+      if (this._els.badgeText) {
+        this._els.badgeText.textContent = paused
+          ? t('recorder_badge_paused')
+          : t('recorder_badge_recording');
+      }
+      if (this._els.dot) this._els.dot.classList.toggle('rr-paused', paused);
+      if (this._els.btnPause) {
+        this._els.btnPause.textContent = paused
+          ? t('recorder_btn_resume')
+          : t('recorder_btn_pause');
+      }
     }
 
     // Reset the timeline list content
     resetTimeline() {
       this._count = 0;
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
-      if (list) list.innerHTML = '';
+      if (this._timeline) this._timeline.textContent = '';
+      this.setStepCount(0);
     }
 
     // Append a new recorded step into the timeline UI
     appendStep(step) {
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      const list = this._timeline;
       if (!list) return;
       this._count += 1;
-      const item = document.createElement('li');
-      const text = this._formatStepText(step, this._count);
-      item.setAttribute('data-step-id', step.id || '');
-      item.style.display = 'flex';
-      item.style.alignItems = 'flex-start';
-      item.style.gap = '6px';
-      item.innerHTML = `
-        <span style="min-width:20px; text-align:right; opacity:0.8;">${this._count}.</span>
-        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
-      `;
-      list.appendChild(item);
+      this._appendStepWithIndex(step, this._count);
       while (list.children.length > CONFIG.UI_MAX_STEPS) {
         list.removeChild(list.firstChild);
       }
+      this.setStepCount(this._count);
       const container = list.parentElement;
       if (container) container.scrollTop = container.scrollHeight;
     }
@@ -382,7 +861,7 @@
             const item = currentItems[i];
             if (item) {
               // Update the text content for this step
-              const textSpan = item.querySelector('span:last-child');
+              const textSpan = item.querySelector('.rr-timeline-text');
               if (textSpan) {
                 const newText = this._formatStepText(step, windowStart + i + 1);
                 if (textSpan.textContent !== newText) {
@@ -393,6 +872,7 @@
           }
         }
         this._count = total;
+        this.setStepCount(total);
       } catch {}
     }
 
@@ -401,50 +881,55 @@
      * Used by applyTimelineUpdate for proper numbering.
      */
     _appendStepWithIndex(step, displayIndex) {
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      const list = this._timeline;
       if (!list) return;
       const item = document.createElement('li');
-      const text = this._formatStepText(step, displayIndex);
+      item.className = 'rr-timeline-item';
       item.setAttribute('data-step-id', step.id || '');
-      item.style.display = 'flex';
-      item.style.alignItems = 'flex-start';
-      item.style.gap = '6px';
-      item.innerHTML = `
-        <span style="min-width:20px; text-align:right; opacity:0.8;">${displayIndex}.</span>
-        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
-      `;
+      const idxSpan = document.createElement('span');
+      idxSpan.className = 'rr-timeline-idx';
+      idxSpan.textContent = `${displayIndex}.`;
+      const textSpan = document.createElement('span');
+      textSpan.className = 'rr-timeline-text';
+      textSpan.textContent = this._formatStepText(step, displayIndex);
+      item.appendChild(idxSpan);
+      item.appendChild(textSpan);
       list.appendChild(item);
       const container = list.parentElement;
       if (container) container.scrollTop = container.scrollHeight;
     }
 
-    // Create a short, human-readable text for a recorded step
+    // Create a short, human-readable text for a recorded step.
+    // 민감값 규칙(1.3): 입력 단계는 셀렉터까지만 표시하고 값은 표시하지 않는다.
     _formatStepText(step, _idx) {
       try {
-        if (!step || typeof step !== 'object') return '未知步骤';
-        const t = step.type;
+        if (!step || typeof step !== 'object') return t('recorder_step_unknown');
+        const type = step.type;
         const sel = step.target && step.target.selector ? step.target.selector : '';
-        if (t === 'click' || t === 'dblclick') {
-          return `${t === 'dblclick' ? '双击' : '点击'}: ${sel || '(document)'}`;
-        }
-        if (t === 'fill') {
-          const val = step.value;
-          const shown = typeof val === 'string' && val.length > 0 ? val : String(val);
-          return `输入: ${sel} = ${shown}`;
-        }
-        if (t === 'scroll') {
-          const mode = step.mode === 'container' ? '容器' : '页面';
+        const target = sel || t('recorder_step_target_document');
+        if (type === 'click') return t('recorder_step_click', [target]);
+        if (type === 'dblclick') return t('recorder_step_dblclick', [target]);
+        if (type === 'fill') return t('recorder_step_fill', [target]);
+        if (type === 'scroll') {
+          const mode =
+            step.mode === 'container' ? t('recorder_scroll_container') : t('recorder_scroll_page');
           const off = step.offset || {};
-          return `滚动(${mode}): y=${off.y ?? 0}, x=${off.x ?? 0}`;
+          return t('recorder_step_scroll', [mode, off.y ?? 0, off.x ?? 0]);
         }
-        if (t === 'openTab') return `打开标签页: ${step.url || ''}`;
-        if (t === 'switchTab') return `切换标签页: 包含 ${step.urlContains || ''}`;
-        if (t === 'switchFrame')
-          return `切换Frame: 包含 ${step.frame && step.frame.urlContains ? step.frame.urlContains : ''}`;
-        if (t === 'waitFor') return `等待: ${sel || step.until || ''}`;
-        return `${t}`;
+        if (type === 'openTab') return t('recorder_step_open_tab', [step.url || '']);
+        if (type === 'switchTab') {
+          const urlPart = t('recorder_step_url_contains', [step.urlContains || '']);
+          return `${t('recorder_step_switch_tab')}: ${urlPart}`;
+        }
+        if (type === 'switchFrame') {
+          const frameUrl = step.frame && step.frame.urlContains ? step.frame.urlContains : '';
+          const urlPart = t('recorder_step_url_contains', [frameUrl]);
+          return `${t('recorder_step_switch_frame')}: ${urlPart}`;
+        }
+        if (type === 'waitFor') return t('recorder_step_wait', [sel || step.until || '']);
+        return `${type}`;
       } catch (_) {
-        return '步骤';
+        return t('recorder_step_generic');
       }
     }
   }
@@ -878,7 +1363,7 @@
       const nowIso = new Date().toISOString();
       return {
         id: `flow_${Date.now()}`,
-        name: '未命名录制',
+        name: t('recorder_session_untitled'),
         version: 1,
         steps: [],
         variables: [],
@@ -1218,8 +1703,11 @@
           const tt = String(t).toLowerCase();
           if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
         }
-        const overlay = document.getElementById('__rr_rec_overlay');
-        if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
+        const host = this.ui && this.ui._host;
+        if (host) {
+          const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+          if (path.indexOf(host) !== -1) return;
+        }
         const a = el.closest && el.closest('a[href]');
         const href = a && a.getAttribute && a.getAttribute('href');
         const tgt = a && a.getAttribute && a.getAttribute('target');
@@ -1622,13 +2110,13 @@
     _onScroll(e) {
       if (!this.isRecording || this.isPaused) return;
       try {
-        const overlay = document.getElementById('__rr_rec_overlay');
-        if (overlay) {
+        const host = this.ui && this.ui._host;
+        if (host) {
           // Use composedPath for shadow DOM compatibility, fallback to target
           const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
           for (const element of path) {
-            // If the event path contains our overlay, ignore this scroll event
-            if (element === overlay) {
+            // If the event path contains our toolbar host, ignore this scroll event
+            if (element === host) {
               return;
             }
           }
@@ -1927,6 +2415,17 @@
         // Replace entire timeline to avoid divergence across tabs
         const steps = Array.isArray(request.steps) ? request.steps : [];
         rec.ui.applyTimelineUpdate(steps);
+        if (typeof request.startedAt === 'number' && request.startedAt > 0) {
+          rec.ui.setStartedAt(request.startedAt);
+        }
+        if (typeof request.stepCount === 'number') {
+          rec.ui.setStepCount(request.stepCount);
+        } else {
+          rec.ui.setStepCount(steps.length);
+        }
+        if (request.status === 'paused' || request.status === 'recording') {
+          rec.ui.updateStatus(request.status === 'paused');
+        }
         sendResponse({ ok: true });
         return true;
       }
