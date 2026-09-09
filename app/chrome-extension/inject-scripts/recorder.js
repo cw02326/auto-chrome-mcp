@@ -270,7 +270,11 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      background: #ffffff;
+      /* 뒤 내용이 비치되 글자는 묻히지 않게 한다. 배경만 반투명으로 두고
+         뒤쪽을 흐리게 깔아 대비를 지킨다. 글자와 아이콘은 불투명 그대로다. */
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: blur(12px) saturate(1.15);
+      -webkit-backdrop-filter: blur(12px) saturate(1.15);
       color: #191f28;
       border-radius: 8px;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
@@ -282,6 +286,20 @@
     @media (max-width: 480px) {
       .rr-panel { width: calc(100vw - 20px); }
     }
+    /* 흐림 효과를 못 쓰는 환경에서는 거의 불투명하게 두어 가독성을 지킨다. */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .rr-panel { background: rgba(255, 255, 255, 0.97); }
+    }
+    /* 마우스를 올리거나 초점이 들어오면 또렷해진다. */
+    .rr-panel:hover,
+    .rr-panel:focus-within {
+      background: rgba(255, 255, 255, 0.99);
+    }
+    /* 끌어 옮기는 동안에는 가리는 부분을 확인할 수 있게 더 비친다. */
+    .rr-panel.rr-dragging { background: rgba(255, 255, 255, 0.72); }
+    .rr-status-row { cursor: grab; }
+    .rr-panel.rr-dragging { transition: none; }
+    .rr-panel.rr-dragging .rr-status-row { cursor: grabbing; }
     .rr-status-row:focus-visible {
       outline: 2px solid #3182f6;
       outline-offset: 2px;
@@ -365,7 +383,8 @@
     .rr-btn-danger { background: #ef3341; color: #ffffff; }
     .rr-btn-danger:hover { background: #de2b39; }
     .rr-timeline {
-      background: #ffffff;
+      /* 막대 배경을 그대로 비치게 두어 판 전체가 같은 투명도로 보이게 한다. */
+      background: transparent;
       max-height: 220px;
       overflow: auto;
     }
@@ -399,6 +418,7 @@
       this._observer = null;
       this._reattachAttempts = 0;
       this._corner = DEFAULT_CORNER;
+      this._position = null;
       this._startedAt = 0;
       this._tickTimer = null;
       this._dragState = null;
@@ -441,6 +461,94 @@
       } catch {}
     }
 
+    /**
+     * 좌클릭으로 잡아 끌면 막대가 커서를 따라 움직인다. 손을 뗀 자리에 그대로 남고,
+     * 화면 밖으로는 나가지 않게 가장자리에서 멈춘다. 자유 위치는 화면 크기에 대한
+     * 비율로 저장해, 창 크기가 다른 탭에서도 비슷한 자리에 뜬다.
+     */
+    _bindDrag(handle) {
+      try {
+        handle.addEventListener('pointerdown', (e) => {
+          if (e.button !== undefined && e.button !== 0) return;
+          const host = this._host;
+          if (!host) return;
+          const rect = host.getBoundingClientRect();
+          this._dragState = {
+            moved: false,
+            startX: e.clientX,
+            startY: e.clientY,
+            baseLeft: rect.left,
+            baseTop: rect.top,
+          };
+          try {
+            handle.setPointerCapture(e.pointerId);
+          } catch {}
+        });
+        handle.addEventListener('pointermove', (e) => {
+          const state = this._dragState;
+          if (!state) return;
+          const dx = e.clientX - state.startX;
+          const dy = e.clientY - state.startY;
+          // 손떨림으로 클릭이 드래그가 되지 않게 한다.
+          if (!state.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+          if (!state.moved) {
+            state.moved = true;
+            const panel = this._els.panel;
+            if (panel) panel.classList.add('rr-dragging');
+          }
+          e.preventDefault();
+          this._moveTo(state.baseLeft + dx, state.baseTop + dy, { persist: false });
+        });
+        const finish = () => {
+          const state = this._dragState;
+          if (!state) return;
+          this._dragState = null;
+          const panel = this._els.panel;
+          if (panel) panel.classList.remove('rr-dragging');
+          if (!state.moved) return;
+          this._persistPosition();
+        };
+        handle.addEventListener('pointerup', finish);
+        handle.addEventListener('pointercancel', finish);
+      } catch {}
+    }
+
+    /** 화면 안으로 가둔 좌표로 막대를 옮긴다. */
+    _moveTo(left, top, opts = {}) {
+      const host = this._host;
+      if (!host) return;
+      const rect = host.getBoundingClientRect();
+      const margin = 10;
+      const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+      const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+      const x = Math.min(Math.max(left, margin), maxLeft);
+      const y = Math.min(Math.max(top, margin), maxTop);
+      host.style.left = `${Math.round(x)}px`;
+      host.style.top = `${Math.round(y)}px`;
+      host.style.right = '';
+      host.style.bottom = '';
+      this._position = { left: x, top: y };
+      this._corner = null;
+      if (this._els.wrap) {
+        this._els.wrap.classList.toggle('rr-anchor-bottom', y > window.innerHeight / 2);
+      }
+      if (opts.persist !== false) this._persistPosition();
+    }
+
+    _persistPosition() {
+      try {
+        const pos = this._position;
+        if (!pos) return;
+        const g = globalThis.chrome;
+        if (!g || !g.storage || !g.storage.local) return;
+        const w = Math.max(1, window.innerWidth);
+        const h = Math.max(1, window.innerHeight);
+        g.storage.local.set({
+          [CORNER_STORAGE_KEY]: { xRatio: pos.left / w, yRatio: pos.top / h },
+        });
+      } catch {}
+    }
+
     _applyCornerStyle(corner) {
       const host = this._host;
       if (!host) return;
@@ -457,6 +565,7 @@
     _setCorner(corner, opts = {}) {
       if (CORNERS.indexOf(corner) === -1) return;
       this._corner = corner;
+      this._position = null;
       this._applyCornerStyle(corner);
       if (opts.persist !== false) {
         try {
@@ -478,55 +587,37 @@
             const stored = res && res[CORNER_STORAGE_KEY];
             if (typeof stored === 'string' && CORNERS.indexOf(stored) !== -1) {
               this._setCorner(stored, { persist: false });
+              return;
+            }
+            // 끌어서 옮긴 자유 위치는 비율로 저장돼 있다.
+            if (stored && typeof stored === 'object') {
+              const xr = Number(stored.xRatio);
+              const yr = Number(stored.yRatio);
+              if (Number.isFinite(xr) && Number.isFinite(yr)) {
+                this._moveTo(xr * window.innerWidth, yr * window.innerHeight, { persist: false });
+              }
             }
           } catch {}
         });
-        // MV3 promise-style storage: get() may also return a Promise
+        // 프로미스를 돌려주는 구현도 있다.
         if (result && typeof result.then === 'function') {
           result
             .then((res) => {
               const stored = res && res[CORNER_STORAGE_KEY];
               if (typeof stored === 'string' && CORNERS.indexOf(stored) !== -1) {
                 this._setCorner(stored, { persist: false });
+                return;
+              }
+              if (stored && typeof stored === 'object') {
+                const xr = Number(stored.xRatio);
+                const yr = Number(stored.yRatio);
+                if (Number.isFinite(xr) && Number.isFinite(yr)) {
+                  this._moveTo(xr * window.innerWidth, yr * window.innerHeight, { persist: false });
+                }
               }
             })
             .catch(() => {});
         }
-      } catch {}
-    }
-
-    _bindDrag(handle) {
-      try {
-        handle.addEventListener('pointerdown', (e) => {
-          if (e.button !== undefined && e.button !== 0) return;
-          this._dragState = { moved: false };
-          try {
-            handle.setPointerCapture(e.pointerId);
-          } catch {}
-        });
-        handle.addEventListener('pointermove', (e) => {
-          if (!this._dragState) return;
-          this._dragState.moved = true;
-          this._dragState.lastX = e.clientX;
-          this._dragState.lastY = e.clientY;
-        });
-        const finish = (e) => {
-          if (!this._dragState) return;
-          const state = this._dragState;
-          this._dragState = null;
-          if (!state.moved) return;
-          const x = typeof e.clientX === 'number' ? e.clientX : state.lastX;
-          const y = typeof e.clientY === 'number' ? e.clientY : state.lastY;
-          if (typeof x !== 'number' || typeof y !== 'number') return;
-          const cx = window.innerWidth / 2;
-          const cy = window.innerHeight / 2;
-          const corner = `${y < cy ? 'top' : 'bottom'}-${x < cx ? 'left' : 'right'}`;
-          this._setCorner(corner);
-        };
-        handle.addEventListener('pointerup', finish);
-        handle.addEventListener('pointercancel', () => {
-          this._dragState = null;
-        });
       } catch {}
     }
 
@@ -720,6 +811,17 @@
 
       this._applyCornerStyle(this._corner);
       this._loadStoredCorner();
+      if (!this._resizeBound) {
+        this._resizeBound = true;
+        window.addEventListener('resize', () => {
+          try {
+            if (!this._host) return;
+            if (this._position) {
+              this._moveTo(this._position.left, this._position.top, { persist: false });
+            }
+          } catch {}
+        });
+      }
       this._setCollapsed(false);
       this._startTicking();
       this.updateStatus();
