@@ -4,14 +4,20 @@ import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { createManagedWindow } from '@/utils/mcp-window-manager';
+import { RunAbortedError } from '@/utils/tool-watchdog';
 import {
   RunTabError,
-  isRunOwnedTab,
+  bindTabRef,
+  isValidTabRef,
   markRunOwnedTab,
+  releaseTabRef,
   resolveRunTab,
+  resolveSwitchTarget,
+  resolveTabRef,
   runOwnedTabIds,
   runToolArgs,
   setRunTab,
+  verifyTabDocument,
 } from '../engine/tab-context';
 
 /**
@@ -60,7 +66,20 @@ export const openTabNode: NodeRuntime<StepOpenTab> = {
       });
     }
     if (typeof created?.id !== 'number') throw new Error('openTab: could not open a tab');
+    // 탭을 여는 사이에 취소됐으면 방금 만든 탭을 닫고 끝낸다. 끝난 시도가 뒤늦게 소유·번호를
+    // 남기면 다음 단계가 그 탭에서 이어질 수 있다 (검토 D3).
+    if (ctx.signal?.aborted) {
+      try {
+        await chrome.tabs.remove(created.id);
+      } catch {
+        // 이미 닫혔으면 그만이다.
+      }
+      throw new RunAbortedError('run_aborted: 실행이 취소되어 새 탭을 닫았어요.');
+    }
     markRunOwnedTab(ctx, created.id);
+    // 번호 묶기는 소유 등록 뒤에만 한다 (설계 2.1, 불변식 I1). `openTab` 은 생성이
+    // 결정적이라 모호성이 없는 두 묶기 경로 중 하나다.
+    if (s.tabRef !== undefined) bindTabRef(ctx, s.tabRef, created.id);
     setRunTab(ctx, created.id, created.windowId);
     return {} as ExecResult;
   },
@@ -69,20 +88,24 @@ export const openTabNode: NodeRuntime<StepOpenTab> = {
 export const switchTabNode: NodeRuntime<StepSwitchTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const targetTabId: number | undefined =
-      typeof s.tabId === 'number' ? s.tabId : Number(s.tabId) || undefined;
+    // 대상 판정은 두 실행기가 같은 함수를 쓴다 (설계 2.7). 대기는 하지 않는다: 번호는
+    // 원인 단계가 끝날 때 이미 묶여 있어야 한다.
+    const targetTabId = resolveSwitchTarget(ctx, s, (message) =>
+      ctx.logger({ stepId: step.id, status: 'warning', message }),
+    );
 
-    if (!targetTabId) {
-      // url/title 검색은 브라우저 전체를 뒤지는 일이라 격리를 깬다. run 이 만든 탭은
-      // id 를 알고 있으므로 그 id 로 지목한다.
-      throw scopeViolation(
-        'tab_scope_violation',
-        'switchTab needs the id of a tab this run opened; matching by urlContains/titleContains would search the whole browser.',
-        ctx,
-      );
-    }
-    if (!isRunOwnedTab(ctx, targetTabId)) {
-      throw scopeViolation('tab_scope_violation', `switchTab refused tab ${targetTabId}.`, ctx);
+    // 문서 준비 검증 (설계 2.4). 이미 정해진 탭의 상태를 보는 것이지 탭을 고르는 것이
+    // 아니므로 I2 를 어기지 않는다.
+    //
+    // **번호로 지목한 전환에만 건다.** id 로 지목하는 옛 흐름은 `about:blank` 작업 탭으로
+    // 옮겨 가는 경우가 있어, 여기에 준비 검증을 걸면 예전에 되던 흐름이 실패한다 (검토 사소).
+    if (isValidTabRef(s.tabRef)) {
+      await verifyTabDocument(targetTabId, {
+        tabRef: s.tabRef,
+        urlContains: typeof s.urlContains === 'string' ? s.urlContains : undefined,
+        timeoutMs: s.timeoutMs,
+        signal: ctx.signal,
+      });
     }
 
     // 탭이 아직 살아 있는지 확인만 하고, 활성화(포커스 이동)는 하지 않는다.
@@ -97,8 +120,16 @@ export const closeTabNode: NodeRuntime<StepCloseTab> = {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const owned = runOwnedTabIds(ctx);
     let tabIds: number[];
+    /** 닫은 뒤 회수할 논리 번호 (있을 때만). */
+    let closedRef: number | undefined;
 
-    if (Array.isArray(s.tabIds) && s.tabIds.length) {
+    if (s.tabRef !== undefined) {
+      // 번호가 있으면 그 탭만 닫는다. 해석에 실패하면 `tab_ref_unbound` 로 멈추고, 예전의
+      // "인자 없음 = 현재 탭" 폴백은 절대 타지 않는다 (설계 2.4).
+      const target = resolveTabRef(ctx, s.tabRef);
+      tabIds = [target];
+      closedRef = s.tabRef;
+    } else if (Array.isArray(s.tabIds) && s.tabIds.length) {
       tabIds = s.tabIds
         .map((id: unknown) => Number(id))
         .filter((id: number) => Number.isFinite(id));
@@ -141,6 +172,7 @@ export const closeTabNode: NodeRuntime<StepCloseTab> = {
       args: runToolArgs(ctx, { tabIds }),
     });
     if ((res as any).isError) throw new Error('closeTab failed');
+    if (closedRef !== undefined) releaseTabRef(ctx, closedRef, tabIds[0]);
     return {} as ExecResult;
   },
 };

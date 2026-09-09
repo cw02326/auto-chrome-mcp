@@ -5,7 +5,7 @@
  *
  * 왜 있나
  * -------
- * 곧 들어올 여러 탭 흐름은 `closeTab { tabRef: n }` 같은 단계를 남긴다. 이 필드를 모르는
+ * 여러 탭 흐름은 `closeTab { tabRef: n }` 같은 단계를 남긴다. 이 필드를 모르는
  * 구버전 실행기는 `nodes/tabs.ts` 의 `closeTabNode` 에서 "인자가 없다" 로 보고 **현재 run
  * 탭을 닫는다**. 사용자가 보던 탭이 사라지는 사고다.
  *
@@ -16,7 +16,7 @@
  * -----------
  *   1. `flow.meta.features`  흐름이 요구한다고 스스로 밝힌 기능 이름 목록.
  *   2. `flow.meta.minEngine` 이 흐름을 돌릴 수 있는 최소 확장 버전.
- *   3. 표시가 없어도 단계 어딘가에 `tabRef` 나 `opensTab` 이 들어 있으면 여러 탭 기능을
+ *   3. 표시가 없어도 단계 어딘가에 `tabRef` 가 들어 있으면 여러 탭 기능을
  *      요구하는 것으로 본다. 표시를 지운 채 내보낸 흐름이나 손으로 고친 JSON 이 게이트를
  *      우회하지 못하게 하는 장치다.
  *
@@ -28,20 +28,26 @@ import type { Flow } from '../types';
 
 /** 흐름이 요구할 수 있는 기능 이름. 문자열 상수는 저장 형식의 일부이므로 바꾸지 않는다. */
 export const FLOW_FEATURES = {
-  /** 여러 탭 녹화·재생 (`tabRef`, `opensTab`). PR B 에서 실제 지원이 들어온다. */
+  /** 여러 탭 녹화·재생 (`tabRef`). 1.14.0 부터 지원한다. */
   MULTITAB: 'multitab',
 } as const;
 
 export type FlowFeature = (typeof FLOW_FEATURES)[keyof typeof FLOW_FEATURES];
 
+/** 각 기능이 처음 들어온 확장 버전. 흐름이 `minEngine` 을 밝히지 않았을 때 쓴다. */
+export const FEATURE_MIN_ENGINE: Record<string, string> = Object.freeze({
+  [FLOW_FEATURES.MULTITAB]: '1.14.0',
+});
+
 /**
  * **지금 이 실행기가 지원하는 기능 목록.**
  *
- * PR B(여러 탭 본체)가 `tabRef`·`opensTab` 을 실제로 해석하게 되면 여기에
- * `FLOW_FEATURES.MULTITAB` 을 넣는다. 그 전까지는 비어 있어야 하고, 비어 있는 것이 곧
- * "여러 탭 흐름은 실행하지 않는다" 는 뜻이다.
+ * 2026-09-09 PR B(여러 탭 본체)로 `tabRef` 를 실제로 해석하게 되어
+ * `FLOW_FEATURES.MULTITAB` 이 들어왔다. 순서가 중요하다: 구현과 테스트가 모두 끝난 뒤에
+ * 마지막으로 넣는다. 먼저 넣으면 아직 해석하지 못하는 흐름을 실행하게 되고, 반대로 녹화가
+ * 표시를 먼저 남기면 자기 브라우저가 자기 흐름을 거절한다.
  */
-export const ENGINE_FEATURES: readonly string[] = Object.freeze([]);
+export const ENGINE_FEATURES: readonly string[] = Object.freeze([FLOW_FEATURES.MULTITAB]);
 
 /**
  * 매니페스트를 읽지 못할 때 쓰는 엔진 버전(테스트 환경 등).
@@ -127,11 +133,16 @@ export function compareEngineVersions(a: string, b: string): number {
   return 0;
 }
 
-/** 값 하나가 여러 탭 필드를 들고 있는가. */
+/**
+ * 값 하나가 여러 탭 필드를 들고 있는가.
+ *
+ * 지금 저장 형식에서 여러 탭을 쓴다는 표시는 `tabRef` 하나뿐이다. (클릭에 붙이던
+ * `opensTab` 기대는 2026-09-09 축소 결정으로 없앴다. 브라우저가 "이 클릭이 이 탭을
+ * 만들었다" 는 인과를 알려 주지 않아, 무관한 탭을 잡을 위험을 없앨 수 없었다.)
+ */
 function carriesMultitabFields(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return record.tabRef !== undefined || record.opensTab !== undefined;
+  return (value as Record<string, unknown>).tabRef !== undefined;
 }
 
 /**
@@ -150,22 +161,30 @@ export function collectRequiredFeatures(flow: unknown): string[] {
     }
   }
 
-  const nodes = (flow as { nodes?: unknown } | null | undefined)?.nodes;
-  if (Array.isArray(nodes)) {
-    for (const node of nodes) {
-      if (carriesMultitabFields((node as { config?: unknown } | null)?.config)) {
-        required.add(FLOW_FEATURES.MULTITAB);
-        break;
-      }
-    }
+  if (scanNodes((flow as { nodes?: unknown } | null | undefined)?.nodes)) {
+    required.add(FLOW_FEATURES.MULTITAB);
   }
 
   // 옛 steps 배열로 들어온 흐름(가져오기·예전 내보내기)도 같은 눈으로 본다.
   if (!required.has(FLOW_FEATURES.MULTITAB)) {
     const steps = (flow as { steps?: unknown } | null | undefined)?.steps;
-    if (Array.isArray(steps)) {
-      for (const step of steps) {
-        if (carriesMultitabFields(step)) {
+    if (Array.isArray(steps) && steps.some((step) => carriesMultitabFields(step))) {
+      required.add(FLOW_FEATURES.MULTITAB);
+    }
+  }
+
+  // 하위 흐름(foreach·while·loopElements 가 도는 subflows)도 같은 실행기가 돌린다. 여기를
+  // 보지 않으면 표시 없는 subflow 안의 `tabRef` 가 게이트를 그냥 지나간다 (검토 사소).
+  if (!required.has(FLOW_FEATURES.MULTITAB)) {
+    const subflows = (flow as { subflows?: unknown } | null | undefined)?.subflows;
+    if (subflows && typeof subflows === 'object') {
+      for (const sub of Object.values(subflows as Record<string, unknown>)) {
+        const subNodes = (sub as { nodes?: unknown } | null | undefined)?.nodes;
+        const subSteps = (sub as { steps?: unknown } | null | undefined)?.steps;
+        if (
+          scanNodes(subNodes) ||
+          (Array.isArray(subSteps) && subSteps.some((step) => carriesMultitabFields(step)))
+        ) {
           required.add(FLOW_FEATURES.MULTITAB);
           break;
         }
@@ -174,6 +193,12 @@ export function collectRequiredFeatures(flow: unknown): string[] {
   }
 
   return [...required];
+}
+
+/** 노드 배열에 여러 탭 필드가 있는가. */
+function scanNodes(nodes: unknown): boolean {
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some((node) => carriesMultitabFields((node as { config?: unknown } | null)?.config));
 }
 
 /** 흐름이 밝힌 최소 엔진 버전. 없거나 형식이 아니면 undefined. */
@@ -199,7 +224,20 @@ export function checkFlowRunnable(
   const required = collectRequiredFeatures(flow);
   const missing = required.filter((name) => !supported.has(name));
 
-  const minEngine = declaredMinEngine(flow);
+  // 흐름이 최소 버전을 밝히지 않았어도, 그 기능이 처음 들어온 버전은 우리가 안다.
+  // 밝히지 않은 흐름이 옛 실행기에서 그냥 도는 구멍을 막는다 (검토 D5).
+  const impliedMinEngine = required.includes(FLOW_FEATURES.MULTITAB)
+    ? FEATURE_MIN_ENGINE[FLOW_FEATURES.MULTITAB]
+    : undefined;
+  // 선언값과 기능이 요구하는 값 중 **높은 쪽**을 쓴다. 낮은 값을 적어 두면 하한이
+  // 우회되기 때문이다 (검토 E4).
+  const declared = declaredMinEngine(flow);
+  const minEngine =
+    declared && impliedMinEngine
+      ? compareEngineVersions(declared, impliedMinEngine) >= 0
+        ? declared
+        : impliedMinEngine
+      : (declared ?? impliedMinEngine);
   const current = options.engineVersion ?? engineVersion();
   const tooOld = minEngine ? compareEngineVersions(current, minEngine) < 0 : false;
 

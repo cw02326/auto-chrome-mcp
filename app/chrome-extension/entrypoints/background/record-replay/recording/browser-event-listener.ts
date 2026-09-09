@@ -1,7 +1,5 @@
-import { STEP_TYPES } from '@/common/step-types';
 import { ensureRecorderInjected, broadcastControlToTab, REC_CMD } from './content-injection';
 import type { RecordingSessionManager } from './session-manager';
-import type { Step } from '../types';
 
 /**
  * 페이지 이동 녹화 (2026-09-05 사이드패널 1단계 B).
@@ -120,27 +118,182 @@ function recordNavigationEvent(
 }
 
 /**
- * 이 탭을 녹화 세션에 넣어도 되는가.
+ * 녹화·재생이 실제로 다룰 수 있는 주소인가 (설계 2.3).
  *
- * 이미 세션 탭이면 그대로 참이고, 아니면 **세션 탭이 연 탭**(openerTabId)일 때만 참이다.
- * 링크를 새 탭으로 여는 경우가 여기 해당한다. 그 밖의 탭은 사용자가 따로 쓰던 탭이므로
- * 녹화기를 주입하지도, 세션에 넣지도 않는다 (Codex 교차 리뷰 1).
+ * `chrome://`·확장 페이지·웹스토어·`devtools://` 같은 곳은 녹화기를 주입할 수 없고, 재생이
+ * 같은 주소를 새 탭으로 열어도 조작할 수 없다. 단계를 남기면 사용자에게 "왜 여기서 멈추지"
+ * 만 남으므로 아예 세션에 넣지 않는다.
+ *
+ * `file:` 은 포함한다. 확장의 파일 URL 접근 권한이 켜져 있으면 주입도 재생도 되고, 시연용
+ * 로컬 페이지가 이 부류다. 권한이 꺼져 있으면 주입이 실패해 단계가 생기지 않는다.
  */
-async function shouldJoinSession(
-  session: RecordingSessionManager,
-  tabId: number,
-): Promise<boolean> {
-  if (session.hasTab(tabId)) return true;
+export function isRecordableUrl(url: string | undefined | null): boolean {
+  if (typeof url !== 'string' || !url.trim()) return false;
+  const value = url.trim();
+  if (!/^(https?:|file:)/i.test(value)) return false;
+  // 크롬 웹스토어는 http(s) 이지만 확장 스크립트 주입을 브라우저가 막는다. 주입이 안 되는
+  // 곳을 세션에 넣으면 단계만 남고 재생은 아무것도 못 한다 (검토 사소).
+  if (/^https?:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/i.test(value)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 실제로 이 탭을 녹화할 수 있는가.
+ *
+ * `file:` 은 확장에 "파일 URL 접근 허용" 이 켜져 있을 때만 주입된다. 권한을 확인하지 않고
+ * 합류 단계부터 기록하면, 재생할 수 없는 단계만 흐름에 남는다 (검토 사소).
+ */
+export async function isRecordableTabUrl(url: string | undefined | null): Promise<boolean> {
+  if (!isRecordableUrl(url)) return false;
+  if (!/^file:/i.test(String(url).trim())) return true;
   try {
-    const tab = await chrome.tabs.get(tabId);
-    return session.hasTab(tab?.openerTabId);
+    const allowed = await chrome.extension?.isAllowedFileSchemeAccess?.();
+    return allowed !== false;
   } catch {
+    // 확인할 수 없으면 주입 시도까지 가지 않는다.
     return false;
   }
 }
 
 /**
- * 이동한 탭에 녹화기를 붙이고 세션 탭으로 등록한다.
+ * 이 탭에 녹화기를 다시 붙여도 되는가 (`onCommitted` 경로 전용).
+ *
+ * **이미 세션에 있는 탭만** 참이다 (2026-09-09 축소 결정). 예전에는 `openerTabId` 가 세션
+ * 탭이면 그 탭도 세션에 넣었는데, 그러면 사용자가 **보지도 않은** 탭이 흐름에 들어와 그
+ * 탭의 SPA 이동이 `navigate` 단계로 섞였다. 그 단계에는 대상 탭 번호도 선행 전환도 없어
+ * 재생의 현재 탭에서 엉뚱한 이동이 일어난다.
+ *
+ * 이제 세션 합류는 `onActivated` 의 `joinTab` 한 곳에서만 일어난다. 여기는 이미 세션인
+ * 탭이 문서를 새로 띄웠을 때 녹화기를 **다시 주입**하는 일만 한다.
+ */
+function shouldJoinSession(session: RecordingSessionManager, tabId: number): boolean {
+  return session.hasTab(tabId);
+}
+
+/* ------------------------------------------------------------------ *
+ * 단일 기록 큐 (설계 2.3)
+ *
+ * `onActivated` 는 주입·메시지·`tabs.get` 을 await 한 뒤에야 단계를 기록한다. 그 사이에
+ * 다른 이벤트가 끼어들면 주소창으로 연 새 탭에서 `switchTab` 이 `openTab` 보다 앞서는 등
+ * 순서가 뒤집힌다. 그래서 브라우저 이벤트는 **받는 즉시 동기로** 큐에 넣고, 단일 소비자가
+ * 들어온 순서대로 처리한다. await 은 소비자 안에서만 한다.
+ *
+ * 콘텐츠 스크립트가 보내는 단계(`appendSteps`)는 이미 동기 경로라 이 큐를 타지 않는다.
+ * 한 배치 안의 `openTab`+`switchTab` 사이에는 어떤 await 도 없으므로 순서가 깨지지 않는다.
+ * ------------------------------------------------------------------ */
+
+type QueueBody = { kind: 'activated'; tabId: number } | { kind: 'removed'; tabId: number };
+
+/**
+ * 큐 항목은 **어느 녹화 세션의 것인지** 를 달고 다닌다 (검토 C4).
+ *
+ * 항목이 소비되기 전에 녹화가 멈추고 새 세션이 시작될 수 있다. 세션 id 를 확인하지 않으면
+ * 이전 세션에서 밀린 탭 전환이 새 흐름의 첫 단계로 들어간다.
+ */
+type QueueItem = QueueBody & { sessionId: string; seq: number };
+
+export interface RecordQueue {
+  push(body: QueueBody): void;
+  /** 테스트용: 큐가 빌 때까지 기다린다. */
+  settled(): Promise<void>;
+}
+
+function createRecordQueue(session: RecordingSessionManager): RecordQueue {
+  const items: QueueItem[] = [];
+  let running: Promise<void> = Promise.resolve();
+  let draining = false;
+  let seq = 0;
+
+  const drain = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    try {
+      while (items.length) {
+        const item = items.shift() as QueueItem;
+        try {
+          await handleQueueItem(session, item);
+        } catch (e) {
+          console.warn('record queue item failed', item?.kind, e);
+        }
+      }
+    } finally {
+      draining = false;
+    }
+  };
+
+  const queue: RecordQueue = {
+    push(body: QueueBody): void {
+      // 세션 id 와 순번은 **이벤트가 일어난 시점**의 값이다. 소비는 순번대로 하고, 소비
+      // 중간의 await 뒤에도 이 세션 id 로 다시 확인한다 (검토 D1).
+      items.push({ ...body, sessionId: session.getSessionId(), seq: seq++ } as QueueItem);
+      running = running.then(drain, drain);
+    },
+    async settled(): Promise<void> {
+      await running;
+    },
+  };
+  return queue;
+}
+
+/** 큐 항목 하나를 처리한다. 여기에서만 await 한다. */
+async function handleQueueItem(session: RecordingSessionManager, item: QueueItem): Promise<void> {
+  // 만든 세션과 지금 세션이 다르면 버린다 (검토 C4).
+  if (item.sessionId && item.sessionId !== session.getSessionId()) return;
+
+  if (item.kind === 'removed') {
+    session.removeActiveTab(item.tabId);
+    session.forgetTab(item.tabId);
+    return;
+  }
+
+  if (session.getStatus() !== 'recording') return;
+
+  // kind === 'activated'
+  const sessionId = item.sessionId;
+  const tabId = item.tabId;
+
+  let url = '';
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    url = tab?.url || '';
+  } catch {
+    return; // 이미 닫힌 탭
+  }
+  if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
+  if (!(await isRecordableTabUrl(url))) {
+    notifyTabNotRecordable(tabId, url);
+    return;
+  }
+  // 파일 권한 확인을 기다리는 사이에 녹화가 끝났을 수 있다 (검토 D1).
+  if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
+
+  // 단계를 먼저 남기고 주입은 그 뒤에 한다 (설계 2.3 의 순서). 주입은 실패할 수 있고,
+  // 실패해도 사용자가 이 탭으로 옮겼다는 사실 자체는 흐름에 남아야 한다.
+  session.joinTab(tabId, url);
+
+  await ensureRecorderInjected(tabId);
+  if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
+  await broadcastControlToTab(tabId, REC_CMD.START);
+  if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
+  if (session.getFlow()) session.broadcastTimelineUpdate();
+}
+
+/** 녹화할 수 없는 페이지로 옮겨 갔음을 사이드패널에 한 번 알린다 (표시는 M2). */
+const notRecordableNotified = new Set<number>();
+function notifyTabNotRecordable(tabId: number, url: string): void {
+  if (notRecordableNotified.has(tabId)) return;
+  notRecordableNotified.add(tabId);
+  try {
+    chrome.runtime?.sendMessage?.({ action: 'rr_tab_not_recordable', tabId, url });
+  } catch {
+    // 사이드패널이 닫혀 있으면 받을 사람이 없다. 무시한다.
+  }
+}
+
+/**
+ * 이미 세션에 있는 탭에 녹화기를 다시 붙인다.
  *
  * await 이 들어가므로 시작할 때의 세션 id 를 받아 두고, 끝난 뒤 같은 세션인지 다시 본다.
  */
@@ -149,7 +302,7 @@ async function attachRecorderToTab(
   tabId: number,
   sessionId: string,
 ): Promise<void> {
-  if (!(await shouldJoinSession(session, tabId))) return;
+  if (!shouldJoinSession(session, tabId)) return;
   if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
   await ensureRecorderInjected(tabId);
   if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
@@ -159,35 +312,28 @@ async function attachRecorderToTab(
   if (session.getFlow()) session.broadcastTimelineUpdate();
 }
 
-export function initBrowserEventListeners(session: RecordingSessionManager): void {
-  // 탭 전환은 **사용자가 직접 한 조작**이다. 그 탭에서 녹화를 이어 가겠다는 뜻이므로
-  // 여기서는 세션 소속을 따지지 않고 그대로 세션에 넣는다 (기존 동작 유지).
-  chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    try {
-      if (session.getStatus() !== 'recording') return;
-      const sessionId = session.getSessionId();
-      const tabId = activeInfo.tabId;
-      await ensureRecorderInjected(tabId);
-      if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
-      await broadcastControlToTab(tabId, REC_CMD.START);
-      // Track active tab for targeted STOP later
-      session.addActiveTab(tabId);
+export function initBrowserEventListeners(session: RecordingSessionManager): RecordQueue {
+  const queue = createRecordQueue(session);
 
-      const flow = session.getFlow();
-      if (!flow) return;
-      const tab = await chrome.tabs.get(tabId);
-      if (session.getSessionId() !== sessionId || session.getStatus() !== 'recording') return;
-      const url = tab.url;
-      const step: Step = {
-        id: '',
-        type: STEP_TYPES.SWITCH_TAB,
-        ...(url ? { urlContains: url } : {}),
-      };
-      session.appendSteps([step], { tabId });
+  // 탭 전환은 **사용자가 직접 한 조작**이다. 그 탭에서 녹화를 이어 가겠다는 뜻이므로
+  // 여기서는 세션 소속을 따지지 않고 그대로 세션에 넣는다 (사용자 확정 사항, 설계 2.3).
+  // 받는 즉시 큐에 넣기만 하고, 판정과 기록은 단일 소비자가 순서대로 한다.
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    try {
+      if (!activeInfo) return;
+      if (session.getStatus() !== 'recording') return;
+      queue.push({ kind: 'activated', tabId: activeInfo.tabId });
     } catch (e) {
       console.warn('onActivated handler failed', e);
     }
   });
+
+  // 새 탭 생성 이벤트는 보지 않는다 (2026-09-09 축소 결정).
+  //
+  // 브라우저는 "이 클릭이 이 탭을 만들었다" 는 인과를 알려 주지 않는다. `openerTabId` 도
+  // `sourceTabId` 도 "같은 탭에서 열렸다" 까지만 말해 주므로, 사용자가 같은 탭에서 직접
+  // 연 링크나 페이지가 스스로 띄운 광고 탭이 그 자리에 들어올 수 있다. 그래서 새 탭은
+  // **사용자가 그 탭을 활성화해 세션에 합류할 때** 그 시점의 실제 주소로만 기록한다.
 
   chrome.webNavigation.onCommitted.addListener(async (details) => {
     // 기록은 await 앞에서 동기로 끝낸다 (Codex 교차 리뷰 3).
@@ -230,9 +376,11 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
     try {
       // Even if not recording, removing is harmless; keep guard for clarity
       if (session.getStatus() !== 'recording') return;
-      session.removeActiveTab(tabId);
+      queue.push({ kind: 'removed', tabId });
     } catch (e) {
       console.warn('onRemoved handler failed', e);
     }
   });
+
+  return queue;
 }

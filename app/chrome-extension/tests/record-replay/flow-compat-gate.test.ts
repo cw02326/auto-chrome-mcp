@@ -49,7 +49,9 @@ import {
   FLOW_REQUIRES_NEWER_ENGINE,
   FlowCompatError,
   assertFlowRunnable,
+  FEATURE_MIN_ENGINE,
   checkFlowRunnable,
+  collectRequiredFeatures,
   compareEngineVersions,
 } from '@/entrypoints/background/record-replay/engine/flow-compat';
 import { runFlow } from '@/entrypoints/background/record-replay/engine/scheduler';
@@ -111,27 +113,53 @@ describe('checkFlowRunnable 판정', () => {
     expect(checkFlowRunnable({ id: 'x' })).toEqual({ ok: true });
   });
 
-  it('지금 실행기는 multitab 을 지원하지 않는다 (PR B 에서 켠다)', () => {
-    expect([...ENGINE_FEATURES]).not.toContain(FLOW_FEATURES.MULTITAB);
+  // 2026-09-09 PR B: 여러 탭 본체가 들어오면서 실행기가 multitab 을 지원하게 됐다.
+  // 게이트 판정 로직 자체는 그대로이므로, 아래 두 테스트는 "지원 목록이 비어 있는 실행기"
+  // 를 대역으로 넣어 같은 규칙을 계속 확인한다.
+  it('실행기는 이제 multitab 을 지원한다 (PR B 에서 켰다)', () => {
+    expect([...ENGINE_FEATURES]).toContain(FLOW_FEATURES.MULTITAB);
   });
 
   it('meta.features 가 모르는 기능을 요구하면 거부한다', () => {
     const verdict = checkFlowRunnable({
       id: 'x',
-      meta: { features: [FLOW_FEATURES.MULTITAB] },
+      meta: { features: ['some_future_feature'] },
     });
     expect(verdict.ok).toBe(false);
     if (verdict.ok) return;
     expect(verdict.errorCode).toBe(FLOW_REQUIRES_NEWER_ENGINE);
-    expect(verdict.missingFeatures).toEqual([FLOW_FEATURES.MULTITAB]);
+    expect(verdict.missingFeatures).toEqual(['some_future_feature']);
+
+    // 여러 탭 흐름도 지원 목록이 없는 실행기(= PR B 이전 빌드)에서는 같은 이유로 거부된다.
+    const onOldEngine = checkFlowRunnable(
+      { id: 'x', meta: { features: [FLOW_FEATURES.MULTITAB] } },
+      { engineFeatures: [] },
+    );
+    expect(onOldEngine.ok).toBe(false);
+    if (onOldEngine.ok) return;
+    expect(onOldEngine.missingFeatures).toEqual([FLOW_FEATURES.MULTITAB]);
   });
 
   it('실행기가 그 기능을 가지면 같은 흐름이 통과한다 (설계 2.9 M0 합격 조건)', () => {
     const flow = { id: 'x', meta: { features: [FLOW_FEATURES.MULTITAB] } };
-    expect(checkFlowRunnable(flow).ok).toBe(false);
-    expect(checkFlowRunnable(flow, { engineFeatures: [FLOW_FEATURES.MULTITAB] })).toEqual({
-      ok: true,
+    expect(checkFlowRunnable(flow, { engineFeatures: [] }).ok).toBe(false);
+    expect(
+      checkFlowRunnable(flow, {
+        engineFeatures: [FLOW_FEATURES.MULTITAB],
+        engineVersion: '1.14.0',
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('minEngine 을 밝히지 않은 여러 탭 흐름도 최소 버전을 요구한다', () => {
+    // 표시만 지우고 최소 버전을 비워 두면 옛 실행기에서 그냥 돌던 구멍을 막는다.
+    const flow = { id: 'x', meta: { features: [FLOW_FEATURES.MULTITAB] } };
+    const old = checkFlowRunnable(flow, {
+      engineFeatures: [FLOW_FEATURES.MULTITAB],
+      engineVersion: '1.13.0',
     });
+    expect(old.ok).toBe(false);
+    if (!old.ok) expect(old.minEngine).toBe(FEATURE_MIN_ENGINE[FLOW_FEATURES.MULTITAB]);
   });
 
   it('meta.minEngine 이 설치된 확장보다 높으면 거부한다', () => {
@@ -143,17 +171,29 @@ describe('checkFlowRunnable 판정', () => {
     expect(checkFlowRunnable(flow, { engineVersion: '1.20.0' })).toEqual({ ok: true });
   });
 
-  it('표시를 지워도 단계의 tabRef·opensTab 을 보고 거부한다', () => {
-    expect(checkFlowRunnable({ id: 'x', nodes: [{ id: 'n1', config: { tabRef: 2 } }] }).ok).toBe(
-      false,
-    );
+  it('표시를 지워도 단계의 tabRef 를 보고 거부한다', () => {
+    // 지원 목록이 없는 실행기(= PR B 이전 빌드) 기준으로 본다. 표시를 지운 채 내보낸
+    // 흐름이나 손으로 고친 JSON 이 게이트를 우회하지 못하는지가 이 테스트의 요지다.
+    const oldEngine = { engineFeatures: [] as string[] };
     expect(
-      checkFlowRunnable({ id: 'x', nodes: [{ id: 'n1', config: { opensTab: { tabRef: 1 } } }] }).ok,
+      checkFlowRunnable({ id: 'x', nodes: [{ id: 'n1', config: { tabRef: 2 } }] }, oldEngine).ok,
     ).toBe(false);
     // 옛 steps 배열로 들어온 흐름도 같은 눈으로 본다.
     expect(
-      checkFlowRunnable({ id: 'x', steps: [{ id: 's1', type: 'closeTab', tabRef: 1 }] }).ok,
+      checkFlowRunnable({ id: 'x', steps: [{ id: 's1', type: 'closeTab', tabRef: 1 }] }, oldEngine)
+        .ok,
     ).toBe(false);
+  });
+
+  it('표시 없는 하위 흐름(subflow) 안의 tabRef 도 잡는다', () => {
+    // foreach·while 이 도는 subflow 도 같은 실행기가 돌린다. 최상위만 보면 그냥 지나간다.
+    const flow = {
+      id: 'x',
+      nodes: [{ id: 'n1', type: 'foreach', config: { subflowId: 'sf1' } }],
+      subflows: { sf1: { nodes: [{ id: 's1', config: { tabRef: 2 } }], edges: [] } },
+    };
+    expect(checkFlowRunnable(flow, { engineFeatures: [] }).ok).toBe(false);
+    expect(collectRequiredFeatures(flow)).toContain(FLOW_FEATURES.MULTITAB);
   });
 
   it('버전 비교는 마디 단위 숫자로 한다', () => {

@@ -57,6 +57,22 @@ export const INTERACTION_STEP_TYPES: ReadonlySet<string> = new Set<string>([
   STEP_TYPES.KEY,
 ]);
 
+/* ------------------------------------------------------------------ *
+ * 여러 탭 녹화 (2026-09-09 설계 2.2 · 2.3)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 여러 탭 기능 스위치 (설계 2.8).
+ *
+ * false 면 녹화가 `tabRef`·`origin` 을 만들지 않고 1.13 과 같은 단계만 남긴다.
+ * (지금은 `joinTab` 한 곳에서만 읽는다.)
+ * 합류 규칙 자체는 바뀌지 않는다(사용자 확정 사항). 실행 쪽은 구버전 차단 게이트가 맡는다.
+ */
+export const MULTITAB_ENABLED = true;
+
+/** 이 흐름을 돌릴 수 있는 최소 확장 버전. 구버전 차단 게이트가 읽는다. */
+export const MULTITAB_MIN_ENGINE = '1.14.0';
+
 /** recordNavigation 이 실제로 한 일. 테스트와 진단 로그가 읽는다. */
 export type NavigationOutcome = 'appended' | 'merged' | 'duplicate' | 'ignored';
 
@@ -158,6 +174,21 @@ export class RecordingSessionManager {
    */
   private navStates: Map<number, TabNavState> = new Map();
 
+  /* ---------------- 여러 탭 상태 (설계 2.2·2.3) ---------------- */
+
+  /** 실제 탭 id -> 논리 탭 번호. 녹화가 확정한 번호이고 재생은 이 번호만 쓴다. */
+  private tabRefs: Map<number, number> = new Map();
+  /** 마지막으로 배정한 번호. 0 번은 녹화를 시작한 탭이다. */
+  private lastTabRef = 0;
+
+  /*
+   * 번호는 **생성 경로가 확정된 탭에만** 붙인다.
+   *
+   * `tabRefs` 에 항목이 생기는 순간은 언제나 그 탭을 만드는 단계가 흐름에 함께 들어간
+   * 순간이다: 합류하는 탭에 `openTab{joined}` 을 남겼을 때 하나뿐이다. 그래서 "번호는
+   * 있는데 재생이 그 탭을 만들 방법이 없다" 는 상태가 생기지 않는다.
+   */
+
   /** 탭 id 를 모르는 경로(예전 호출부)의 몫. 실제 탭 id 와 절대 겹치지 않는 값이다. */
   private static readonly UNKNOWN_TAB = -1;
 
@@ -235,6 +266,7 @@ export class RecordingSessionManager {
     this.nodeIndexMap.clear();
     this.edgeSeq = 0;
     this.navStates.clear();
+    this.resetMultitabState();
 
     const normalizedStartUrl =
       typeof startUrl === 'string' && startUrl.trim() ? startUrl.trim() : undefined;
@@ -257,6 +289,9 @@ export class RecordingSessionManager {
       stoppedTabs: new Set<number>(),
       startedAt: Date.now(),
     };
+
+    // 녹화를 시작한 탭이 0번이다. 재생에서도 흐름이 시작하는 탭이 0번이 된다.
+    this.tabRefs.set(originTabId, 0);
 
     // Initialize caches from existing flow data (supports resume scenarios)
     this.rebuildCaches();
@@ -338,6 +373,7 @@ export class RecordingSessionManager {
     this.nodeIndexMap.clear();
     this.edgeSeq = 0;
     this.navStates.clear();
+    this.resetMultitabState();
     return flow;
   }
 
@@ -450,6 +486,8 @@ export class RecordingSessionManager {
 
     // 이동 판정 상태 갱신 (2026-09-05 B + Codex 교차 리뷰 1·4).
     this.trackAppendedSteps(nav, appendedIds);
+    // 여러 탭 표시와 "이 탭의 마지막 단계" 기록 (설계 2.2).
+    this.trackMultitabSteps(steps);
 
     // Update meta timestamp
     try {
@@ -754,6 +792,120 @@ export class RecordingSessionManager {
       expectsNavigation: true,
       after: { ...after, waitForNavigation: true },
     };
+  }
+
+  /* ================================================================== *
+   * 여러 탭 녹화 (설계 2.2 · 2.3)
+   * ================================================================== */
+
+  /** 세션이 끝나거나 새로 시작할 때 여러 탭 상태를 비운다. */
+  private resetMultitabState(): void {
+    this.tabRefs.clear();
+    this.lastTabRef = 0;
+  }
+
+  /** 이 탭의 논리 번호. 아직 없으면 undefined. */
+  tabRefFor(tabId: number): number | undefined {
+    return this.tabRefs.get(tabId);
+  }
+
+  /** 이 탭에 논리 번호를 배정한다(이미 있으면 그대로). */
+  assignTabRef(tabId: number): number {
+    const existing = this.tabRefs.get(tabId);
+    if (existing !== undefined) return existing;
+    const ref = ++this.lastTabRef;
+    this.tabRefs.set(tabId, ref);
+    return ref;
+  }
+
+  /**
+   * 흐름에 "여러 탭 기능을 쓴다" 는 표시를 남긴다 (설계 2.8).
+   *
+   * 이 표시가 있어야 구버전 실행기가 흐름을 거절한다. 표시를 지운 채 내보낸 흐름도
+   * `flow-compat.ts` 가 단계에서 직접 읽어 막지만, 표시가 먼저다.
+   */
+  private markMultitabFeature(): void {
+    const f = this.state.flow;
+    if (!f) return;
+    const meta = (f.meta || {}) as { features?: string[]; minEngine?: string };
+    const features = Array.isArray(meta.features) ? [...meta.features] : [];
+    if (!features.includes('multitab')) features.push('multitab');
+    meta.features = features;
+    meta.minEngine = MULTITAB_MIN_ENGINE;
+    (f as { meta?: unknown }).meta = meta;
+  }
+
+  /**
+   * 이 탭이 세션에 합류했음을 기록한다 (설계 2.3).
+   *
+   * **새 탭이 흐름에 들어오는 경로는 여기 하나뿐이다.** 처음 보는 탭이면 합류 시점의
+   * 실제 주소로 `openTab{origin:'joined'}` 을 남기고 그 번호로 옮겨 간다. 재생은 사용자의
+   * 탭을 만질 수 없으므로(I1), 같은 주소의 새 탭을 여는 것이 그 탭을 재현하는 유일한
+   * 수단이다. 링크를 눌러 뜬 탭도, 주소창으로 연 탭도 같은 경로를 탄다.
+   */
+  joinTab(tabId: number, url?: string): void {
+    if (!this.canAcceptSteps()) return;
+    if (!this.state.flow) return;
+    this.addActiveTab(tabId);
+
+    if (!MULTITAB_ENABLED) {
+      this.appendSteps(
+        [{ id: '', type: STEP_TYPES.SWITCH_TAB, ...(url ? { urlContains: url } : {}) } as Step],
+        { tabId },
+      );
+      return;
+    }
+
+    let ref = this.tabRefs.get(tabId);
+    if (ref === undefined) {
+      // 번호와 생성 단계는 **항상 함께** 만든다. 그러지 않으면 재생이 만들 수 없는 번호가
+      // 생겨 `tab_ref_unbound` 로 멈춘다. 재생은 이 주소를 직접 새 탭으로 연다.
+      ref = this.assignTabRef(tabId);
+      this.appendSteps(
+        [
+          {
+            id: '',
+            type: STEP_TYPES.OPEN_TAB,
+            ...(url ? { url } : {}),
+            tabRef: ref,
+            origin: 'joined',
+          } as unknown as Step,
+        ],
+        { tabId },
+      );
+    }
+
+    // 바로 앞 단계가 이미 같은 번호로 옮겨 간 것이면 또 남기지 않는다. 같은 탭의 활성화
+    // 이벤트가 연달아 오는 경우가 있다.
+    const f = this.state.flow;
+    const lastNode = Array.isArray(f?.nodes) && f.nodes.length ? f.nodes[f.nodes.length - 1] : null;
+    if (lastNode && lastNode.type === STEP_TYPES.SWITCH_TAB) {
+      const config = (lastNode.config || {}) as Record<string, unknown>;
+      if (config.tabRef === ref) return;
+    }
+
+    this.appendSteps([{ id: '', type: STEP_TYPES.SWITCH_TAB, tabRef: ref } as unknown as Step], {
+      tabId,
+    });
+  }
+
+  /**
+   * 이번에 붙은 단계에서 여러 탭 표시와 "이 탭의 마지막 단계" 를 갱신한다.
+   *
+   * 어느 탭에서 온 단계인지는 호출부가 알려 준다(콘텐츠 스크립트 메시지는 sender.tab.id).
+   */
+  private trackMultitabSteps(steps: Step[]): void {
+    let multitab = false;
+    for (const step of steps) {
+      const s = step as unknown as Record<string, unknown>;
+      if (s.tabRef !== undefined) multitab = true;
+    }
+    if (multitab) this.markMultitabFeature();
+  }
+
+  /** 탭이 닫혔다. 번호는 회수하지 않는다(재사용 금지). */
+  forgetTab(tabId: number): void {
+    if (this.tabRefs.has(tabId)) this.tabRefs.delete(tabId);
   }
 
   /**

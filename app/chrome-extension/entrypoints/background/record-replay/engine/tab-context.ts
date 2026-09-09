@@ -20,6 +20,7 @@
 import { LEASE_TOKEN_ARG, acquireTabLease, isTabLeasedBy, releaseTabLease } from '@/utils/tab-lock';
 import { EFFECTIVE_BACKGROUND_MODE_ARG } from '@/utils/background-mode';
 import { FLOW_DEADLINE_ARG } from '@/utils/tool-watchdog';
+import { RunAbortedError } from '@/utils/tool-watchdog';
 
 /** Where the pinned tab came from. Recorded for diagnostics only. */
 export type RunTabSource = 'mcp' | 'sidepanel' | 'explicit';
@@ -116,6 +117,247 @@ export interface RunTabContext {
    * after the caller gave up (2026-09-05 Codex review, item 4).
    */
   signal?: AbortSignal;
+  /**
+   * 여러 탭 흐름의 공유 상태 (설계 2.1). 참조로 공유한다. 값 복사 금지.
+   *
+   * 실행기가 둘(nodes 경로·actions 경로)이라 파생 컨텍스트가 필드를 명시 복사한다. 이
+   * 객체를 값으로 베끼면 두 실행기가 서로 다른 탭 번호표를 보게 되어, 한쪽에서 묶은
+   * 번호가 다른 쪽에서는 "묶이지 않음" 이 된다.
+   */
+  tabState?: RunTabState;
+}
+
+/* ------------------------------------------------------------------ *
+ * 여러 탭 (설계 2.1 · 2.4)
+ * ------------------------------------------------------------------ */
+
+/**
+ * run 하나가 공유하는 탭 상태 (설계 2.1).
+ *
+ * `ownedTabIds` 는 기존 컨텍스트의 Set 을 그대로 담는다(참조 공유). 나머지는 새 값이다.
+ */
+export interface RunTabState {
+  /** run 이 만든 것으로 확인된 탭. `RunTabContext.ownedTabIds` 와 같은 객체다. */
+  ownedTabIds: Set<number>;
+  /** 논리 번호 -> 실제 탭 id. 한 번 묶이면 바뀌지 않는다. */
+  tabRefs: Map<number, number>;
+  /** 닫힌 논리 번호. 재사용·재바인딩 금지. */
+  closedRefs: Set<number>;
+  /** run 진단용 키 (`run::` + runId). */
+  scopeKey: string;
+}
+
+/**
+ * 공통 탭 판정이 필요로 하는 최소 컨텍스트.
+ *
+ * `RunTabContext`(nodes 경로)와 `ActionExecutionContext`(actions 경로)가 둘 다 구조적으로
+ * 이 모양을 만족한다. 두 실행기가 같은 함수를 부르게 하는 것이 목적이다 (설계 2.7).
+ */
+export interface RunTabScope {
+  tabId: number;
+  entryTabId?: number;
+  ownedTabIds?: Set<number>;
+  leasedTabIds?: Set<number>;
+  leaseToken?: string;
+  tabState?: RunTabState;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}
+
+/** 새 `RunTabState`. `ownedTabIds` 는 넘겨받은 Set 을 그대로 쓴다(참조 공유). */
+export function createRunTabState(scopeKey: string, ownedTabIds: Set<number>): RunTabState {
+  return {
+    ownedTabIds,
+    tabRefs: new Map<number, number>(),
+    closedRefs: new Set<number>(),
+    scopeKey,
+  };
+}
+
+/**
+ * 이 컨텍스트의 공유 상태. 없으면 만들어 붙인다.
+ *
+ * 정상 경로에서는 `ExecutionOrchestrator` 가 run 시작 때 한 번 만들고, 파생 컨텍스트는 그
+ * 참조를 물려받는다. 여기서 새로 만드는 것은 노드를 직접 부르는 단위 테스트뿐이다.
+ */
+export function ensureRunTabState(scope: RunTabScope, scopeKey = ''): RunTabState {
+  if (!scope.tabState) {
+    if (!scope.ownedTabIds) scope.ownedTabIds = new Set<number>();
+    scope.tabState = createRunTabState(scopeKey, scope.ownedTabIds);
+  }
+  return scope.tabState;
+}
+
+/** 논리 탭 번호로 쓸 수 있는 값인가 (0 이상의 정수). 0 은 유효하다. */
+export function isValidTabRef(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * 논리 번호를 실제 탭에 묶는다.
+ *
+ * 묶기 전에 소유 등록이 끝나 있어야 한다. 이 순서가 I1 을 지키는 자리다: 번호가 붙는 탭은
+ * 예외 없이 run 이 만든 것으로 확인된 탭이다.
+ */
+export function bindTabRef(scope: RunTabScope, ref: number, tabId: number): void {
+  if (!isValidTabRef(ref)) {
+    throw new RunTabError('tab_ref_conflict', TAB_REF_CONFLICT_MESSAGE, tabId);
+  }
+  const state = ensureRunTabState(scope);
+  if (state.tabRefs.has(ref) || state.closedRefs.has(ref)) {
+    throw new RunTabError('tab_ref_conflict', TAB_REF_CONFLICT_MESSAGE, tabId);
+  }
+  if (!isUsableTabId(tabId) || !isRunOwnedTab(scope, tabId)) {
+    throw new RunTabError(
+      'tab_ref_conflict',
+      `${TAB_REF_CONFLICT_MESSAGE} (tab ${String(tabId)} is not owned by this run)`,
+      tabId,
+    );
+  }
+  state.tabRefs.set(ref, tabId);
+}
+
+/**
+ * 논리 번호를 실제 탭 id 로 푼다. 대기하지 않는다.
+ *
+ * 묶임은 `openTab` 실행이 끝날 때 이미 확정돼 있어야 한다. 여기서
+ * 기다리면 "언젠가 생기겠지" 로 후속 조작이 흘러가고, 그것이 곧 엉뚱한 탭 사고다.
+ */
+export function resolveTabRef(scope: RunTabScope, ref: number): number {
+  if (!isValidTabRef(ref)) {
+    throw new RunTabError('tab_ref_conflict', TAB_REF_CONFLICT_MESSAGE);
+  }
+  const state = ensureRunTabState(scope);
+  const tabId = state.tabRefs.get(ref);
+  if (!isUsableTabId(tabId)) {
+    throw new RunTabError('tab_ref_unbound', tabRefUnboundMessage(ref));
+  }
+  // 소유는 해석할 때 한 번 더 본다. 묶인 뒤에 정리 경로가 소유를 걷어 갔을 수 있다.
+  if (!isRunOwnedTab(scope, tabId)) {
+    throw new RunTabError('tab_ref_unbound', tabRefUnboundMessage(ref), tabId);
+  }
+  return tabId;
+}
+
+/**
+ * `switchTab` 이 갈 탭을 정한다. 두 실행기가 이 함수 하나를 쓴다.
+ *
+ *   - `tabRef` 가 있으면 그것만 본다(`tabId` 가 함께 있으면 무시하고 경고).
+ *   - `tabRef` 가 없고 `tabId` 가 있으면 예전과 같이 소유 검사만 한다.
+ *   - 둘 다 없으면 예전과 같이 `tab_scope_violation`. url·title 전역 검색은 없다 (I2).
+ */
+export function resolveSwitchTarget(
+  scope: RunTabScope,
+  input: { tabRef?: unknown; tabId?: unknown },
+  onWarn?: (message: string) => void,
+): number {
+  const rawRef = input?.tabRef;
+  if (rawRef !== undefined && rawRef !== null) {
+    if (!isValidTabRef(rawRef)) {
+      throw new RunTabError('tab_ref_conflict', TAB_REF_CONFLICT_MESSAGE);
+    }
+    if (input?.tabId !== undefined && input?.tabId !== null) {
+      onWarn?.(`switchTab: tabRef ${rawRef} 이 있으므로 tabId 는 무시한다.`);
+    }
+    return resolveTabRef(scope, rawRef);
+  }
+
+  const rawId = input?.tabId;
+  const targetTabId = typeof rawId === 'number' ? rawId : Number(rawId) || undefined;
+  if (!isUsableTabId(targetTabId)) {
+    throw new RunTabError(
+      'tab_scope_violation',
+      `switchTab needs the id of a tab this run opened; matching by urlContains/titleContains would search the whole browser. This run may only touch the tab it was given and tabs it opened itself (${scopeListing(scope)}).`,
+    );
+  }
+  if (!isRunOwnedTab(scope, targetTabId)) {
+    throw new RunTabError(
+      'tab_scope_violation',
+      `switchTab refused tab ${targetTabId}. This run may only touch the tab it was given and tabs it opened itself (${scopeListing(scope)}).`,
+      targetTabId,
+    );
+  }
+  return targetTabId;
+}
+
+/** 닫은 번호를 회수한다. 그 번호는 다시 쓰이지 않는다. */
+export function releaseTabRef(scope: RunTabScope, ref: number, tabId: number): void {
+  const state = ensureRunTabState(scope);
+  if (isValidTabRef(ref)) {
+    state.tabRefs.delete(ref);
+    state.closedRefs.add(ref);
+  }
+  if (isUsableTabId(tabId)) state.ownedTabIds.delete(tabId);
+}
+
+/** 문서 준비 검증의 기본 마감. */
+export const DEFAULT_TAB_READY_TIMEOUT_MS = 10_000;
+
+/**
+ * 이미 정해진 탭이 조작할 수 있는 상태인지 확인한다 (설계 2.4).
+ *
+ * 탭을 고르는 일이 아니라 검증이므로 I2 를 어기지 않는다. 여기서 URL 을 보고 다른 탭으로
+ * 옮겨 가는 경로는 없다.
+ */
+export async function verifyTabDocument(
+  tabId: number,
+  options: { tabRef?: number; urlContains?: string; timeoutMs?: number; signal?: AbortSignal },
+): Promise<void> {
+  const label = isValidTabRef(options.tabRef) ? `${options.tabRef}번 탭` : `탭 ${tabId}`;
+  const deadline = Date.now() + Math.max(0, options.timeoutMs ?? DEFAULT_TAB_READY_TIMEOUT_MS);
+  let url = '';
+  for (;;) {
+    // 취소는 "검증 통과" 가 아니다. 여기서 조용히 돌아가면 취소된 run 이 다음 단계를
+    // 이어서 실행한다 (검토 C6).
+    if (options.signal?.aborted) {
+      throw new RunAbortedError('run_aborted: 실행이 취소되어 탭 확인을 멈췄어요.');
+    }
+    let tab: chrome.tabs.Tab | undefined;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      throw new RunTabError('tab_not_ready', tabNotReadyMessage(label), tabId);
+    }
+    url = tab?.url || '';
+    const ready = tab?.status !== 'loading' && !!url && !isBlankOrInternalUrl(url);
+    if (ready) break;
+    if (Date.now() >= deadline) {
+      throw new RunTabError('tab_not_ready', tabNotReadyMessage(label), tabId);
+    }
+    await sleepMs(100);
+  }
+
+  const needle = typeof options.urlContains === 'string' ? options.urlContains.trim() : '';
+  if (needle && !url.includes(needle)) {
+    throw new RunTabError('tab_url_mismatch', tabUrlMismatchMessage(label), tabId);
+  }
+}
+
+function isBlankOrInternalUrl(url: string): boolean {
+  return /^(about:|chrome:|chrome-extension:|edge:)/i.test(url);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function scopeListing(scope: RunTabScope): string {
+  return [...runOwnedTabIds(scope)].join(', ');
+}
+
+/* 사용자에게 그대로 보이는 문구 (설계 2.4 표). */
+const TAB_REF_CONFLICT_MESSAGE = '탭 번호가 겹치거나 잘못됐어요. 이 흐름을 다시 녹화해 주세요.';
+export const WORKER_RESTARTED_MESSAGE =
+  '브라우저 확장이 다시 시작되어 실행을 멈췄어요. 자동으로 이어서 실행하지 않아요.';
+
+function tabRefUnboundMessage(ref: number): string {
+  return `${ref}번 탭이 아직 열리지 않았어요. 앞 단계에서 새 탭을 여는 동작이 빠졌는지 확인해 주세요.`;
+}
+function tabNotReadyMessage(label: string): string {
+  return `${label}이 아직 준비되지 않았어요. 페이지가 다 열린 뒤 다시 실행해 주세요.`;
+}
+function tabUrlMismatchMessage(label: string): string {
+  return `${label}에 예상과 다른 페이지가 열렸어요. 안전을 위해 여기서 멈췄어요.`;
 }
 
 /** What `acquireRunTabLease` needs: the run's token and the tabs it already leased. */
@@ -155,7 +397,7 @@ export function releaseRunTabLeases(holder: RunLeaseHolder): void {
  * Tabs the run may close or switch to: what it created, the tab it is on now,
  * and the tab it started on.
  */
-export function runOwnedTabIds(ctx: RunTabContext): Set<number> {
+export function runOwnedTabIds(ctx: RunTabScope): Set<number> {
   const owned = new Set<number>(ctx.ownedTabIds ?? []);
   if (isUsableTabId(ctx.tabId)) owned.add(ctx.tabId);
   if (isUsableTabId(ctx.entryTabId)) owned.add(ctx.entryTabId);
@@ -163,7 +405,7 @@ export function runOwnedTabIds(ctx: RunTabContext): Set<number> {
 }
 
 /** Remember that this run created the tab, so it is allowed to drive and close it. */
-export function markRunOwnedTab(ctx: RunTabContext, tabId: number): void {
+export function markRunOwnedTab(ctx: RunTabScope, tabId: number): void {
   if (!isUsableTabId(tabId)) return;
   if (!ctx.ownedTabIds) ctx.ownedTabIds = new Set<number>();
   ctx.ownedTabIds.add(tabId);
@@ -172,7 +414,7 @@ export function markRunOwnedTab(ctx: RunTabContext, tabId: number): void {
 }
 
 /** Is this tab inside the run's scope? */
-export function isRunOwnedTab(ctx: RunTabContext, tabId: number): boolean {
+export function isRunOwnedTab(ctx: RunTabScope, tabId: number): boolean {
   return runOwnedTabIds(ctx).has(tabId);
 }
 
@@ -192,7 +434,13 @@ export type RunTabErrorCode =
   | 'run_tab_missing'
   | 'run_tab_required'
   | 'close_scope_violation'
-  | 'tab_scope_violation';
+  | 'tab_scope_violation'
+  // 여러 탭 (설계 2.4). 번호가 가리키는 탭이 확실하지 않으면 멈춘다.
+  | 'tab_ref_unbound'
+  | 'tab_ref_conflict'
+  | 'tab_not_ready'
+  | 'tab_url_mismatch'
+  | 'worker_restarted';
 
 /**
  * Error thrown when the run tab cannot be used.
@@ -353,6 +601,8 @@ export interface RunSessionContext {
   /** Extra tab leases this run holds (shared by reference, like `ownedTabIds`). */
   leasedTabIds?: Set<number>;
   signal?: AbortSignal;
+  /** 여러 탭 공유 상태. `ownedTabIds` 와 같은 이유로 참조로 물려준다 (설계 2.7). */
+  tabState?: RunTabState;
 }
 
 /** Build a pinned context from a tab id the caller already knows. */
@@ -380,6 +630,9 @@ export function runTabFromId(
     entryTabId: session?.entryTabId,
     leasedTabIds: session?.leasedTabIds,
     signal: session?.signal,
+    // 참조 공유. 빠뜨리면 actions 경로가 빈 번호표를 보게 되어 같은 흐름이 실행기에 따라
+    // 다르게 판정된다 (설계 지적 6).
+    tabState: session?.tabState,
   };
 }
 

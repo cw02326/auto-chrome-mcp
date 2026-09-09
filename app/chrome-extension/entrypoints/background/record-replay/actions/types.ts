@@ -11,6 +11,8 @@
  * - SOLID 원칙(인터페이스는 선언 병합으로 확장)
  */
 
+import type { RunTabState } from '../engine/tab-context';
+
 // ================================
 // 기본 타입
 // ================================
@@ -512,10 +514,16 @@ export interface LoopElementsParams {
 export interface OpenTabParams {
   url?: Resolvable<string>;
   newWindow?: boolean;
+  /** 이 단계가 만든 탭에 붙일 논리 탭 번호 (설계 2.1). */
+  tabRef?: number;
+  /** 이 단계가 어떻게 생겼는지 (표시·진단용). 지금 녹화가 만드는 값은 `joined` 뿐이다. */
+  origin?: 'joined' | 'blank_link' | 'auto';
 }
 
 export interface SwitchTabParams {
   tabId?: number;
+  /** 옮겨 갈 논리 탭 번호. 있으면 `tabId` 보다 우선한다 (설계 2.1). */
+  tabRef?: number;
   urlContains?: Resolvable<string>;
   titleContains?: Resolvable<string>;
   /**
@@ -528,6 +536,8 @@ export interface SwitchTabParams {
 export interface CloseTabParams {
   tabIds?: ReadonlyArray<number>;
   url?: Resolvable<string>;
+  /** 닫을 논리 탭 번호. 있으면 현재 탭 폴백을 타지 않는다 (설계 2.4). */
+  tabRef?: number;
 }
 
 export interface HandleDownloadParams {
@@ -792,6 +802,13 @@ export interface ActionExecutionContext {
   leaseToken?: string;
   /** Cancellation signal of the run; long waits must check it. */
   signal?: AbortSignal;
+  /**
+   * 여러 탭 공유 상태 (설계 2.1·2.7). run 컨텍스트와 같은 객체를 참조로 받는다.
+   *
+   * 이 필드가 빠지면 actions 경로가 빈 번호표를 보게 되어, 같은 흐름이 실행기에 따라 다르게
+   * 판정된다. `adapter.execCtxToActionCtx` 가 반드시 넘긴다.
+   */
+  tabState?: RunTabState;
   /**
    * MCP session/lane of the caller that started the run.
    *

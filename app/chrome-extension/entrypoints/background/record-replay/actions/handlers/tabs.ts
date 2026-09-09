@@ -16,7 +16,16 @@ import type {
   DownloadState,
   VariableStore,
 } from '../types';
-import { actionOwnedTabIds, isActionOwnedTab, markActionOwnedTab } from './common';
+import { actionOwnedTabIds, markActionOwnedTab } from './common';
+import {
+  bindTabRef,
+  isRunTabError,
+  isValidTabRef,
+  releaseTabRef,
+  resolveSwitchTarget,
+  resolveTabRef,
+  verifyTabDocument,
+} from '../../engine/tab-context';
 // v1.9.0: 창 생성은 mcp-window-manager 를 거친다 (배치·비포커스·복귀 규칙 적용).
 import { createManagedWindow } from '@/utils/mcp-window-manager';
 
@@ -96,7 +105,19 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         tabId = tab.id;
       }
 
+      // 탭을 여는 사이에 취소됐으면 방금 만든 탭을 닫고 끝낸다 (검토 D3).
+      if (ctx.signal?.aborted) {
+        try {
+          await chrome.tabs.remove(tabId);
+        } catch {
+          // 이미 닫혔으면 그만이다.
+        }
+        return failed('UNKNOWN', 'run_aborted: 실행이 취소되어 새 탭을 닫았어요.');
+      }
       markActionOwnedTab(ctx, tabId);
+      // 번호 묶기는 소유 등록 뒤에만 (설계 2.1, 불변식 I1). nodes 경로의 openTabNode 와
+      // 같은 순서·같은 함수다.
+      if (params.tabRef !== undefined) bindTabRef(ctx, params.tabRef, tabId);
 
       // Wait for tab to be ready if URL was specified
       if (url) {
@@ -120,12 +141,13 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
 
   validate: (action) => {
     const params = action.params;
+    const hasTabRef = params.tabRef !== undefined;
     const hasTabId = params.tabId !== undefined;
     const hasUrlContains = params.urlContains !== undefined;
     const hasTitleContains = params.titleContains !== undefined;
 
-    if (!hasTabId && !hasUrlContains && !hasTitleContains) {
-      return invalid('switchTab requires tabId, urlContains, or titleContains');
+    if (!hasTabRef && !hasTabId && !hasUrlContains && !hasTitleContains) {
+      return invalid('switchTab requires tabRef, tabId, urlContains, or titleContains');
     }
 
     return ok();
@@ -147,41 +169,42 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
   run: async (ctx, action) => {
     const params = action.params;
 
+    let targetTabId: number;
     try {
-      if (params.tabId === undefined) {
-        // url·title 로 브라우저 전체를 뒤지는 경로는 제거했다 (검토 항목 5): 사용자의
-        // 탭이 걸리면 그 탭을 조작하게 된다. run 이 연 탭은 id 를 알고 있다.
-        return failed(
-          'TAB_NOT_FOUND',
-          scopeMessage(
-            ctx,
-            'tab_scope_violation: switchTab needs the id of a tab this run opened; matching by urlContains/titleContains would search the whole browser.',
-          ),
-        );
-      }
-
-      const targetTabId = params.tabId;
-      if (!isActionOwnedTab(ctx, targetTabId)) {
-        return failed(
-          'TAB_NOT_FOUND',
-          scopeMessage(ctx, `tab_scope_violation: switchTab refused tab ${targetTabId}.`),
-        );
-      }
-
-      // 탭이 살아 있는지만 확인한다. 활성화·창 포커스는 하지 않는다 — 재생이 사용자의
-      // 화면을 빼앗지 않는다. ctx 의 작업 탭 포인터(newTabId)만 바뀐다.
-      await chrome.tabs.get(targetTabId);
-
-      // Return newTabId for ctx.tabId sync
-      return { status: 'success', newTabId: targetTabId };
+      // 대상 판정은 nodes 경로와 같은 함수다 (설계 2.7). 차이는 오류를 던지느냐
+      // 실패 결과로 돌려주느냐뿐이다.
+      targetTabId = resolveSwitchTarget(ctx, params, (message) => ctx.log(message, 'warn'));
     } catch (e) {
-      return failed(
-        'UNKNOWN',
-        `Failed to switch tab: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      if (isRunTabError(e)) return failed('TAB_NOT_FOUND', tabErrorMessage(ctx, e.message));
+      throw e;
     }
+
+    // 번호로 지목한 전환에만 준비 검증을 건다. id 로 지목하는 옛 흐름의 동작은 그대로 둔다
+    // (nodes 경로와 같은 규칙, 검토 사소).
+    if (isValidTabRef(params.tabRef)) {
+      try {
+        await verifyTabDocument(targetTabId, {
+          tabRef: params.tabRef,
+          urlContains: typeof params.urlContains === 'string' ? params.urlContains : undefined,
+          timeoutMs: action.policy?.timeout?.ms,
+          signal: ctx.signal,
+        });
+      } catch (e) {
+        if (isRunTabError(e)) return failed('TAB_NOT_FOUND', e.message);
+        throw e;
+      }
+    }
+
+    // 활성화·창 포커스는 하지 않는다. 재생이 사용자의 화면을 빼앗지 않는다.
+    // ctx 의 작업 탭 포인터(newTabId)만 바뀐다.
+    return { status: 'success', newTabId: targetTabId };
   },
 };
+
+/** 범위 위반 메시지에 run 이 만질 수 있는 탭 목록을 덧붙인다 (기존 문구 유지). */
+function tabErrorMessage(ctx: ActionExecutionContext, message: string): string {
+  return message.startsWith('tab_scope_violation') ? scopeMessage(ctx, message) : message;
+}
 
 // ================================
 // closeTab Handler
@@ -207,9 +230,20 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
 
     try {
       let tabIds: number[] = [];
+      let closedRef: number | undefined;
       const owned = actionOwnedTabIds(ctx);
 
-      if (params.tabIds && params.tabIds.length > 0) {
+      if (params.tabRef !== undefined) {
+        // 번호가 있으면 그 탭만 닫는다. 해석 실패는 `tab_ref_unbound` 로 멈추고, 현재 탭
+        // 폴백은 타지 않는다 (설계 2.4). nodes 경로의 closeTabNode 와 같은 규칙이다.
+        try {
+          tabIds = [resolveTabRef(ctx, params.tabRef)];
+          closedRef = params.tabRef;
+        } catch (e) {
+          if (isRunTabError(e)) return failed('TAB_NOT_FOUND', e.message);
+          throw e;
+        }
+      } else if (params.tabIds && params.tabIds.length > 0) {
         // Close specific tabs — run 소유 밖은 거절한다 (검토 항목 1).
         tabIds = [...params.tabIds];
         const outside = tabIds.filter((id) => !owned.has(id));
@@ -265,6 +299,7 @@ export const closeTabHandler: ActionHandler<'closeTab'> = {
       }
 
       await chrome.tabs.remove(tabIds);
+      if (closedRef !== undefined) releaseTabRef(ctx, closedRef, tabIds[0]);
       return { status: 'success' };
     } catch (e) {
       return failed(

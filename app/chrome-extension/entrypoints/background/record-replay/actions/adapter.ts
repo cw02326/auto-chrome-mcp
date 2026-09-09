@@ -118,6 +118,9 @@ export function execCtxToActionCtx(
     ownedTabIds: ctx.ownedTabIds,
     entryTabId: ctx.entryTabId,
     leasedTabIds: ctx.leasedTabIds,
+    // 여러 탭 공유 상태도 같은 이유로 참조를 넘긴다: 이 줄이 빠지면 actions 경로가 빈
+    // 번호표를 보게 되어, 같은 흐름이 실행기에 따라 다르게 판정된다 (설계 2.7).
+    tabState: ctx.tabState,
     signal: ctx.signal,
     log: (message: string, level?: 'info' | 'warn' | 'error') => {
       ctx.logger({

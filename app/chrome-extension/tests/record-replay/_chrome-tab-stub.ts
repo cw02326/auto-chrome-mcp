@@ -15,6 +15,8 @@ export interface FakeTab {
   status: string;
   windowId: number;
   active: boolean;
+  /** 이 탭을 연 탭. 페이지가 띄운 탭을 흉내 낼 때 쓴다. */
+  openerTabId?: number;
 }
 
 export interface TabTouch {
@@ -31,6 +33,13 @@ export interface TabStub {
   touchedTabIds(): number[];
   /** Calls recorded for one api name. */
   callsTo(api: string): TabTouch[];
+  /**
+   * 탭이 하나 만들어질 때마다 불린다.
+   *
+   * "run 이 탭을 여는 사이에 페이지가 다른 탭을 띄웠다" 처럼 **실행 도중**에만 일어나는
+   * 상황을 테스트가 만들 수 있게 하는 훅이다.
+   */
+  onTabCreated?: (created: FakeTab) => void;
 }
 
 export function makeTab(over: Partial<FakeTab> & { id: number }): FakeTab {
@@ -128,6 +137,11 @@ export function installTabStub(tabs: FakeTab[], firstNewId = 500): TabStub {
         });
         liveTabs.set(id, tab);
         record('tabs.create', id);
+        try {
+          handle.onTabCreated?.(tab);
+        } catch {
+          // 훅이 던져도 스텁은 계속 답한다.
+        }
         return tab;
       }),
       remove: vi.fn(async (tabId: number | number[]) => {
@@ -194,7 +208,7 @@ export function installTabStub(tabs: FakeTab[], firstNewId = 500): TabStub {
     },
   });
 
-  return {
+  const handle: TabStub = {
     touches,
     liveTabs,
     createdTabs,
@@ -207,4 +221,5 @@ export function installTabStub(tabs: FakeTab[], firstNewId = 500): TabStub {
       ].sort((a, b) => a - b),
     callsTo: (api: string) => touches.filter((t) => t.api === api),
   };
+  return handle;
 }

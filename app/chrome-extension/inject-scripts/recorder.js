@@ -1849,16 +1849,17 @@
         const href = a && a.getAttribute && a.getAttribute('href');
         const tgt = a && a.getAttribute && a.getAttribute('target');
         if (a && href && tgt && tgt.toLowerCase() === '_blank') {
-          try {
-            const abs = new URL(href, location.href).href;
-            this._pushStep({ type: 'openTab', url: abs });
-            this._pushStep({ type: 'switchTab', urlContains: abs });
-            return;
-          } catch (_) {
-            this._pushStep({ type: 'openTab', url: href });
-            this._pushStep({ type: 'switchTab', urlContains: href });
-            return;
-          }
+          // 새 탭으로 여는 링크는 여기서 아무 단계도 만들지 않는다 (2026-09-09 축소 결정).
+          //
+          // 예전에는 이 클릭을 "그 href 로 새 탭 열기" 로 바꿔 두고, 나중에 실제로 뜬 탭을
+          // 주소로 짝지어 같은 번호에 이어 붙였다. 그런데 `/orders?id=1` 과 `/orders?id=2`
+          // 처럼 주소가 비슷한 두 탭을 그 방식으로는 가릴 수 없어, 서로 다른 업무 대상이
+          // 한 번호로 합쳐졌다.
+          //
+          // 이제 새 탭은 **사용자가 그 탭을 실제로 볼 때** 그때의 진짜 주소로만 기록한다
+          // (배경의 joinTab). 링크만 누르고 그 탭에서 아무 일도 하지 않았다면 흐름에도
+          // 아무것도 남지 않는 것이 맞다.
+          return;
         }
       } catch {}
 

@@ -1,6 +1,7 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { getRunTabInfo } from '../engine/tab-context';
 import { abortErrorOf, sleepWithSignal } from '@/utils/tool-watchdog';
+import { FLOW_FEATURES, collectRequiredFeatures } from '../engine/flow-compat';
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -14,6 +15,20 @@ export const executeFlowNode: NodeRuntime<any> = {
     const flow = await getFlow(String(s.flowId));
     if (!flow) throw new Error('referenced flow not found');
     const inline = s.inline !== false; // default inline
+
+    // 여러 탭 흐름의 inline 실행은 거절한다 (검토 C7).
+    //
+    // inline 은 자식 흐름의 단계를 **부모 컨텍스트로** 그대로 돌린다. 그런데 논리 탭 번호는
+    // 흐름마다 따로 매겨진 것이라, 자식의 0번은 부모의 시작 탭을 가리키고 자식의 1번은
+    // 부모가 이미 쓰고 있는 번호와 부딪힌다. 번호가 어긋나면 조작이 엉뚱한 탭에서 실행되므로,
+    // 이름 공간을 나누기 전까지는 추측하지 않고 여기서 멈춘다. `inline: false` 로 두면
+    // 자식이 자기 run 과 자기 번호표를 갖게 되어 안전하다.
+    if (inline && collectRequiredFeatures(flow).includes(FLOW_FEATURES.MULTITAB)) {
+      throw new Error(
+        'multitab_inline_unsupported: 이 흐름은 여러 탭을 쓰기 때문에 다른 흐름 안에 끼워 넣어 실행할 수 없어요. ' +
+          '단계 설정에서 "따로 실행" 을 켜 주세요.',
+      );
+    }
     if (!inline) {
       const { runFlow } = await import('../flow-runner');
       // The sub-run inherits this run's pinned tab; it never resolves its own.

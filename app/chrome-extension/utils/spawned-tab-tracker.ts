@@ -56,7 +56,7 @@ export interface SpawnScopeInput {
 }
 
 interface SpawnScope extends SpawnScopeInput {
-  /** 이 스코프가 흡수한, 페이지가 연 팝업 창들. */
+  /** 이 스코프가 흡수한, 페이지가 연 팝업 창들 (실행이 끝날 때 창째로 닫는다). */
   popupWindowIds: Set<number>;
 }
 
@@ -82,13 +82,27 @@ export async function settleSpawnAdoptions(): Promise<void> {
 
 /** 이 세션이 도는 동안 열리는 새 탭을 흡수하도록 스코프를 연다. */
 export function beginSpawnScope(input: SpawnScopeInput): void {
-  spawnScopes.set(input.sessionKey, { ...input, popupWindowIds: new Set<number>() });
+  spawnScopes.set(input.sessionKey, {
+    ...input,
+    popupWindowIds: new Set<number>(),
+  });
 }
 
 /** 스코프를 닫고, 실행이 끝날 때 닫아야 하는 팝업 창 id 를 돌려준다. */
 export function endSpawnScope(sessionKey: string): number[] {
   const scope = spawnScopes.get(sessionKey);
   spawnScopes.delete(sessionKey);
+  if (scope) {
+    // 복원 추적도 함께 끝낸다. 남겨 두면 실행이 끝난 뒤 사용자가 그 탭을 직접 골라도
+    // 이전 탭으로 되돌아간다 (검토 C5).
+    for (const [tabId, owner] of [...adoptedTabScopes.entries()]) {
+      if (owner !== scope) continue;
+      adoptedTabScopes.delete(tabId);
+      adoptedTabs.delete(tabId);
+      adoptedTabAt.delete(tabId);
+      focusRestoredSpawns.delete(tabId);
+    }
+  }
   return scope ? Array.from(scope.popupWindowIds) : [];
 }
 
@@ -104,8 +118,10 @@ export function isSpawnedPopupWindow(windowId: number | null | undefined): boole
 /** 테스트·정리용 - 열린 스코프와 화면 추적을 모두 버린다. */
 export function resetSpawnScopes(): void {
   spawnScopes.clear();
+  records.length = 0;
   adoptedTabs.clear();
   adoptedTabScopes.clear();
+  adoptedTabAt.clear();
   focusRestoredSpawns.clear();
   lastActiveTabByWindow.clear();
   focusHistory.length = 0;
@@ -152,6 +168,17 @@ const lastActiveTabByWindow = new Map<number, number>();
 const focusHistory: number[] = [];
 /** 흡수한 탭 -> 그 탭을 흡수한 스코프 (활성화가 흡수보다 늦게 와도 되돌릴 수 있게). */
 const adoptedTabScopes = new Map<number, SpawnScope>();
+/** 흡수한 탭 -> 흡수 시각. 복원은 "생성 직후의 활성화 경합" 에만 허용한다 (검토 C5). */
+const adoptedTabAt = new Map<number, number>();
+
+/**
+ * 화면 복원을 허용하는 기간.
+ *
+ * 팝업이 화면을 가져가는 것은 생성 직후 한순간이다. 그 뒤에 사용자가 **직접** 그 탭을 고른
+ * 것까지 되돌리면 사용자의 명시적 선택을 취소하는 셈이라, 무간섭 규칙이 오히려 간섭이 된다
+ * (2026-09-09 여러 탭 검토 C5).
+ */
+const ADOPTION_RESTORE_WINDOW_MS = 5_000;
 /** 창 포커스를 이미 되돌린 스폰 탭 (중복 복귀 방지). */
 const focusRestoredSpawns = new Set<number>();
 
@@ -224,6 +251,11 @@ async function previousUserFocusedWindow(spawnWindowId: number): Promise<number 
   return null;
 }
 
+/** 이 스코프가 아직 열려 있는가 (종료된 스코프로는 화면을 건드리지 않는다). */
+function isScopeOpen(scope: SpawnScope): boolean {
+  return spawnScopes.get(scope.sessionKey) === scope;
+}
+
 /** 이 opener 탭을 소유한 열린 스코프. 없으면 null. */
 async function scopeForOpener(openerTabId: number | null): Promise<SpawnScope | null> {
   if (openerTabId === null || spawnScopes.size === 0) return null;
@@ -256,6 +288,12 @@ async function scopeForOpener(openerTabId: number | null): Promise<SpawnScope | 
  * 예외 목록), 게이트를 거치면 무간섭 모드에서 복구 자체가 막혀 사용자가 팝업에 갇힌다.
  */
 async function restoreUserView(tabId: number, windowId: number): Promise<void> {
+  // 화면을 실제로 바꾸기 직전마다 스코프가 아직 열려 있는지 본다. 실행이 끝난 뒤의 복원은
+  // 사용자의 선택을 취소하는 간섭이다 (검토 D2).
+  // 어느 스코프의 탭인지 모르면 되돌리지 않는다. 모르는 채로 화면을 옮기는 것이 사용자의
+  // 선택을 취소하는 것과 같은 종류의 간섭이다 (검토 E3).
+  const owner = adoptedTabScopes.get(tabId);
+  if (!owner || !isScopeOpen(owner)) return;
   const prevTabId = lastActiveTabByWindow.get(windowId);
   // 직전 탭이 이 실행이 연 다른 탭이면 되돌릴 사용자 화면이 아니다.
   if (typeof prevTabId === 'number' && prevTabId !== tabId && !adoptedTabs.has(prevTabId)) {
@@ -263,6 +301,8 @@ async function restoreUserView(tabId: number, windowId: number): Promise<void> {
       // 그 탭이 아직 활성이면 스폰 탭이 활성 슬롯을 가져가지 않았다는 뜻이다
       // (별도 팝업 창으로 떴다). 되돌릴 것이 없으므로 건드리지 않는다.
       const prev = await chrome.tabs.get(prevTabId);
+      // `tabs.get` 을 기다리는 사이에 실행이 끝났을 수 있다 (검토 D2).
+      if (!isScopeOpen(owner)) return;
       if (prev?.active !== true) await chrome.tabs.update(prevTabId, { active: true });
     } catch {
       // 탭이 이미 닫혔을 수 있다 - best-effort
@@ -275,6 +315,7 @@ async function restoreUserView(tabId: number, windowId: number): Promise<void> {
   // (어느 쪽이 먼저 올지는 정해져 있지 않다) 확인이 없으면 두 번 건다.
   if (focusRestoredSpawns.has(tabId)) return;
   const prevWindowId = await previousUserFocusedWindow(windowId);
+  if (!isScopeOpen(owner)) return;
   if (prevWindowId !== null) {
     focusRestoredSpawns.add(tabId);
     try {
@@ -293,13 +334,21 @@ async function adoptSpawnedTab(record: SpawnedTabRecord, windowType: string): Pr
   if (adoptedTabs.has(record.tabId)) return true;
   const scope = await scopeForOpener(record.openerTabId);
   if (!scope) return false;
+  // 소유 조회를 기다리는 사이에 실행이 끝났을 수 있다. 끝난 스코프로 추적을 다시 심으면
+  // 그 뒤 사용자가 그 탭을 직접 골라도 화면이 되돌아간다 (검토 D2).
+  if (!isScopeOpen(scope)) return false;
   adoptedTabs.add(record.tabId);
   adoptedTabScopes.set(record.tabId, scope);
+  adoptedTabAt.set(record.tabId, Date.now());
+  // 흡수한 탭은 이 스코프의 소유 버킷에 넣고, 팝업 창이면 실행이 끝날 때 창째로 닫는다.
   try {
     await addOwnedTab(record.tabId, scope.sessionKey);
   } catch {
     // 소유 등록 실패는 정리 경로가 창 단위로 한 번 더 걷는다.
   }
+  // 소유 등록을 기다리는 사이에 실행이 끝났을 수 있다. 끝났으면 화면을 건드리지 않는다
+  // (검토 E3).
+  if (!isScopeOpen(scope)) return true;
   if (windowType === 'popup') scope.popupWindowIds.add(record.windowId);
   await restoreUserView(record.tabId, record.windowId);
   return true;
@@ -348,14 +397,15 @@ function upsert(partial: Omit<SpawnedTabRecord, 'windowType'> & { windowType?: s
     if (partial.url) existing.url = partial.url;
     return;
   }
-  records.push({
+  const created: SpawnedTabRecord = {
     tabId: partial.tabId,
     openerTabId: partial.openerTabId,
     url: partial.url,
     windowId: partial.windowId,
     windowType: partial.windowType ?? 'normal',
     createdAt: partial.createdAt,
-  });
+  };
+  records.push(created);
 }
 
 async function resolveWindowType(windowId: number): Promise<string> {
@@ -380,7 +430,14 @@ export function noteTabActivated(tabId: number, windowId: number): void {
     // 흡수는 storage 조회를 기다리므로 이 활성화보다 늦게 끝날 수 있다. 같은 체인에
     // 실어 두면 여기 올 때는 흡수 판정이 이미 끝나 있다.
     if (adoptedTabs.has(tabId) || adoptedTabScopes.has(tabId)) {
-      await restoreUserView(tabId, windowId);
+      // 되돌리는 것은 생성 직후의 활성화 경합뿐이다. 창이 뜨고 한참 뒤에 사용자가 그 탭을
+      // 직접 고른 것은 사용자의 선택이므로 건드리지 않는다 (검토 C5).
+      const adoptedAt = adoptedTabAt.get(tabId) ?? 0;
+      const owner = adoptedTabScopes.get(tabId);
+      const scopeStillOpen = !!owner && isScopeOpen(owner);
+      if (scopeStillOpen && adoptedAt && Date.now() - adoptedAt <= ADOPTION_RESTORE_WINDOW_MS) {
+        await restoreUserView(tabId, windowId);
+      }
       return;
     }
     // 자동화가 쥔 탭은 "사용자가 보던 화면" 이 아니다 - 되돌릴 대상으로 기록하지 않는다.
@@ -470,6 +527,7 @@ try {
     if (idx >= 0) records.splice(idx, 1);
     adoptedTabs.delete(tabId);
     adoptedTabScopes.delete(tabId);
+    adoptedTabAt.delete(tabId);
     focusRestoredSpawns.delete(tabId);
     // 닫힌 탭으로는 되돌리지 않는다.
     for (const [windowId, active] of lastActiveTabByWindow.entries()) {

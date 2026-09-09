@@ -195,6 +195,21 @@ export interface StepOpenTab extends StepBase {
   type: 'openTab';
   url?: string;
   newWindow?: boolean;
+  /**
+   * 이 단계가 만든 탭에 붙일 논리 탭 번호 (2026-09-09 여러 탭 설계 2.1).
+   *
+   * 녹화가 확정한 번호다. 재생은 번호를 추측하지 않는다. 0 은 흐름을 시작한 탭이다.
+   */
+  tabRef?: number;
+  /**
+   * 이 `openTab` 단계가 어떻게 생겼는지 (표시·진단용).
+   *
+   *   - `joined`: 녹화 중 사용자가 그 탭으로 옮겨 가 세션에 합류한 것. 지금 녹화가 만드는
+   *     값은 이것 하나뿐이다.
+   *   - `blank_link` · `auto`: 1.14.0 개발 중 잠깐 쓰였던 값. 그때 저장된 흐름을 읽기 위해
+   *     타입에만 남겨 둔다.
+   */
+  origin?: 'joined' | 'blank_link' | 'auto';
 }
 
 export interface StepSwitchTab extends StepBase {
@@ -202,12 +217,22 @@ export interface StepSwitchTab extends StepBase {
   tabId?: number;
   urlContains?: string;
   titleContains?: string;
+  /** 옮겨 갈 논리 탭 번호. 있으면 `tabId` 보다 우선한다 (설계 2.1). */
+  tabRef?: number;
 }
 
 export interface StepCloseTab extends StepBase {
   type: 'closeTab';
   tabIds?: number[];
   url?: string;
+  /**
+   * 닫을 논리 탭 번호 (설계 2.4).
+   *
+   * 이 필드가 있으면 해석 실패 시 현재 run 탭을 닫는 폴백을 타지 않는다. 구버전이 이
+   * 필드를 "인자 없음" 으로 오해해 사용자가 보던 탭을 닫는 것이 이 기능의 대표 사고이고,
+   * 그래서 구버전은 게이트(`engine/flow-compat.ts`)가 아예 실행을 거절한다.
+   */
+  tabRef?: number;
 }
 
 export interface StepNavigate extends StepBase {

@@ -15,7 +15,7 @@ import { PluginManager } from './plugins/manager';
 import type { RunPlugin } from './plugins/types';
 import { breakpointPlugin } from './plugins/breakpoint';
 import { evalExpression } from './utils/expression';
-import { runState } from './state-manager';
+import { markRunFinished, markRunLive, reapInterruptedRuns, runState } from './state-manager';
 import { AfterScriptQueue } from './runners/after-script-queue';
 import { StepRunner } from './runners/step-runner';
 import { ControlFlowRunner } from './runners/control-flow-runner';
@@ -30,7 +30,13 @@ import {
 } from './execution-mode';
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
-import { RunTabError, resolveRunTab, runToolArgs, type RunTabContext } from './tab-context';
+import {
+  RunTabError,
+  createRunTabState,
+  resolveRunTab,
+  runToolArgs,
+  type RunTabContext,
+} from './tab-context';
 import { assertFlowRunnable } from './flow-compat';
 import { RunAbortedError } from '@/utils/tool-watchdog';
 
@@ -260,6 +266,11 @@ class ExecutionOrchestrator {
     // 시작 탭은 계속 사정권에 둔다(돌아올 수 있어야 한다). 소유 집합에는 넣지 않는다 —
     // run 이 만든 탭이 아니므로 abort 정리가 닫으면 안 된다.
     if (this.tab.entryTabId === undefined) this.tab.entryTabId = this.tab.tabId;
+    // 여러 탭 공유 상태는 run 하나당 하나뿐이고, 파생 컨텍스트는 이 객체를 참조로 물려받는다
+    // (설계 2.1·2.7). `ownedTabIds` 는 위에서 만든 Set 을 그대로 담는다.
+    if (!this.tab.tabState) {
+      this.tab.tabState = createRunTabState(`run::${this.runId}`, this.tab.ownedTabIds);
+    }
     if (options.signal) this.tab.signal = options.signal;
     this.ctx = Object.assign(this.tab, {
       vars: this.vars,
@@ -422,8 +433,30 @@ class ExecutionOrchestrator {
       return;
     }
 
+    // 0번 탭은 흐름을 시작한 탭이다. run 이 만든 탭이 아니므로 소유 집합에는 넣지 않고
+    // (abort 정리가 사용자의 작업 탭을 닫으면 안 된다) 번호표에만 올린다 (설계 2.1).
+    const tabState = this.tab.tabState;
+    if (tabState && !tabState.tabRefs.has(0)) tabState.tabRefs.set(0, ensured.tabId);
+
+    // 흐름 Run 은 스폰 스코프를 열지 않는다 (2026-09-09 축소 결정).
+    //
+    // 스코프가 하던 일은 "run 의 탭이 연 팝업이 화면을 가져가면 되돌리기" 하나였다. 그런데
+    // 재생은 이제 자기가 연 탭만 다루고 남의 탭을 주워 오지 않으므로, 스코프가 흡수 판정에
+    // 관여할 이유가 없다. 반대로 스코프 종료와 비동기 복원의 경합은 실제 위험이었다
+    // (실행이 끝난 뒤 사용자가 그 탭을 직접 골라도 되돌려 버리는 문제). 예약 실행의
+    // 스코프는 그대로 두고, Run 은 1.13 과 같은 동작으로 남긴다.
+
     // register run state
     await runState.restore();
+    // 저장소에 `running` 으로 남은 이전 워커의 run 은 여기서 중단으로 정리한다. 자동
+    // 재개는 하지 않는다 (설계 2.6). 이 워커가 시작한 run 은 대상이 아니다.
+    // (`reapInterruptedRuns` 는 자기 몫의 restore 를 스스로 한다.)
+    try {
+      await reapInterruptedRuns();
+    } catch {
+      // best-effort
+    }
+    markRunLive(this.runId);
     await runState.add(this.runId, {
       id: this.runId,
       flowId: this.flow.id,
@@ -807,6 +840,14 @@ class ExecutionOrchestrator {
         (s) => this.logger.overlayAppend(`✔ ${s.type} (${s.id})`),
         (s, e) => this.logger.overlayAppend(`✘ ${s.type} (${s.id}) -> ${e?.message || String(e)}`),
       );
+      // "마지막으로 끝낸 단계" 표시용 (설계 2.6). 실행 **뒤에** 기록해야 워커가 죽었을 때
+      // 사용자가 보는 숫자가 실제로 끝난 단계와 맞는다 (검토 사소). 재개용이 아니므로
+      // 저장 실패는 무시한다.
+      if (r.status !== 'failed') {
+        void runState
+          .update(this.runId, { lastStepIndex: this.executed, updatedAt: Date.now() })
+          .catch(() => undefined);
+      }
       if (r.status === 'paused') {
         this.paused = true;
         break;
@@ -1079,6 +1120,7 @@ class ExecutionOrchestrator {
     // `checkAbort()` 를 다시 지나지 않는다. 그래서 예전에는 취소된 run 이 자기가 연 탭을
     // 그대로 남겼다.
     if (this.aborted || this.abortRequested()) await this.closeOwnedTabs();
+    markRunFinished(this.runId);
   }
 }
 

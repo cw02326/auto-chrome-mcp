@@ -25,6 +25,7 @@ import { runFlow } from './flow-runner';
 import { checkFlowRunnable } from './engine/flow-compat';
 import { queryEntryPointTab, runTabFromId, type RunTabContext } from './engine/tab-context';
 import { RecorderManager } from './recording/recorder-manager';
+import { reapInterruptedRuns, runState } from './engine/state-manager';
 import { recordingSession } from './recording/session-manager';
 // 녹화가 시작·중지되면 우클릭 메뉴 문구도 따라가야 한다 (2026-09-06).
 import { syncRecordingMenuTitles } from '../context-menus-spec';
@@ -204,6 +205,13 @@ export function initRecordReplayListeners() {
   initTriggerEngine().catch(() => {});
   // Initialize recorder manager (wires browser and content listeners)
   RecorderManager.init().catch(() => {});
+  // MV3 워커가 죽으면 진행 중이던 run 의 탭 소유·번호표가 통째로 사라진다. 그 상태로는
+  // 무엇이 run 의 것인지 알 수 없으므로 이어서 실행하지 않고 중단으로 정리한다
+  // (설계 2.6). 열려 있는 탭을 다시 훑어 번호를 붙이는 복구는 하지 않는다.
+  void runState
+    .restore()
+    .then(() => reapInterruptedRuns())
+    .catch(() => undefined);
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
