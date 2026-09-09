@@ -2809,5 +2809,9 @@
   "recorder_move_hint": {
     "message": "Drag to move. You can also focus this row and use the arrow keys.",
     "description": "Toolbar move hint (title/aria-label)"
+  },
+  "sidepanel_flow_delete_confirm_with_schedule": {
+    "message": "Delete this flow and its schedule? This cannot be undone",
+    "description": "Confirm deleting a flow that has a schedule"
   }
 }

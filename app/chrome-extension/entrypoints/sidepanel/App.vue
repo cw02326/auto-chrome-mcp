@@ -958,9 +958,17 @@ async function unpublish(id: string) {
 }
 
 async function remove(id: string) {
-  const ok = confirm(getMessage('sidepanel_flow_delete_confirm'));
+  // 예약이 걸린 흐름을 지우면 그 예약은 없는 흐름을 실행하려 든다. 함께 지운다.
+  const schedule = schedulesByFlowId.value[id] || null;
+  const message = schedule
+    ? getMessage('sidepanel_flow_delete_confirm_with_schedule')
+    : getMessage('sidepanel_flow_delete_confirm');
+  const ok = confirm(message);
   if (!ok) return;
   try {
+    if (schedule?.scheduleId) {
+      await dailySchedules.remove(schedule.scheduleId);
+    }
     await workflowsV3.deleteFlow(id);
   } catch (e) {
     showToast(getMessage('sidepanel_flow_delete_failed', [errorText(e)]), 'error');

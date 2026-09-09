@@ -62,6 +62,14 @@
       >
         {{ getMessage('sidepanel_card_edit_action') }}
       </button>
+      <button
+        class="ac-button ac-button--danger ac-button--sm"
+        type="button"
+        @click.stop="$emit('delete', flow.id)"
+        :title="getMessage('deleteButton')"
+      >
+        {{ getMessage('deleteButton') }}
+      </button>
       <div class="wf-more">
         <button
           class="ac-icon-button"
@@ -117,23 +125,6 @@
                 />
               </svg>
               <span>{{ getMessage('sidepanel_export_button') }}</span>
-            </button>
-            <button class="wf-menu-item wf-menu-item-danger" type="button" @click="handleDelete">
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
-              <span>{{ getMessage('deleteButton') }}</span>
             </button>
           </div>
         </Transition>
@@ -253,11 +244,6 @@ onUnmounted(() => {
 
 function toggleMoreMenu() {
   showMoreMenu.value = !showMoreMenu.value;
-}
-
-function handleDelete() {
-  showMoreMenu.value = false;
-  emit('delete', props.flow.id);
 }
 
 function handleExport() {
