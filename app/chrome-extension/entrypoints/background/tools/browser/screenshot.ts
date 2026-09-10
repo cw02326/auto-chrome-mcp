@@ -12,6 +12,10 @@ import {
   type ModelInputImage,
 } from '../../../../utils/image-utils';
 import { screenshotContextManager } from '@/utils/screenshot-context';
+import {
+  readObservationPageState,
+  type ObservationPageState,
+} from '@/utils/screenshot-observation';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { activateTab } from '@/utils/activation-guard';
 import { isMcpWindow } from '@/utils/mcp-window-manager';
@@ -502,6 +506,11 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let originalScroll: { x: number; y: number } | null = null;
     let didPreparePage = false;
     let pageDetails: ScreenshotPageDetails | undefined;
+    const stateBeforeCapture = notInjectable ? undefined : await readObservationPageState(tab.id!);
+    let captureRect: { x: number; y: number; width: number; height: number } | undefined;
+    let coordinateSpace: 'viewport' | 'fullPage' | 'region' = 'viewport';
+    let observationId: string | undefined;
+    let elementCaptureState: ObservationPageState | undefined;
 
     try {
       // auto-chrome-mcp fork: CDP 는 대상 탭이 보이지 않아도 정확히 그 탭을 캡처하므로,
@@ -524,6 +533,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           // 좌표 스케일링 규약 유지: 컨텍스트에는 CSS 픽셀 기준 뷰포트 크기를 기록한다
           finalImageWidthCss = captured.viewportWidthCss;
           finalImageHeightCss = captured.viewportHeightCss;
+          if (stateBeforeCapture && captured.viewportWidthCss && captured.viewportHeightCss) {
+            captureRect = {
+              x: stateBeforeCapture.scrollX,
+              y: stateBeforeCapture.scrollY,
+              width: captured.viewportWidthCss,
+              height: captured.viewportHeightCss,
+            };
+          }
         } catch (e) {
           cdpCaptureError = e;
           console.warn('CDP viewport capture failed, falling back to helper path:', e);
@@ -574,8 +591,11 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         originalScroll = { x: pageDetails.currentScrollX, y: pageDetails.currentScrollY };
 
         if (fullPage) {
+          coordinateSpace = 'fullPage';
           this.logInfo('Capturing full page...');
-          finalImageDataUrl = await this._captureFullPage(tab, args, pageDetails);
+          finalImageDataUrl = await this._captureFullPage(tab, args, pageDetails, (rect) => {
+            captureRect = rect;
+          });
           // Compute final CSS size
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
@@ -593,8 +613,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             finalImageHeightCss = pageDetails.totalHeight;
           }
         } else if (selector) {
+          coordinateSpace = 'region';
           this.logInfo(`Capturing element: ${selector}`);
-          finalImageDataUrl = await this._captureElement(tab, args, pageDetails.devicePixelRatio);
+          const elementCapture = await this._captureElement(
+            tab,
+            args,
+            pageDetails.devicePixelRatio,
+          );
+          finalImageDataUrl = elementCapture.dataUrl;
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
             finalImageHeightCss = args.height;
@@ -602,12 +628,20 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             finalImageWidthCss = pageDetails.viewportWidth;
             finalImageHeightCss = pageDetails.viewportHeight;
           }
+          captureRect = elementCapture.captureRect;
+          elementCaptureState = elementCapture.pageState;
         } else {
           // Visible area only — CDP 가 실패했을 때만 도달하는 폴백 경로
           this.logInfo('Capturing visible area (captureVisibleTab fallback)...');
           finalImageDataUrl = await captureVisibleTabFallback(tab.id!, tab.windowId);
           finalImageWidthCss = pageDetails.viewportWidth;
           finalImageHeightCss = pageDetails.viewportHeight;
+          captureRect = {
+            x: pageDetails.currentScrollX,
+            y: pageDetails.currentScrollY,
+            width: pageDetails.viewportWidth,
+            height: pageDetails.viewportHeight,
+          };
         }
       }
 
@@ -648,36 +682,103 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         });
       }
 
-      // 2. Process output
-      // Update screenshot context for coordinate scaling by tools like chrome_computer
-      try {
-        if (typeof finalImageWidthCss === 'number' && typeof finalImageHeightCss === 'number') {
-          let hostname = '';
-          try {
-            hostname = tab.url ? new URL(tab.url).hostname : '';
-          } catch {
-            // ignore
-          }
-          // Use pageDetails if available, otherwise fall back to final image dimensions
-          // auto-chrome-mcp fork: viewportWidth/Height 는 예전과 완전히 동일하게 "원본 CSS 뷰포트" 크기를 기록한다.
-          const viewportWidth = pageDetails?.viewportWidth ?? finalImageWidthCss;
-          const viewportHeight = pageDetails?.viewportHeight ?? finalImageHeightCss;
-          // auto-chrome-mcp fork: 좌표 기준 프레임은 모델에게 넘어간 이미지의 실제 픽셀 크기.
-          // (이미지를 반환하지 않는 경로에서는 기존과 동일하게 CSS 기준 크기를 유지)
-          const screenshotWidth = modelImage ? modelImage.width : finalImageWidthCss;
-          const screenshotHeight = modelImage ? modelImage.height : finalImageHeightCss;
-          screenshotContextManager.setContext(tab.id!, {
-            screenshotWidth,
-            screenshotHeight,
-            viewportWidth,
-            viewportHeight,
-            devicePixelRatio: pageDetails?.devicePixelRatio,
-            hostname,
-          });
-        }
-      } catch (e) {
-        console.warn('Failed to set screenshot context:', e);
+      const intrinsicBitmap = modelImage
+        ? undefined
+        : await createImageBitmapFromUrl(finalImageDataUrl);
+      const screenshotWidth = modelImage?.width ?? intrinsicBitmap?.width ?? finalImageWidthCss!;
+      const screenshotHeight =
+        modelImage?.height ?? intrinsicBitmap?.height ?? finalImageHeightCss!;
+      intrinsicBitmap?.close?.();
+      const stateAfterCapture = notInjectable ? undefined : await readObservationPageState(tab.id!);
+      let observationState: ObservationPageState | undefined;
+      if (
+        stateBeforeCapture &&
+        stateAfterCapture &&
+        stateBeforeCapture.url === stateAfterCapture.url &&
+        stateBeforeCapture.lastNavigationAt === stateAfterCapture.lastNavigationAt &&
+        stateBeforeCapture.viewportWidth === stateAfterCapture.viewportWidth &&
+        stateBeforeCapture.viewportHeight === stateAfterCapture.viewportHeight &&
+        (fullPage ||
+          Boolean(selector) ||
+          (stateBeforeCapture.scrollX === stateAfterCapture.scrollX &&
+            stateBeforeCapture.scrollY === stateAfterCapture.scrollY))
+      ) {
+        const elementStable =
+          !selector ||
+          (elementCaptureState &&
+            elementCaptureState.url === stateAfterCapture.url &&
+            elementCaptureState.lastNavigationAt === stateAfterCapture.lastNavigationAt &&
+            elementCaptureState.scrollX === stateAfterCapture.scrollX &&
+            elementCaptureState.scrollY === stateAfterCapture.scrollY &&
+            elementCaptureState.viewportWidth === stateAfterCapture.viewportWidth &&
+            elementCaptureState.viewportHeight === stateAfterCapture.viewportHeight);
+        if (elementStable) observationState = fullPage ? stateBeforeCapture : stateAfterCapture;
       }
+      if (
+        !captureRect &&
+        coordinateSpace === 'viewport' &&
+        observationState &&
+        finalImageWidthCss &&
+        finalImageHeightCss
+      ) {
+        captureRect = {
+          x: observationState.scrollX,
+          y: observationState.scrollY,
+          width: finalImageWidthCss,
+          height: finalImageHeightCss,
+        };
+      }
+      // 복구를 먼저 끝낸 뒤 레거시 컨텍스트와 새 관찰을 한 스냅샷으로 저장한다.
+      await screenshotContextManager.restore();
+      if (typeof finalImageWidthCss === 'number' && typeof finalImageHeightCss === 'number') {
+        let contextHostname = '';
+        try {
+          contextHostname = tab.url ? new URL(tab.url).hostname : '';
+        } catch {
+          /* ignore */
+        }
+        screenshotContextManager.setContext(tab.id!, {
+          screenshotWidth: modelImage ? modelImage.width : finalImageWidthCss,
+          screenshotHeight: modelImage ? modelImage.height : finalImageHeightCss,
+          viewportWidth: pageDetails?.viewportWidth ?? finalImageWidthCss,
+          viewportHeight: pageDetails?.viewportHeight ?? finalImageHeightCss,
+          devicePixelRatio: pageDetails?.devicePixelRatio,
+          hostname: contextHostname,
+        });
+      }
+      {
+        const fallbackState: ObservationPageState = observationState ?? {
+          url: tab.url || '',
+          lastNavigationAt: 0,
+          scrollX: 0,
+          scrollY: 0,
+          viewportWidth: 0,
+          viewportHeight: 0,
+        };
+        const observation = await screenshotContextManager.recordObservation(tab.id!, {
+          ...fallbackState,
+          coordinateSpace,
+          captureRect: captureRect ?? {
+            x: 0,
+            y: 0,
+            width: finalImageWidthCss || 0,
+            height: finalImageHeightCss || 0,
+          },
+          screenshotWidth,
+          screenshotHeight,
+          devicePixelRatio: pageDetails?.devicePixelRatio,
+          hostname: (() => {
+            try {
+              return tab.url ? new URL(tab.url).hostname : '';
+            } catch {
+              return '';
+            }
+          })(),
+          metadataAvailable: Boolean(observationState && captureRect),
+        });
+        observationId = observation.observationId;
+      }
+
       if (storeBase64 === true && modelImage) {
         // auto-chrome-mcp fork: 이미지를 텍스트(JSON) 안에 base64 로 넣어 돌려주면 MCP 클라이언트가
         // 이미지 1장에 텍스트 토큰 10만~30만개를 지불한다. 정식 MCP image 블록으로 분리하고
@@ -706,6 +807,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
                 tabId: tab.id,
                 url: tab.url,
                 name,
+                observationId,
                 mimeType: modelImage.mimeType,
                 width: modelImage.width,
                 height: modelImage.height,
@@ -797,6 +899,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             tabId: tab.id,
             url: tab.url,
             name: name,
+            observationId,
             ...results,
           }),
         },
@@ -886,7 +989,11 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tab: chrome.tabs.Tab,
     options: ScreenshotToolParams,
     pageDpr: number,
-  ): Promise<string> {
+  ): Promise<{
+    dataUrl: string;
+    captureRect?: { x: number; y: number; width: number; height: number };
+    pageState?: ObservationPageState;
+  }> {
     const tabId = tab.id!;
     const elementDetails = await this.sendMessageToTab(tabId, {
       action: TOOL_MESSAGE_TYPES.SCREENSHOT_GET_ELEMENT_DETAILS,
@@ -899,6 +1006,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
     const dpr = elementDetails.devicePixelRatio || pageDpr || 1;
     const rect = elementDetails.rect as { x: number; y: number; width: number; height: number };
+    const pageState = await readObservationPageState(tabId);
+    let captureRect: { x: number; y: number; width: number; height: number } | undefined;
     if (!(rect.width > 0) || !(rect.height > 0)) {
       throw new Error(`Element "${options.selector}" has zero size and cannot be captured`);
     }
@@ -920,7 +1029,10 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
     // === Primary: CDP clip capture ===
     try {
-      return await this._captureElementViaCdp(tabId, rect, options, dpr);
+      const dataUrl = await this._captureElementViaCdp(tabId, rect, options, dpr, (actualRect) => {
+        captureRect = actualRect;
+      });
+      return { dataUrl, captureRect, pageState };
     } catch (e) {
       console.warn('CDP element capture failed, falling back to captureVisibleTab crop:', e);
     }
@@ -935,7 +1047,13 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       options.width, // Target output width in CSS pixels
       options.height, // Target output height in CSS pixels
     );
-    return canvasToDataURL(croppedCanvas);
+    return {
+      dataUrl: await canvasToDataURL(croppedCanvas),
+      pageState,
+      captureRect: pageState
+        ? { ...rect, x: pageState.scrollX + rect.x, y: pageState.scrollY + rect.y }
+        : undefined,
+    };
   }
 
   /**
@@ -948,6 +1066,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     rect: { x: number; y: number; width: number; height: number },
     options: ScreenshotToolParams,
     dpr: number,
+    onCaptureRect: (rect: { x: number; y: number; width: number; height: number }) => void,
   ): Promise<string> {
     return await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
       const metrics = normalizeLayoutMetrics(
@@ -975,6 +1094,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       });
 
       const dataUrl = `data:image/png;base64,${base64Data}`;
+      onCaptureRect({
+        x: metrics.pageXCss + rect.x,
+        y: metrics.pageYCss + rect.y,
+        width: rect.width,
+        height: rect.height,
+      });
       if (!options.width && !options.height) return dataUrl;
 
       // 출력 크기 지정 시 폴백(crop) 경로와 동일한 리사이즈 규칙 적용
@@ -998,6 +1123,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tabId: number,
     options: ScreenshotToolParams,
     initialPageDetails: any,
+    onCaptureRect: (rect: { x: number; y: number; width: number; height: number }) => void,
   ): Promise<string | null> {
     const dpr = initialPageDetails.devicePixelRatio || 1;
 
@@ -1044,12 +1170,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         },
       });
 
-      return await resizeToRequestedSize(
+      const dataUrl = await resizeToRequestedSize(
         `data:image/png;base64,${base64Data}`,
         dpr,
         options.width,
         options.height,
       );
+      onCaptureRect({ x: 0, y: 0, width: contentWidthCss, height: limitedHeightCss });
+      return dataUrl;
     });
   }
 
@@ -1060,13 +1188,20 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tab: chrome.tabs.Tab,
     options: ScreenshotToolParams,
     initialPageDetails: any,
+    onCaptureRect: (rect: { x: number; y: number; width: number; height: number }) => void = () =>
+      undefined,
   ): Promise<string> {
     const tabId = tab.id!;
     const dpr = initialPageDetails.devicePixelRatio;
 
     // === Primary: 단일 CDP 캡처 (백그라운드 탭 지원, 스크롤 이동 없음) ===
     try {
-      const cdpDataUrl = await this._captureFullPageViaCdp(tabId, options, initialPageDetails);
+      const cdpDataUrl = await this._captureFullPageViaCdp(
+        tabId,
+        options,
+        initialPageDetails,
+        onCaptureRect,
+      );
       if (cdpDataUrl) return cdpDataUrl;
     } catch (e) {
       console.warn('CDP full page capture failed, falling back to scroll-stitch:', e);
@@ -1097,6 +1232,16 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let currentScrollYCss = 0;
     let capturedHeightPx = 0;
     let partIndex = 0;
+
+    // 스티칭의 첫 이미지도 문서 원점에서 찍어야 저장한 captureRect와 실제 픽셀이 일치한다.
+    if (initialPageDetails.currentScrollX || initialPageDetails.currentScrollY) {
+      await this.sendMessageToTab(tabId, {
+        action: TOOL_MESSAGE_TYPES.SCREENSHOT_SCROLL_PAGE,
+        x: 0,
+        y: 0,
+        scrollDelay: SCREENSHOT_CONSTANTS.SCROLL_DELAY_MS,
+      });
+    }
 
     while (capturedHeightPx < totalHeightPx && partIndex < SCREENSHOT_CONSTANTS.MAX_CAPTURE_PARTS) {
       this.logInfo(
@@ -1189,7 +1334,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       }
     }
 
-    return canvasToDataURL(outputCanvas);
+    const dataUrl = await canvasToDataURL(outputCanvas);
+    onCaptureRect({ x: 0, y: 0, width: totalWidthCss, height: limitedHeightCss });
+    return dataUrl;
   }
 }
 

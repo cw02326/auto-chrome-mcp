@@ -25,7 +25,11 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 vi.mock('@/utils/screenshot-context', () => ({
-  screenshotContextManager: { setContext: vi.fn() },
+  screenshotContextManager: {
+    restore: vi.fn(),
+    setContext: vi.fn(),
+    recordObservation: vi.fn(async () => ({ observationId: 'obs-test' })),
+  },
 }));
 
 vi.mock('@/utils/activation-guard', () => ({ activateTab: vi.fn(async () => undefined) }));
@@ -279,7 +283,7 @@ describe('chrome_screenshot — 일반 탭은 기존 경로 그대로', () => {
     } as any);
 
     // 주입은 시도되고(= 기존 경로), 이 테스트 환경에서는 주입이 거부되므로 그 에러로 끝난다.
-    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(executeScript).toHaveBeenCalledTimes(2);
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('Failed to inject content script');
     // 일반 탭에서는 CDP 파라미터 재시도가 없어야 한다.
@@ -301,7 +305,7 @@ describe('chrome_screenshot — 일반 탭은 기존 경로 그대로', () => {
     } as any);
 
     expect(result.isError).toBe(false);
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledTimes(2);
     expect(captureParams).toHaveLength(1);
   });
 });

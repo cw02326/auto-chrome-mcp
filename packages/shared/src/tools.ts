@@ -568,6 +568,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           },
           description: 'Starting coordinates for drag.',
         },
+        observationId: {
+          type: 'string',
+          description:
+            'Observation ID returned by chrome_screenshot. Binds image coordinates to that capture; rejects missing, expired, or changed page state. Take a new screenshot after rejection.',
+        },
         startRef: {
           type: 'string',
           description: 'Drag start ref (alternative to startCoordinates).',
@@ -714,7 +719,8 @@ export const TOOL_SCHEMAS: Tool[] = [
     description:
       '[Prefer chrome_read_page, or chrome_computer action="screenshot"] Take a screenshot of the page or an element. Use this tool only when you need its advanced options. ' +
       'With storeBase64, the image arrives as a separate MCP image content block in image pixels (chrome_computer converts coordinates via imageScale automatically), not base64 in this text; ' +
-      'a saved file path (savePng/saveToDownloads) is included in the response.',
+      'pass the returned observationId to chrome_computer to validate the page state and map viewport/full-page/element image coordinates. ' +
+      'A saved file path (savePng/saveToDownloads) is included in the response.',
     inputSchema: {
       type: 'object',
       properties: {

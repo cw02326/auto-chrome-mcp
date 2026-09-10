@@ -21,7 +21,11 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 vi.mock('@/utils/screenshot-context', () => ({
-  screenshotContextManager: { setContext: vi.fn() },
+  screenshotContextManager: {
+    restore: vi.fn(),
+    setContext: vi.fn(),
+    recordObservation: vi.fn(async () => ({ observationId: 'obs-save' })),
+  },
 }));
 
 vi.mock('@/utils/activation-guard', () => ({ activateTab: vi.fn(async () => undefined) }));

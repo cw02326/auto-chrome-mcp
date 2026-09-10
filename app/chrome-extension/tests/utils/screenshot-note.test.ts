@@ -25,7 +25,11 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 vi.mock('@/utils/screenshot-context', () => ({
-  screenshotContextManager: { setContext: vi.fn() },
+  screenshotContextManager: {
+    restore: vi.fn(),
+    setContext: vi.fn(),
+    recordObservation: vi.fn(async () => ({ observationId: 'obs-note' })),
+  },
 }));
 
 vi.mock('@/utils/activation-guard', () => ({ activateTab: vi.fn(async () => undefined) }));
@@ -106,6 +110,18 @@ describe('chrome_screenshot — note 필드 제거', () => {
     expect(typeof payload.cssHeight).toBe('number');
     expect(payload.width).toBe(800);
     expect(payload.height).toBe(600);
+    expect(payload.observationId).toBe('obs-note');
+
+    const { screenshotContextManager } = await import('@/utils/screenshot-context');
+    expect(screenshotContextManager.recordObservation).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        coordinateSpace: 'viewport',
+        screenshotWidth: 800,
+        screenshotHeight: 600,
+        metadataAvailable: false,
+      }),
+    );
 
     // 이미지는 여전히 별도 MCP image 블록으로 온다 (본문 텍스트에는 base64 가 없다)
     expect(result.content[1].type).toBe('image');

@@ -7,6 +7,12 @@ import { clickTool, fillTool } from './interaction';
 import { keyboardTool } from './keyboard';
 import { screenshotTool } from './screenshot';
 import { screenshotContextManager, scaleCoordinates } from '@/utils/screenshot-context';
+import {
+  projectObservationCoordinates,
+  readObservationPageState,
+  validateObservation,
+  type ScreenshotObservation,
+} from '@/utils/screenshot-observation';
 import { prepareImageForModelInput, MODEL_INPUT_MAX_LONG_EDGE } from '@/utils/image-utils';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
@@ -78,6 +84,7 @@ interface ComputerParams {
   background?: boolean; // avoid focusing/activating
   // auto-chrome-mcp fork: screenshot/zoom 결과 이미지의 축소(긴 변 1568px)를 건너뛴다. 화질 탈출구.
   fullResolution?: boolean;
+  observationId?: string;
 }
 
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
@@ -244,9 +251,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
         if (actionType) {
           // Convert to viewport-space coordinates for GIF overlays
           // params.coordinates may be screenshot-space when screenshot context exists
+          const observed = params.observationId
+            ? screenshotContextManager.getObservation(params.observationId)
+            : undefined;
           const ctx = screenshotContextManager.getContext(tab.id);
           const toViewport = (c?: Coordinates): { x: number; y: number } | undefined => {
             if (!c) return undefined;
+            if (observed) return projectObservationCoordinates(c.x, c.y, observed);
             if (!ctx) return { x: c.x, y: c.y };
             const scaled = scaleCoordinates(c.x, c.y, ctx);
             return { x: scaled.x, y: scaled.y };
@@ -295,19 +306,448 @@ class ComputerTool extends BaseBrowserToolExecutor {
     return mapping[action] || null;
   }
 
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private partiallyDeliveredError(error: unknown): ToolResult {
+    return createErrorResponse(
+      `Input may have been partially delivered: ${this.errorMessage(error)}`,
+    );
+  }
+
+  private async runCoordinateCdp(
+    tabId: number,
+    action: (dispatch: (event: any) => Promise<void>) => Promise<void>,
+  ): Promise<{ ok: true } | { ok: false; canFallback: boolean; error: unknown }> {
+    let attached = false;
+    let attempted = false;
+    try {
+      await CDPHelper.attach(tabId);
+      attached = true;
+      await action(async (event) => {
+        // 첫 전송 호출 뒤에는 브라우저 전달 여부를 알 수 없어 DOM 재시도를 금지한다.
+        attempted = true;
+        await CDPHelper.dispatchMouseEvent(tabId, event);
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, canFallback: !attempted, error };
+    } finally {
+      // attach가 성공한 세션만 해제한다. 실패한 attach는 다른 소유자의 세션일 수 있다.
+      if (attached) await CDPHelper.detach(tabId).catch(() => undefined);
+    }
+  }
+
+  private withCoordinateTransport(
+    result: ToolResult,
+    action: string,
+    coordinates: Coordinates,
+    transport: 'cdp' | 'dom',
+    fallbackError?: unknown,
+    resolvedBy?: string,
+    warning?: string,
+  ): ToolResult {
+    return {
+      ...result,
+      content: result.content.map((block) => {
+        if (block.type !== 'text') return block;
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(block.text);
+        } catch {
+          payload = { error: block.text };
+        }
+        return {
+          ...block,
+          text: JSON.stringify({
+            ...payload,
+            success: !result.isError,
+            action,
+            coordinates,
+            ...(resolvedBy ? { resolvedBy } : {}),
+            transport,
+            ...(fallbackError !== undefined
+              ? { transportFallbackReason: this.errorMessage(fallbackError) }
+              : {}),
+            ...(warning ? { warning } : {}),
+          }),
+        };
+      }),
+    };
+  }
+
+  private async executePureCoordinateAction(
+    params: ComputerParams,
+    tabId: number,
+    coordinates: Coordinates,
+    start: Coordinates | undefined,
+    warning?: string,
+  ): Promise<ToolResult> {
+    const modifiers = CDPHelper.modifierMask(
+      [
+        params.modifiers?.altKey ? 'alt' : undefined,
+        params.modifiers?.ctrlKey ? 'ctrl' : undefined,
+        params.modifiers?.metaKey ? 'meta' : undefined,
+        params.modifiers?.shiftKey ? 'shift' : undefined,
+      ].filter((v): v is string => typeof v === 'string'),
+    );
+    const clicks = params.action === 'double_click' ? 2 : params.action === 'triple_click' ? 3 : 1;
+    const cdp = await this.runCoordinateCdp(tabId, async (dispatch) => {
+      if (params.action === 'left_click_drag') {
+        await dispatch({
+          type: 'mouseMoved',
+          x: start!.x,
+          y: start!.y,
+          button: 'none',
+          buttons: 0,
+          modifiers,
+        });
+        await dispatch({
+          type: 'mousePressed',
+          x: start!.x,
+          y: start!.y,
+          button: 'left',
+          buttons: 1,
+          clickCount: 1,
+          modifiers,
+        });
+        await dispatch({
+          type: 'mouseMoved',
+          x: coordinates.x,
+          y: coordinates.y,
+          button: 'left',
+          buttons: 1,
+          modifiers,
+        });
+        await dispatch({
+          type: 'mouseReleased',
+          x: coordinates.x,
+          y: coordinates.y,
+          button: 'left',
+          buttons: 0,
+          clickCount: 1,
+          modifiers,
+        });
+      } else if (params.action === 'hover') {
+        await dispatch({
+          type: 'mouseMoved',
+          x: coordinates.x,
+          y: coordinates.y,
+          button: 'none',
+          buttons: 0,
+          modifiers,
+        });
+      } else {
+        const button: MouseButton = params.action === 'right_click' ? 'right' : 'left';
+        await dispatch({
+          type: 'mouseMoved',
+          x: coordinates.x,
+          y: coordinates.y,
+          button: 'none',
+          buttons: 0,
+          modifiers,
+        });
+        for (let i = 1; i <= clicks; i++) {
+          await dispatch({
+            type: 'mousePressed',
+            x: coordinates.x,
+            y: coordinates.y,
+            button,
+            buttons: button === 'left' ? 1 : 2,
+            clickCount: i,
+            modifiers,
+          });
+          await dispatch({
+            type: 'mouseReleased',
+            x: coordinates.x,
+            y: coordinates.y,
+            button,
+            buttons: 0,
+            clickCount: i,
+            modifiers,
+          });
+        }
+      }
+    });
+    if (cdp.ok) {
+      if (params.action === 'hover') {
+        const holdMs = Math.max(0, Math.min(params.duration ? params.duration * 1000 : 400, 5000));
+        if (holdMs) await new Promise((resolve) => setTimeout(resolve, holdMs));
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              action: params.action,
+              ...(start ? { start } : {}),
+              coordinates,
+              transport: 'cdp',
+              ...(warning ? { warning } : {}),
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+    if (!cdp.canFallback) return this.partiallyDeliveredError(cdp.error);
+    if (params.action === 'left_click_drag')
+      return this.domDragFallback(tabId, start!, coordinates, cdp.error, warning, params.modifiers);
+    if (params.action === 'hover') {
+      const fallback = await this.domHoverFallback(tabId, coordinates, 'coordinates');
+      return this.withCoordinateTransport(
+        fallback,
+        'hover',
+        coordinates,
+        'dom',
+        cdp.error,
+        'coordinates',
+        warning,
+      );
+    }
+    if (params.action === 'triple_click') {
+      return this.domTripleClickFallback(tabId, coordinates, params.modifiers, cdp.error, warning);
+    }
+    const fallback = await clickTool.execute({
+      coordinates,
+      waitForNavigation: false,
+      timeout: TIMEOUTS.DEFAULT_WAIT * 5,
+      button: params.action === 'right_click' ? 'right' : 'left',
+      double: params.action === 'double_click',
+      modifiers: params.modifiers,
+      tabId,
+    });
+    return this.withCoordinateTransport(
+      fallback,
+      params.action,
+      coordinates,
+      'dom',
+      cdp.error,
+      undefined,
+      warning,
+    );
+  }
+
+  private async domTripleClickFallback(
+    tabId: number,
+    coordinates: Coordinates,
+    modifiers: Modifiers | undefined,
+    error: unknown,
+    warning?: string,
+  ): Promise<ToolResult> {
+    // 기존 clickTool은 double까지만 지원한다. 무시되는 detail 인자로 단일 클릭을 성공처럼 반환하지 않는다.
+    // attach 실패가 확인된 경우에만 한 번 주입하며, 전송 후 예외에는 재시도하지 않는다.
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        args: [coordinates, modifiers ?? {}] as [Coordinates, Modifiers],
+        func: (point, mods) => {
+          const target = document.elementFromPoint(point.x, point.y);
+          if (!target) return { success: false, error: 'No element found at click coordinates' };
+          const options = {
+            bubbles: true,
+            cancelable: true,
+            clientX: point.x,
+            clientY: point.y,
+            button: 0,
+            view: document.defaultView,
+            ...mods,
+          };
+          for (let detail = 1; detail <= 3; detail++) {
+            target.dispatchEvent(new MouseEvent('mousedown', { ...options, buttons: 1, detail }));
+            target.dispatchEvent(new MouseEvent('mouseup', { ...options, buttons: 0, detail }));
+            target.dispatchEvent(new MouseEvent('click', { ...options, buttons: 0, detail }));
+            if (detail === 2)
+              target.dispatchEvent(new MouseEvent('dblclick', { ...options, buttons: 0, detail }));
+          }
+          return { success: true };
+        },
+      });
+      if (!result?.result?.success)
+        return createErrorResponse(result?.result?.error || 'DOM triple click fallback failed');
+      return this.withCoordinateTransport(
+        { content: [{ type: 'text', text: '{}' }], isError: false },
+        'triple_click',
+        coordinates,
+        'dom',
+        error,
+        undefined,
+        warning,
+      );
+    } catch (fallbackError) {
+      return this.partiallyDeliveredError(fallbackError);
+    }
+  }
+
+  private async domDragFallback(
+    tabId: number,
+    start: Coordinates,
+    end: Coordinates,
+    error: unknown,
+    warning?: string,
+    modifiers?: Modifiers,
+  ): Promise<ToolResult> {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        args: [start, end, modifiers ?? {}] as [Coordinates, Coordinates, Modifiers],
+        func: (from, to, mods) => {
+          const source = document.elementFromPoint(from.x, from.y);
+          const target = document.elementFromPoint(to.x, to.y);
+          if (!source || !target)
+            return { success: false, error: 'No element found at drag coordinates' };
+          const event = (type: string, point: { x: number; y: number }, buttons: number) =>
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              clientX: point.x,
+              clientY: point.y,
+              button: 0,
+              buttons,
+              view: document.defaultView,
+              ...mods,
+            });
+          source.dispatchEvent(event('mousemove', from, 0));
+          source.dispatchEvent(event('mousedown', from, 1));
+          target.dispatchEvent(event('mousemove', to, 1));
+          target.dispatchEvent(event('mouseup', to, 0));
+          return { success: true };
+        },
+      });
+      if (!result?.result?.success)
+        return createErrorResponse(result?.result?.error || 'DOM drag fallback failed');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              action: 'left_click_drag',
+              start,
+              end,
+              transport: 'dom',
+              transportFallbackReason: this.errorMessage(error),
+              ...(warning ? { warning } : {}),
+            }),
+          },
+        ],
+        isError: false,
+      };
+    } catch (fallbackError) {
+      return this.partiallyDeliveredError(fallbackError);
+    }
+  }
+
   private async executeAction(params: ComputerParams, tab: chrome.tabs.Tab): Promise<ToolResult> {
     if (!tab.id) {
       return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
     }
 
-    // Helper to project coordinates using screenshot context when available
-    const project = (c?: Coordinates): Coordinates | undefined => {
+    let observation: ScreenshotObservation | undefined;
+    const mouseAction = [
+      'left_click',
+      'right_click',
+      'double_click',
+      'triple_click',
+      'hover',
+    ].includes(params.action);
+    const coordinateTarget =
+      (mouseAction && !params.ref && !params.selector && Boolean(params.coordinates)) ||
+      (params.action === 'left_click_drag' &&
+        Boolean(
+          (params.coordinates && !params.ref) || (params.startCoordinates && !params.startRef),
+        )) ||
+      (params.action === 'scroll' && !params.ref && Boolean(params.coordinates)) ||
+      (params.action === 'zoom' && Boolean(params.region));
+    if (coordinateTarget) await screenshotContextManager.restore();
+    if (params.observationId !== undefined && coordinateTarget) {
+      const candidate = screenshotContextManager.getObservation(params.observationId);
+      const current = await readObservationPageState(tab.id);
+      const validation = validateObservation(candidate, tab.id, current);
+      if (!validation.ok) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: validation.message,
+                reason: validation.reason,
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+      observation = validation.observation;
+    }
+
+    // 관찰 ID가 있으면 해당 스크린샷의 좌표계를 사용하고, 없으면 기존 컨텍스트를 유지한다.
+    const project = (c?: Coordinates, rawCoordinate = false): Coordinates | undefined => {
       if (!c) return undefined;
+      if (rawCoordinate && observation) {
+        return projectObservationCoordinates(c.x, c.y, observation);
+      }
       const ctx = screenshotContextManager.getContext(tab.id!);
       if (!ctx) return c;
       const scaled = scaleCoordinates(c.x, c.y, ctx);
       return { x: scaled.x, y: scaled.y };
     };
+
+    const coordinateWarning = (): string | undefined => {
+      if (params.observationId !== undefined || !coordinateTarget) return undefined;
+      const ctx = screenshotContextManager.getContext(tab.id!);
+      if (!ctx)
+        return 'No valid screenshot context was available; coordinates were treated as viewport CSS pixels. Take a new screenshot for reliable targeting.';
+      const timestamp = Number((ctx as any).timestamp ?? (ctx as any).createdAt);
+      if (Number.isFinite(timestamp) && Date.now() - timestamp > 5 * 60 * 1000) {
+        return 'Coordinates were used with an expired screenshot context. Capture a new screenshot for reliable targeting.';
+      }
+      return undefined;
+    };
+
+    const pureCoordinateAction =
+      [
+        'left_click',
+        'right_click',
+        'double_click',
+        'triple_click',
+        'left_click_drag',
+        'hover',
+      ].includes(params.action) &&
+      !params.ref &&
+      !params.selector &&
+      !params.startRef &&
+      Boolean(params.coordinates) &&
+      (params.action !== 'left_click_drag' || Boolean(params.startCoordinates));
+    if (pureCoordinateAction) {
+      const hostname = (() => {
+        try {
+          return new URL(tab.url || '').hostname;
+        } catch {
+          return '';
+        }
+      })();
+      const contextHostname = (screenshotContextManager.getContext(tab.id) as any)?.hostname as
+        | string
+        | undefined;
+      if (contextHostname && contextHostname !== hostname) {
+        return createErrorResponse(
+          `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${hostname}). Capture a new screenshot first.`,
+        );
+      }
+      return this.executePureCoordinateAction(
+        params,
+        tab.id,
+        project(params.coordinates, true)!,
+        params.startCoordinates ? project(params.startCoordinates, true) : undefined,
+        coordinateWarning(),
+      );
+    }
 
     switch (params.action) {
       case 'resize_page': {
@@ -412,7 +852,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               resolvedBy = 'selector';
             }
           } else if (params.coordinates) {
-            coord = project(params.coordinates);
+            coord = project(params.coordinates, true);
             resolvedBy = 'coordinates';
           }
         } catch (e) {
@@ -632,7 +1072,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
           return createErrorResponse(
             'Provide ref, selector, or coordinates for double/triple click',
           );
-        let coord = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let coord = params.coordinates
+          ? project(params.coordinates, !params.ref)!
+          : (undefined as any);
         // If ref is provided, resolve center via accessibility helper
         if (params.ref) {
           try {
@@ -750,9 +1192,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
         if (!params.coordinates && !params.ref)
           return createErrorResponse('Provide ref or end coordinates for drag');
         let start = params.startCoordinates
-          ? project(params.startCoordinates)!
+          ? project(params.startCoordinates, !params.startRef)!
           : (undefined as any);
-        let end = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let end = params.coordinates
+          ? project(params.coordinates, !params.ref)!
+          : (undefined as any);
         {
           const stale = ((): any => {
             if (!params.startCoordinates && !params.coordinates) return null;
@@ -840,7 +1284,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success: true, action: 'left_click_drag', start, end }),
+                text: JSON.stringify({
+                  success: true,
+                  action: 'left_click_drag',
+                  start,
+                  end,
+                  ...(coordinateWarning() ? { warning: coordinateWarning() } : {}),
+                }),
               },
             ],
             isError: false,
@@ -853,7 +1303,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
       case 'scroll': {
         if (!params.coordinates && !params.ref)
           return createErrorResponse('Provide ref or coordinates for scroll');
-        let coord = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let coord = params.coordinates
+          ? project(params.coordinates, !params.ref)!
+          : (undefined as any);
         if (params.ref) {
           try {
             await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
@@ -920,6 +1372,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                   coordinates: coord,
                   deltaX,
                   deltaY,
+                  ...(coordinateWarning() ? { warning: coordinateWarning() } : {}),
                 }),
               },
             ],
@@ -1199,8 +1652,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
 
         // Project coordinates from screenshot space to viewport space
-        const p0 = project({ x: x0, y: y0 })!;
-        const p1 = project({ x: x1, y: y1 })!;
+        const p0 = project({ x: x0, y: y0 }, true)!;
+        const p1 = project({ x: x1, y: y1 }, true)!;
         const rx0 = Math.min(p0.x, p1.x);
         const ry0 = Math.min(p0.y, p1.y);
         const rx1 = Math.max(p0.x, p1.x);
@@ -1230,10 +1683,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
           }
         }
 
+        let zoomAttached = false;
         try {
           await CDPHelper.attach(tab.id);
+          zoomAttached = true;
           const metrics: any = await CDPHelper.send(tab.id, 'Page.getLayoutMetrics', {});
-          const viewport = metrics?.layoutViewport ||
+          const viewport = metrics?.cssLayoutViewport ||
+            metrics?.layoutViewport ||
             metrics?.visualViewport || {
               clientWidth: 800,
               clientHeight: 600,
@@ -1243,13 +1699,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const vw = Math.round(Number(viewport.clientWidth || 800));
           const vh = Math.round(Number(viewport.clientHeight || 600));
           if (rx1 > vw || ry1 > vh) {
-            await CDPHelper.detach(tab.id);
             return createErrorResponse(
               `Region exceeds viewport boundaries (${vw}x${vh}). Choose a region within the visible viewport.`,
             );
           }
           const pageX = Number(viewport.pageX || 0);
           const pageY = Number(viewport.pageY || 0);
+          const pageStateBeforeCapture = await readObservationPageState(tab.id);
 
           const shot: any = await CDPHelper.send(tab.id, 'Page.captureScreenshot', {
             format: 'png',
@@ -1263,7 +1719,6 @@ class ComputerTool extends BaseBrowserToolExecutor {
               scale: 1,
             },
           });
-          await CDPHelper.detach(tab.id);
 
           const rawBase64 = String(shot?.data || '');
           if (!rawBase64) {
@@ -1281,6 +1736,39 @@ class ComputerTool extends BaseBrowserToolExecutor {
           });
           const zoomBase64 = zoomImage.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
           const zoomDownscaled = zoomImage.scale < 1;
+          const pageStateAfterCapture = await readObservationPageState(tab.id);
+          const stablePageState =
+            pageStateBeforeCapture &&
+            pageStateAfterCapture &&
+            pageStateBeforeCapture.url === pageStateAfterCapture.url &&
+            pageStateBeforeCapture.lastNavigationAt === pageStateAfterCapture.lastNavigationAt &&
+            pageStateBeforeCapture.scrollX === pageStateAfterCapture.scrollX &&
+            pageStateBeforeCapture.scrollY === pageStateAfterCapture.scrollY &&
+            pageStateBeforeCapture.viewportWidth === pageStateAfterCapture.viewportWidth &&
+            pageStateBeforeCapture.viewportHeight === pageStateAfterCapture.viewportHeight;
+          const observationInput = stablePageState ? pageStateAfterCapture : undefined;
+          const zoomObservation = await screenshotContextManager.recordObservation(tab.id, {
+            ...(observationInput || {
+              url: tab.url || '',
+              lastNavigationAt: 0,
+              scrollX: 0,
+              scrollY: 0,
+              viewportWidth: 0,
+              viewportHeight: 0,
+            }),
+            coordinateSpace: 'region',
+            captureRect: { x: pageX + rx0, y: pageY + ry0, width: w, height: h },
+            screenshotWidth: zoomImage.width,
+            screenshotHeight: zoomImage.height,
+            hostname: (() => {
+              try {
+                return new URL(tab.url || '').hostname;
+              } catch {
+                return '';
+              }
+            })(),
+            metadataAvailable: Boolean(stablePageState),
+          });
 
           return {
             content: [
@@ -1298,6 +1786,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
                     : {}),
                   // region 은 뷰포트 CSS 좌표. 확대 이미지 좌표를 되돌리려면 이 region 을 기준으로 환산한다.
                   region: { x0: rx0, y0: ry0, x1: rx1, y1: ry1 },
+                  observationId: zoomObservation.observationId,
+                  ...(coordinateWarning() ? { warning: coordinateWarning() } : {}),
                   note: 'The zoomed image is attached as an MCP image content block (no base64 in this text). Its pixels map onto the viewport region reported in `region`.',
                 }),
               },
@@ -1310,8 +1800,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
           return createErrorResponse(`zoom failed: ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          if (zoomAttached) await CDPHelper.detach(tab.id);
         }
       }
       case 'screenshot': {
