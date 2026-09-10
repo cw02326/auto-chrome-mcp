@@ -528,7 +528,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.COMPUTER,
     description:
-      'Mouse/keyboard interaction and screenshots. Before clicking (especially an icon), get its ref from chrome_read_page. If a click misses, screenshot and aim the cursor tip at the target center.',
+      'Mouse/keyboard interaction and screenshots. Before clicking (especially an icon), get its ref from chrome_read_page. If a click misses, screenshot and aim the cursor tip at the target center. Held mouse buttons and keys are automatically released after 10 seconds or on an action error; buttons-held permits hover/releases, and held keys permit pure coordinate actions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -544,7 +544,19 @@ export const TOOL_SCHEMAS: Tool[] = [
         action: {
           type: 'string',
           description:
-            'Action: left_click|right_click|double_click|triple_click|left_click_drag|scroll|scroll_to|type|key|fill|fill_form|hover|wait|resize_page|zoom|screenshot',
+            'Action: left_click|right_click|double_click|triple_click|left_click_drag|mouse_down|mouse_up|drag_path|scroll|scroll_to|type|ime_type|key|key_down|key_up|fill|fill_form|hover|wait|resize_page|zoom|screenshot',
+        },
+        observeAfter: {
+          type: 'boolean',
+          default: false,
+          description:
+            'After the action, wait for bounded visual stabilization and create a fresh observation; returns its observationId. Default false.',
+        },
+        includeImage: {
+          type: 'boolean',
+          default: false,
+          description:
+            'When observeAfter=true, also include the stabilized screenshot image in the result. Ignored otherwise. Default false.',
         },
         ref: {
           type: 'string',
@@ -558,7 +570,7 @@ export const TOOL_SCHEMAS: Tool[] = [
             y: { type: 'number' },
           },
           description:
-            'Screenshot-space if a recent screenshot exists, else viewport. Required for click/scroll and the drag end.',
+            'Screenshot-space if a recent screenshot exists, else viewport. Required for click/scroll, mouse_down/mouse_up, and the drag end.',
         },
         startCoordinates: {
           type: 'object',
@@ -567,6 +579,27 @@ export const TOOL_SCHEMAS: Tool[] = [
             y: { type: 'number' },
           },
           description: 'Starting coordinates for drag.',
+        },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          default: 'left',
+          description: 'Mouse button for mouse_down, mouse_up, and drag_path (default left).',
+        },
+        path: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 1000,
+          items: {
+            type: 'object',
+            properties: {
+              x: { type: 'number' },
+              y: { type: 'number' },
+            },
+            required: ['x', 'y'],
+          },
+          description:
+            'action=drag_path: 2-1000 finite points followed in order; points use the same screenshot/observation coordinate system as coordinates.',
         },
         observationId: {
           type: 'string',
@@ -588,7 +621,12 @@ export const TOOL_SCHEMAS: Tool[] = [
         text: {
           type: 'string',
           description:
-            'Text to type (action=type), or space-separated keys/chords (action=key, e.g. "Backspace Enter", "cmd+a")',
+            'Text to type (action=type/ime_type), or space-separated keys/chords (action=key, e.g. "Backspace Enter", "cmd+a"). ime_type uses CDP IME composition followed by commit; type remains insertText.',
+        },
+        key: {
+          type: 'string',
+          description:
+            'Single DOM key or key alias for key_down/key_up (for example "Shift", "Control", or "ArrowLeft").',
         },
         repeat: {
           type: 'number',

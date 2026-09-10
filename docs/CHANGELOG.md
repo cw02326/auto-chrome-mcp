@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] computer use 실행 루프 (2026-09-11, 브랜치 feat/computer-use-loop)
+
+모델이 화면을 보고 좌표로 조작하는 흐름을 신뢰할 수 있게 만드는 작업. 아직 배포하지 않았고
+공유 도구 스키마가 바뀌어 브리지 재발행이 필요하다. 버전은 올리지 않았다.
+
+### Added
+
+- **스크린샷 관찰(`observationId`).** 캡처마다 좌표계·캡처 영역·스크롤·뷰포트·문서 세대를 함께 기록한다.
+  `chrome_computer` 가 이 id 를 받으면 입력을 보내기 전에 검증해 문서 이동·스크롤·뷰포트 변화가 있으면
+  거부하고 새 스크린샷을 요구한다. 예전에는 hostname 변경만 막아서 같은 도메인 안의 화면 변화는 그대로
+  통과했다. 관찰은 `chrome.storage.session` 에 남겨 서비스 워커가 재시작돼도 좌표 의미가 조용히 바뀌지
+  않는다.
+- **액션 후 재관찰(`observeAfter`).** 켜면 액션 뒤 화면이 멈출 때까지 기다렸다가 새 관찰을 만들어
+  `observationId` 를 결과에 실어 준다. 모델이 그 id 로 곧장 다음 좌표를 낼 수 있다. 기본값은 꺼짐이다.
+  안정화는 64px 축소본을 150ms 간격으로 비교해 낮은 변화가 두 번 연속이면 확정하고, 계속 움직이는
+  페이지에서도 2.5초 상한에서 끝내며 그 사실을 결과에 표시한다.
+- **범용 입력 액션.** `mouse_down`·`mouse_up`(누름과 해제 분리), `key_down`·`key_up`(키 유지),
+  `drag_path`(좌표 배열을 따라가는 드래그), `ime_type`(조합 이벤트가 필요한 입력창용). 기존 `type` 의
+  기본 동작은 그대로 두었다.
+
+### Changed
+
+- **좌표만 준 클릭·드래그·호버가 CDP `Input` 을 먼저 쓴다.** 예전에는 픽셀로 목표를 정해 놓고 실행은
+  content script 합성 이벤트로 나가서 실제 브라우저 입력과 이벤트 처리가 달랐다. `ref`·`selector`
+  경로는 의도된 설계라 그대로 DOM 우선이다. 결과에 어느 경로로 나갔는지 `transport` 를 싣는다.
+- **DOM 폴백 경계를 첫 전송 시도 이전으로 한정했다.** `mousePressed` 가 나갔는지 알 수 없는 상태에서
+  DOM 으로 재시도하면 같은 버튼이 두 번 눌린다(주문 중복 제출 같은 사고). 한 번이라도 전송을 시도한 뒤의
+  실패는 폴백하지 않고 "일부 전달됐을 수 있음" 으로 돌려준다.
+
+### Fixed
+
+- 눌린 버튼·키가 남아 사용자 조작까지 막는 것을 방지한다. 탭별로 눌린 상태를 추적하고 10초 watchdog 으로
+  자동 해제하며, 액션 오류·탭 이동·문서 변경 시에도 정리한다. 상태는 저장소에 남겨 워커 재시작 뒤에도
+  복구한다.
+- 좌표 컨텍스트가 없거나 만료된 상태에서 좌표를 그대로 CSS 좌표로 쓴 경우 결과에 경고를 붙인다.
+  예전에는 조용히 넘어갔다.
+
 ## [Unreleased] 녹화 도구 막대 한국어화·흐름 카드 삭제 버튼·여러 탭 녹화와 재생 (2026-09-09, 브랜치 feat/recorder-toolbar-and-flow-gate)
 
 도구 막대와 삭제 버튼은 배포본에 반영했다(커밋 79be434 빌드, 버전 1.13.0 유지).

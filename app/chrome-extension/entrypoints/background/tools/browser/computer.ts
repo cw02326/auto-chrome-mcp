@@ -15,6 +15,9 @@ import {
 } from '@/utils/screenshot-observation';
 import { prepareImageForModelInput, MODEL_INPUT_MAX_LONG_EDGE } from '@/utils/image-utils';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { computerInputState } from '@/utils/computer-input-state';
+import { observeAfterAction, isObservationCleanupPending } from '@/utils/computer-stabilization';
+import type { ExtendedInputAction, ComputerButton } from '@/utils/computer-loop-contract';
 import {
   captureFrameOnAction,
   isAutoCaptureActive,
@@ -45,6 +48,7 @@ interface Modifiers {
 
 interface ComputerParams {
   action:
+    | ExtendedInputAction
     | 'left_click'
     | 'right_click'
     | 'double_click'
@@ -85,6 +89,11 @@ interface ComputerParams {
   // auto-chrome-mcp fork: screenshot/zoom 결과 이미지의 축소(긴 변 1568px)를 건너뛴다. 화질 탈출구.
   fullResolution?: boolean;
   observationId?: string;
+  observeAfter?: boolean;
+  includeImage?: boolean;
+  button?: ComputerButton;
+  key?: string;
+  path?: Coordinates[];
 }
 
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
@@ -106,7 +115,7 @@ class CDPHelper {
       type: opts.type,
       x: Math.round(opts.x),
       y: Math.round(opts.y),
-      modifiers: opts.modifiers || 0,
+      modifiers: (opts.modifiers || 0) | computerInputState.modifierMask(tabId),
     };
     if (
       opts.type === 'mousePressed' ||
@@ -234,16 +243,25 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
   async execute(args: ComputerParams): Promise<ToolResult> {
     const params = args || ({} as ComputerParams);
-    if (!params.action) return createErrorResponse('Action parameter is required');
+    if (!params.action) {
+      if (params.tabId !== undefined && computerInputState.hasHeldInput(params.tabId))
+        await computerInputState.releaseAll(params.tabId).catch(() => undefined);
+      return createErrorResponse('Action parameter is required');
+    }
 
+    let targetTabId: number | undefined;
     try {
       const explicit = await this.tryGetTab(args.tabId);
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      targetTabId = tab.id;
 
       // Execute the action and capture frame on success
       const result = await this.executeAction(params, tab);
+      // 검증 오류도 누른 입력의 후속 동작 실패다. 다음 호출을 기다리지 않고 해제한다.
+      if (result.isError && computerInputState.hasHeldInput(tab.id))
+        await computerInputState.releaseAll(tab.id);
 
       // Trigger auto-capture on successful actions (except screenshot which is read-only)
       if (!result.isError && params.action !== 'screenshot' && params.action !== 'wait') {
@@ -277,8 +295,47 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
 
+      if (params.observeAfter === true && !result.isError) {
+        const observed = await observeAfterAction(tab.id, {
+          includeImage: params.includeImage === true,
+          fullResolution: params.fullResolution,
+        });
+        const { image, ...metadata } = observed;
+        let merged = false;
+        // 재관찰 ID는 마지막 캡처에 대응한다. 앞선 screenshot/zoom 이미지를 섞으면
+        // 모델이 다른 이미지의 좌표를 새 ID로 보내므로 관찰 옵션의 이미지만 붙인다.
+        const content: ToolResult['content'] = result.content
+          .filter((block) => block.type !== 'image')
+          .map((block) => {
+            if (block.type !== 'text' || merged) return block;
+            merged = true;
+            let payload: Record<string, unknown>;
+            try {
+              const parsed = JSON.parse(block.text);
+              payload =
+                parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                  ? parsed
+                  : { message: block.text };
+            } catch {
+              payload = { message: block.text };
+            }
+            return {
+              ...block,
+              text: JSON.stringify({
+                ...payload,
+                ...metadata,
+                observationId: observed.observationId,
+              }),
+            };
+          });
+        if (!merged) content.unshift({ type: 'text', text: JSON.stringify(metadata) });
+        if (image) content.push(image);
+        return { ...result, content };
+      }
       return result;
     } catch (error) {
+      if (targetTabId !== undefined && computerInputState.hasHeldInput(targetTabId))
+        await computerInputState.releaseAll(targetTabId).catch(() => undefined);
       console.error('Error in computer tool:', error);
       return createErrorResponse(
         `Failed to execute action: ${error instanceof Error ? error.message : String(error)}`,
@@ -332,7 +389,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
       });
       return { ok: true };
     } catch (error) {
-      return { ok: false, canFallback: !attempted, error };
+      // 유지 중인 키는 DOM 폴백에 전달되지 않으므로 그 경우에도 CDP만 사용한다.
+      return {
+        ok: false,
+        canFallback: !attempted && !computerInputState.hasHeldInput(tabId),
+        error,
+      };
     } finally {
       // attach가 성공한 세션만 해제한다. 실패한 attach는 다른 소유자의 세션일 수 있다.
       if (attached) await CDPHelper.detach(tabId).catch(() => undefined);
@@ -646,6 +708,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
     if (!tab.id) {
       return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
     }
+    if (isObservationCleanupPending(tab.id))
+      return createErrorResponse(
+        'Previous observation session cleanup is pending. Retry after cleanup completes.',
+      );
 
     let observation: ScreenshotObservation | undefined;
     const mouseAction = [
@@ -656,6 +722,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
       'hover',
     ].includes(params.action);
     const coordinateTarget =
+      ['mouse_down', 'mouse_up', 'drag_path'].includes(params.action) ||
       (mouseAction && !params.ref && !params.selector && Boolean(params.coordinates)) ||
       (params.action === 'left_click_drag' &&
         Boolean(
@@ -663,6 +730,30 @@ class ComputerTool extends BaseBrowserToolExecutor {
         )) ||
       (params.action === 'scroll' && !params.ref && Boolean(params.coordinates)) ||
       (params.action === 'zoom' && Boolean(params.region));
+    const extendedAction = [
+      'mouse_down',
+      'mouse_up',
+      'key_down',
+      'key_up',
+      'drag_path',
+      'ime_type',
+    ].includes(params.action);
+    const rawCoordinateOnly =
+      !params.ref &&
+      !params.selector &&
+      !params.startRef &&
+      Boolean(params.coordinates) &&
+      [
+        'left_click',
+        'right_click',
+        'double_click',
+        'triple_click',
+        'left_click_drag',
+        'hover',
+        'scroll',
+      ].includes(params.action);
+    await computerInputState.ready();
+    await computerInputState.guardAction(tab.id, params.action, rawCoordinateOnly);
     if (coordinateTarget) await screenshotContextManager.restore();
     if (params.observationId !== undefined && coordinateTarget) {
       const candidate = screenshotContextManager.getObservation(params.observationId);
@@ -709,6 +800,39 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       return undefined;
     };
+
+    if (
+      extendedAction ||
+      (params.action === 'hover' && computerInputState.hasHeldButtons(tab.id))
+    ) {
+      // 새 입력도 1단계 관찰 검증·좌표 투영을 통과한다. ref를 조용히 무시하지 않는다.
+      if (params.ref || params.selector || params.startRef)
+        return createErrorResponse(
+          'Extended input actions require coordinates/path or key/text; refs and selectors are not supported',
+        );
+      if (coordinateTarget || params.action === 'hover') {
+        const contextHostname = screenshotContextManager.getContext(tab.id)?.hostname;
+        let hostname = '';
+        try {
+          hostname = new URL(tab.url || '').hostname;
+        } catch {
+          /* 제한 스킴도 동일 검증 */
+        }
+        if (contextHostname && contextHostname !== hostname)
+          return createErrorResponse(
+            'Security check failed: Domain changed since last screenshot. Capture a new screenshot first.',
+          );
+      }
+      return computerInputState.execute(tab.id, {
+        action: params.action as ExtendedInputAction | 'hover',
+        coordinates: params.coordinates ? project(params.coordinates, true) : undefined,
+        path: params.path?.map((point) => project(point, true)!),
+        button: params.button,
+        key: params.key,
+        text: params.text,
+        modifiers: params.modifiers,
+      });
+    }
 
     const pureCoordinateAction =
       [
