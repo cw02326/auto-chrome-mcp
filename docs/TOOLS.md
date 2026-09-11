@@ -273,6 +273,8 @@ the error lists the ports that are alive. **Handled locally by the stdio proxy.*
 
 Take advanced screenshots with various options.
 
+Every capture also creates an **observation** and returns its `observationId`. Pass that id to `chrome_computer` together with image coordinates: the call is rejected before any input is dispatched if the page moved on (document change, scroll, viewport resize, tab change) or if the observation expired. Observations survive a service worker restart, so coordinates do not silently change meaning. Without an `observationId` the old behaviour still applies, but a result produced from a missing or expired coordinate context now carries a warning.
+
 **Parameters**:
 
 - `name` (string, optional): Screenshot filename
@@ -654,11 +656,11 @@ Replaced by `chrome_read_page` as the primary discovery tool. The `read_page` im
 
 ### `chrome_computer`
 
-Unified advanced interaction tool that prioritizes high-level DOM actions with CDP fallback. Supports hover, click, drag, scroll, typing, key chords, fill, wait and screenshot. If a recent screenshot was taken via `chrome_screenshot`, coordinates are auto-scaled from screenshot space to viewport space.
+Unified advanced interaction tool. When a `ref` or `selector` is given it prioritizes high-level DOM actions; **pure coordinate actions go through CDP first** and only fall back to the DOM path when CDP fails _before_ the first event is sent (a failure after that returns a partial-delivery error instead, so the same button is never pressed twice). Supports hover, click, drag, path drag, scroll, typing, IME composition, key chords, held buttons/keys, fill, wait and screenshot. If a recent screenshot was taken via `chrome_screenshot`, coordinates are auto-scaled from screenshot space to viewport space; pass its `observationId` to reject stale coordinates instead of clicking the wrong place.
 
 Parameters:
 
-- `action` (string, required): `left_click` | `right_click` | `double_click` | `triple_click` | `left_click_drag` | `scroll` | `type` | `key` | `fill` | `hover` | `wait` | `screenshot`
+- `action` (string, required): `left_click` | `right_click` | `double_click` | `triple_click` | `left_click_drag` | `mouse_down` | `mouse_up` | `drag_path` | `scroll` | `scroll_to` | `type` | `ime_type` | `key` | `key_down` | `key_up` | `fill` | `fill_form` | `hover` | `wait` | `resize_page` | `zoom` | `screenshot`
 - `tabId` (number, optional): Target an existing tab by ID (default: active tab)
 - `background` (boolean, optional): Avoid focusing/activating tab/window for certain operations (best-effort)
 - `ref` (string, optional): element ref from `chrome_read_page` (preferred). Used for click/scroll/type/key and as drag end when provided
@@ -679,6 +681,14 @@ Parameters:
 - `width` / `height` (number, optional): for `resize_page`
 - `appear` (boolean, optional, default `true`): `wait` with text — wait for it to appear, or disappear
 - `timeout` (number, optional, default `10000`, max `120000`): `wait` with text
+- `observationId` (string, optional): the id returned by `chrome_screenshot` (or by a previous `observeAfter` call). Binds the coordinates to that capture. The call is **rejected before any input is dispatched** if the observation is missing, expired, on another tab, or if the document, scroll position or viewport changed since. Reasons: `not_found`, `expired`, `tab_changed`, `metadata_unavailable`, `document_changed`, `scroll_changed`, `viewport_changed`. Take a new screenshot and retry
+- `observeAfter` (boolean, optional, default `false`): after the action, wait for bounded visual stabilization and create a fresh observation, returning its `observationId` so the next coordinate action can use it immediately. The result carries `stabilization.status` = `stable` | `timeout` | `skipped` (`timeout` means the page kept moving until the 2.5s cap; `skipped` means the tab could not be captured)
+- `includeImage` (boolean, optional, default `false`): with `observeAfter`, also return the stabilized screenshot image. Ignored otherwise
+- `button` (string, optional, default `left`): `left` | `right` | `middle` for `mouse_down`, `mouse_up` and `drag_path`
+- `path` (array, optional): for `drag_path` — 2 to 1000 points `{ x, y }` followed in order, in the same coordinate space as `coordinates`
+- `key` (string, optional): a single DOM key or alias for `key_down` / `key_up` (for example `"Shift"`, `"Control"`, `"ArrowLeft"`)
+
+Held input: `mouse_down` and `key_down` leave a button or key pressed. Held state is tracked per tab, persisted across service worker restarts, and **released automatically after 10 seconds**, on an action error, or when the tab navigates or closes. While a button is held only hover and releases are accepted; while a key is held pure coordinate actions are accepted. Results of coordinate actions carry `transport` (`cdp` | `dom` | `dom-ref`) and, on fallback, `transportFallbackReason`.
 
 Examples:
 
