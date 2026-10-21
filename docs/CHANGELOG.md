@@ -5,7 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] 토스증권 스타일 UI·우클릭 메뉴 한국어·사용설명서 (2026-09-06, PR #4 + 03c4028)
+## [v1.13.1] 녹화 도구 막대 한국어화·흐름 카드 삭제 버튼·토스증권 스타일 UI (2026-10-22)
+
+1.13.0 이후 main 과 브랜치 feat/recorder-toolbar-and-flow-gate(79be434까지)에 쌓인 변경을 정식 배포한다.
+아래 절의 토스증권 스타일 UI·우클릭 메뉴·사용설명서(2026-09-06)도 이 버전에 처음 실린다.
+브리지 코드와 도구 스키마는 바뀌지 않았다. 버전만 확장과 맞춰 올린다.
+여러 탭 녹화·재생(1.14.0 예정)과 computer use 실행 루프는 포함하지 않는다.
+
+### Added
+
+- **구버전 실행기가 새 흐름을 실행하지 못하게 막는 관문**(`engine/flow-compat.ts`). 흐름 `meta` 의 기능
+  표시와 최소 버전을 실행 진입점(사이드패널 실행, 자동 트리거, 단축키, MCP 도구, 예약 실행)에서 검사한다.
+  이 버전의 실행기가 지원하는 기능 목록은 비어 있다.
+- **흐름 카드에 삭제 버튼.** 더보기 메뉴 안에 숨어 있던 것을 실행·예약·편집 옆으로 꺼냈다. 예약이 걸린
+  흐름을 지우면 확인 문구로 알리고 예약도 함께 지운다.
+- 녹화 도구 막대에 경과 시간과 단계 수 표시, 접기 알약, 끌어서 옮기기(화면 밖 방지, 창 크기 변경 시 복귀).
+
+### Changed
+
+- **녹화 도구 막대를 한국어로 바꾸고 페이지에서 격리했다.** 중국어 문자열을 로케일 키(`recorder_*`)로
+  옮기고 한국어 폴백 사전을 두었다. closed Shadow DOM 과 adoptedStyleSheets 로 페이지 CSS 영향을 끊고,
+  host 를 `all:initial` 로 초기화하며 `innerHTML` 대신 `createElement` 로 만든다. 흰 바탕에 반투명과
+  뒤 배경 흐림을 넣되 글자는 불투명으로 두었다.
+- 페이지 위 단계 목록에 **입력값을 표시하지 않는다.** 전체 값은 사이드패널에서 본다.
+
+### Fixed
+
+- 도구 막대 단계 목록에 `navigate` 같은 유형 이름이 영어로 노출되던 문제. 알 수 없는 유형도 한국어로 보인다.
+- 흐름을 지워도 예약이 남아 실행 실패가 반복되던 문제.
+
+## [v1.13.1 에 포함] 토스증권 스타일 UI·우클릭 메뉴 한국어·사용설명서 (2026-09-06, PR #4 + 03c4028)
 
 스키마 변경이 없어 브리지 재발행 없이 확장 리로드만으로 적용된다.
 

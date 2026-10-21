@@ -49,7 +49,7 @@ export const ENGINE_FEATURES: readonly string[] = Object.freeze([]);
  * 평소에는 `chrome.runtime.getManifest().version` 을 읽으므로 package.json 한 곳만 올리면
  * 된다. 이 상수는 매니페스트가 없는 환경의 폴백일 뿐이다.
  */
-export const ENGINE_VERSION_FALLBACK = '1.13.0';
+export const ENGINE_VERSION_FALLBACK = '1.13.1';
 
 /** 게이트가 거절할 때 쓰는 오류 코드. 기존 `flow_not_published` 등과 같은 자리에 온다. */
 export const FLOW_REQUIRES_NEWER_ENGINE = 'flow_requires_newer_engine';
