@@ -29,6 +29,7 @@ import { isExplicitTabId, noWorkTabErrorText } from '@/utils/work-tab-gate';
 import { getWorkTabId, sessionKeyOf } from '@/utils/work-tab-manager';
 import { resolvePublishedFlow } from './flow-store';
 import { runFlow } from './flow-runner';
+import { checkFlowRunnable } from './engine/flow-compat';
 import { isSameUrlForPrepare } from './rr-utils';
 import {
   markRunOwnedTab,
@@ -214,6 +215,14 @@ export async function runPublishedFlow(
     return { ok: false, errorCode: 'flow_missing', error: `Flow not found: ${flowId}` };
   }
   const flow = resolution.flow;
+
+  // 구버전 실행 차단 게이트 (PR B0, 설계 2.8). MCP `record_replay_flow_run` 과 예약 러너가
+  // 같은 이 함수를 부르므로, 두 진입점이 여기서 함께 막힌다. 탭을 열거나 리스를 잡기
+  // **전에** 판정한다: 거절이 부작용을 남기면 안 된다.
+  const compat = checkFlowRunnable(flow);
+  if (!compat.ok) {
+    return { ok: false, errorCode: compat.errorCode, error: compat.error };
+  }
 
   const effectiveStartUrl = resolveStartUrl(
     input.startUrl,

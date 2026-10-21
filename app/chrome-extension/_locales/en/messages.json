@@ -2636,5 +2636,182 @@
         "content": "$1"
       }
     }
+  },
+  "recorder_badge_recording": {
+    "message": "Recording",
+    "description": "Recorder toolbar badge: recording"
+  },
+  "recorder_badge_paused": {
+    "message": "Paused",
+    "description": "Recorder toolbar badge: paused"
+  },
+  "recorder_badge_steps": {
+    "message": "$COUNT$ steps",
+    "description": "Recorder toolbar: number of steps recorded so far",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_opt_hide_values": {
+    "message": "Hide typed values",
+    "description": "Recorder toolbar checkbox: hide input values"
+  },
+  "recorder_opt_highlight": {
+    "message": "Highlight target",
+    "description": "Recorder toolbar checkbox: highlight hovered element"
+  },
+  "recorder_btn_collapse": {
+    "message": "Collapse",
+    "description": "Recorder toolbar button: collapse to a pill"
+  },
+  "recorder_btn_expand": {
+    "message": "Expand",
+    "description": "Recorder toolbar button: expand the collapsed pill"
+  },
+  "recorder_btn_pause": {
+    "message": "Pause",
+    "description": "Recorder toolbar button: pause recording"
+  },
+  "recorder_btn_resume": {
+    "message": "Resume",
+    "description": "Recorder toolbar button: resume recording"
+  },
+  "recorder_btn_stop": {
+    "message": "Stop recording",
+    "description": "Recorder toolbar button: stop recording"
+  },
+  "recorder_timeline_title": {
+    "message": "Recorded steps",
+    "description": "Recorder toolbar timeline title"
+  },
+  "recorder_step_unknown": {
+    "message": "Unknown step",
+    "description": "Timeline entry: step with unrecognized shape"
+  },
+  "recorder_step_click": {
+    "message": "Click: $SELECTOR$",
+    "description": "Timeline entry: click step",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_dblclick": {
+    "message": "Double-click: $SELECTOR$",
+    "description": "Timeline entry: double-click step",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_fill": {
+    "message": "Type: $SELECTOR$",
+    "description": "Timeline entry: fill step (value is never shown)",
+    "placeholders": {
+      "selector": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_scroll": {
+    "message": "Scroll ($MODE$): y=$Y$, x=$X$",
+    "description": "Timeline entry: scroll step",
+    "placeholders": {
+      "mode": {
+        "content": "$1"
+      },
+      "y": {
+        "content": "$2"
+      },
+      "x": {
+        "content": "$3"
+      }
+    }
+  },
+  "recorder_scroll_container": {
+    "message": "list",
+    "description": "Scroll step target: a specific list/container"
+  },
+  "recorder_scroll_page": {
+    "message": "page",
+    "description": "Scroll step target: the whole page"
+  },
+  "recorder_step_open_tab": {
+    "message": "Open tab: $URL$",
+    "description": "Timeline entry: open tab step",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_switch_tab": {
+    "message": "Switch tab",
+    "description": "Timeline entry: switch tab step label"
+  },
+  "recorder_step_url_contains": {
+    "message": "URL contains $URL$",
+    "description": "Timeline entry: URL condition for the switch target",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_switch_frame": {
+    "message": "Switch to embedded frame",
+    "description": "Timeline entry: iframe switch step label"
+  },
+  "recorder_step_wait": {
+    "message": "Wait: $TARGET$",
+    "description": "Timeline entry: wait step",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_generic": {
+    "message": "Step",
+    "description": "Timeline entry: fallback text when formatting fails"
+  },
+  "recorder_step_target_document": {
+    "message": "document",
+    "description": "Timeline entry: whole document as target, not a specific element"
+  },
+  "recorder_session_untitled": {
+    "message": "Untitled recording",
+    "description": "Default name for a recording session"
+  },
+  "recorder_step_navigate": {
+    "message": "Go to: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_key": {
+    "message": "Key: $1",
+    "placeholders": {
+      "target": {
+        "content": "$1"
+      }
+    }
+  },
+  "recorder_step_close_tab": {
+    "message": "Close tab"
+  },
+  "recorder_move_hint": {
+    "message": "Drag to move. You can also focus this row and use the arrow keys.",
+    "description": "Toolbar move hint (title/aria-label)"
+  },
+  "sidepanel_flow_delete_confirm_with_schedule": {
+    "message": "Delete this flow and its schedule? This cannot be undone",
+    "description": "Confirm deleting a flow that has a schedule"
   }
 }

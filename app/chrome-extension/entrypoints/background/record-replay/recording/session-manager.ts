@@ -122,6 +122,11 @@ export interface RecordingSessionState {
   activeTabs: Set<number>;
   // Track which tabs have acknowledged stop command
   stoppedTabs: Set<number>;
+  /**
+   * 이 세션이 시작된 시각(ms epoch). 페이지 위 녹화 도구 막대가 이 값으로 로컬 1초
+   * 타이머를 돌려 경과 시간을 표시한다(2026-09-09 도구 막대 고도화).
+   */
+  startedAt: number;
 }
 
 // Valid node types for type checking
@@ -136,6 +141,7 @@ export class RecordingSessionManager {
     flow: null,
     activeTabs: new Set<number>(),
     stoppedTabs: new Set<number>(),
+    startedAt: 0,
   };
 
   // Session-level cache for incremental DAG sync (cleared on session start/stop)
@@ -249,6 +255,7 @@ export class RecordingSessionManager {
       flow,
       activeTabs: new Set<number>([originTabId]),
       stoppedTabs: new Set<number>(),
+      startedAt: Date.now(),
     };
 
     // Initialize caches from existing flow data (supports resume scenarios)
@@ -326,6 +333,7 @@ export class RecordingSessionManager {
     this.state.startUrl = undefined;
     this.state.activeTabs.clear();
     this.state.stoppedTabs.clear();
+    this.state.startedAt = 0;
     // Clear cache
     this.nodeIndexMap.clear();
     this.edgeSeq = 0;
@@ -819,7 +827,8 @@ export class RecordingSessionManager {
     try {
       // Derive steps from nodes for UI consumption (protocol unchanged)
       const fullSteps = this.getTimelineSteps();
-      if (fullSteps.length === 0) return;
+      // 0단계일 때도 막대가 "00:00 · 0단계" 를 그릴 수 있어야 하므로 조기 반환하지 않는다
+      // (2026-09-09 도구 막대 고도화 1.5).
 
       // Prefer broadcasting to all tabs that participated in this session, so timeline
       // stays consistent when user switches across tabs/windows during a single session.
@@ -830,10 +839,19 @@ export class RecordingSessionManager {
           : this.state.originTabId != null
             ? [this.state.originTabId]
             : [];
+      const startedAt = this.state.startedAt || Date.now();
+      const status: 'recording' | 'paused' =
+        this.state.status === 'paused' ? 'paused' : 'recording';
       for (const tabId of list) {
         chrome.tabs.sendMessage(
           tabId,
-          { action: TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE, steps: fullSteps },
+          {
+            action: TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE,
+            steps: fullSteps,
+            startedAt,
+            stepCount: fullSteps.length,
+            status,
+          },
           { frameId: 0 },
         );
       }
