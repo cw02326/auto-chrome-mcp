@@ -80,6 +80,8 @@ interface ComputerParams {
   fullResolution?: boolean;
 }
 
+type KeyDef = { key: string; code?: string; text?: string; vk?: number };
+
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
 class CDPHelper {
   static async attach(tabId: number): Promise<void> {
@@ -141,54 +143,66 @@ class CDPHelper {
     return mask;
   }
 
-  // Enhanced key mapping for common non-character keys
-  private static KEY_ALIASES: Record<string, { key: string; code?: string; text?: string }> = {
-    enter: { key: 'Enter', code: 'Enter' },
-    return: { key: 'Enter', code: 'Enter' },
-    backspace: { key: 'Backspace', code: 'Backspace' },
-    delete: { key: 'Delete', code: 'Delete' },
-    tab: { key: 'Tab', code: 'Tab' },
-    escape: { key: 'Escape', code: 'Escape' },
-    esc: { key: 'Escape', code: 'Escape' },
-    space: { key: ' ', code: 'Space', text: ' ' },
-    pageup: { key: 'PageUp', code: 'PageUp' },
-    pagedown: { key: 'PageDown', code: 'PageDown' },
-    home: { key: 'Home', code: 'Home' },
-    end: { key: 'End', code: 'End' },
-    arrowup: { key: 'ArrowUp', code: 'ArrowUp' },
-    arrowdown: { key: 'ArrowDown', code: 'ArrowDown' },
-    arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft' },
-    arrowright: { key: 'ArrowRight', code: 'ArrowRight' },
+  // Enhanced key mapping for common non-character keys.
+  // vk (windowsVirtualKeyCode) is required: without it keyCode is 0 and rich editors
+  // (e.g. Naver SmartEditor) ignore Enter/Backspace.
+  private static KEY_ALIASES: Record<string, KeyDef> = {
+    enter: { key: 'Enter', code: 'Enter', text: '\r', vk: 13 },
+    return: { key: 'Enter', code: 'Enter', text: '\r', vk: 13 },
+    backspace: { key: 'Backspace', code: 'Backspace', vk: 8 },
+    delete: { key: 'Delete', code: 'Delete', vk: 46 },
+    tab: { key: 'Tab', code: 'Tab', vk: 9 },
+    escape: { key: 'Escape', code: 'Escape', vk: 27 },
+    esc: { key: 'Escape', code: 'Escape', vk: 27 },
+    space: { key: ' ', code: 'Space', text: ' ', vk: 32 },
+    pageup: { key: 'PageUp', code: 'PageUp', vk: 33 },
+    pagedown: { key: 'PageDown', code: 'PageDown', vk: 34 },
+    home: { key: 'Home', code: 'Home', vk: 36 },
+    end: { key: 'End', code: 'End', vk: 35 },
+    arrowup: { key: 'ArrowUp', code: 'ArrowUp', vk: 38 },
+    arrowdown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 },
+    arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', vk: 37 },
+    arrowright: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
   };
 
-  private static resolveKeyDef(token: string): { key: string; code?: string; text?: string } {
+  private static resolveKeyDef(token: string): KeyDef {
     const t = (token || '').toLowerCase();
     if (this.KEY_ALIASES[t]) return this.KEY_ALIASES[t];
     if (/^f([1-9]|1[0-2])$/.test(t)) {
-      return { key: t.toUpperCase(), code: t.toUpperCase() };
+      return { key: t.toUpperCase(), code: t.toUpperCase(), vk: 111 + Number(t.slice(1)) };
     }
     if (t.length === 1) {
+      if (/[0-9]/.test(t)) return { key: t, code: `Digit${t}`, text: t, vk: t.charCodeAt(0) };
       const upper = t.toUpperCase();
-      return { key: upper, code: `Key${upper}`, text: t };
+      // VK codes equal the char code only for A-Z and 0-9; other symbols keep vk unset.
+      const vk = /^[a-z]$/.test(t) ? upper.charCodeAt(0) : undefined;
+      return { key: upper, code: `Key${upper}`, text: t, vk };
     }
     return { key: token };
   }
 
   static async dispatchSimpleKey(tabId: number, token: string) {
     const def = this.resolveKeyDef(token);
-    if (def.text && def.text.length === 1) {
+    if (def.text && def.text.length === 1 && def.text !== '\r') {
       await this.insertText(tabId, def.text);
       return;
     }
+    const vk = def.vk ?? 0;
     await this.send(tabId, 'Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
+      type: def.text ? 'keyDown' : 'rawKeyDown',
       key: def.key,
       code: def.code,
+      text: def.text,
+      unmodifiedText: def.text,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
     });
     await this.send(tabId, 'Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: def.key,
       code: def.code,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
     });
   }
 
@@ -212,12 +226,16 @@ class CDPHelper {
       code: def.code,
       text: def.text,
       modifiers: mask,
+      windowsVirtualKeyCode: def.vk ?? 0,
+      nativeVirtualKeyCode: def.vk ?? 0,
     });
     await this.send(tabId, 'Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: def.key,
       code: def.code,
       modifiers: mask,
+      windowsVirtualKeyCode: def.vk ?? 0,
+      nativeVirtualKeyCode: def.vk ?? 0,
     });
   }
 }
